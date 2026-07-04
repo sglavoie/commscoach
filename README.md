@@ -4,7 +4,7 @@ Personal communications coach: log interactions with people, attach context, gen
 
 ## Status
 
-Ready to use. The CLI, SQLite schema, skill integration, packaging, and Markdown export are in place. v1 intentionally excludes import, encryption, FTS5, and non-Markdown exports.
+Ready to use. The CLI, SQLite schema, stored feedback and reviews, skill integration, packaging, and Markdown export are in place. Current scope intentionally excludes import, encryption, FTS5, and non-Markdown exports.
 
 ## Layout
 
@@ -74,15 +74,18 @@ commscoach entry list
 commscoach context 1                 # skill-facing JSON
 commscoach feedback add 1 "Lead with the ask next time."
 commscoach feedback list 1
+commscoach review context --limit 20 --prior-review-limit 3 # skill-facing review JSON
+commscoach review add "Review: lead with the ask across recent 1:1s." --limit 20 --entry 1
+commscoach review list
 commscoach export                    # Markdown to stdout
 commscoach export --out export.md    # Markdown to file (mode 0600)
 ```
 
-`entry add` body sources: a literal string, `-` for stdin, or `@PATH` for a UTF-8 file. The same convention applies to `entry edit --body` and `feedback add`.
+`entry add` body sources: a literal string, `-` for stdin, or `@PATH` for a UTF-8 file. The same convention applies to `entry edit --body`, `feedback add`, and `review add`.
 
 ## Skill integration
 
-The `commscoach` skill at `~/scripts/skills/commscoach/SKILL.md` is symlinked into all four harnesses (`~/.claude`, `~/.claude-personal`, `~/.codex`, `~/.copilot`). Invoke it with an entry ID; it fetches the entry context via `commscoach context <id>`, drafts coaching feedback, and stores it via `commscoach --json feedback add <id> -`.
+The `commscoach` skill at `~/scripts/skills/commscoach/SKILL.md` is symlinked into all four harnesses (`~/.claude`, `~/.claude-personal`, `~/.codex`, `~/.copilot`). Invoke it with an entry ID for entry-specific coaching, or ask for a recent communications review. Entry coaching uses `commscoach context <id>` and stores via `commscoach --json feedback add <id> -`; stored reviews use `commscoach review context --limit N --prior-review-limit M` to gather source context and prior syntheses, then store via `commscoach --json review add - --scope latest --limit N --entry ID...`. The `review add --limit N` value records the source context limit used for the synthesis.
 
 ## Export
 
@@ -93,4 +96,4 @@ commscoach export                       # print Markdown to stdout
 commscoach export --out export.md       # write Markdown to file (mode 0600)
 ```
 
-The export groups one section per entry (newest first) with the entry's metadata, linked people, and any attached feedback notes (oldest first). No JSONL or import format is supported.
+When stored reviews exist, export starts with a `## Reviews` section. Reviews are rendered newest first with created time, scope, covered entry IDs, and body. Entry sections follow newest first with each entry's metadata, linked people, and any attached feedback notes oldest first. No JSONL or import format is supported.

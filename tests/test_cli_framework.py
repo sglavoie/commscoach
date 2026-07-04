@@ -253,6 +253,22 @@ class OpenDBTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("run 'commscoach init' first", err_buf.getvalue())
 
+    def test_v1_db_exits_one_with_init_guidance(self) -> None:
+        db_path = self.tmpdir / "v1.sqlite3"
+        paths.ensure_data_dir(db_path)
+        with closing(db.connect(db_path)) as conn:
+            conn.executescript(db._SCHEMA_V1_SQL)
+            conn.execute(
+                "INSERT INTO _meta (key, value) VALUES ('schema_version', '1')"
+            )
+            conn.commit()
+
+        err_buf = io.StringIO()
+        with redirect_stderr(err_buf):
+            rc = cli.main(["--db", str(db_path), "entry", "list"])
+        self.assertEqual(rc, 1)
+        self.assertIn("run 'commscoach init' first", err_buf.getvalue())
+
 
 class MainModuleTests(unittest.TestCase):
     def test_main_module_exposes_main(self) -> None:

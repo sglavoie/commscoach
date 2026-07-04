@@ -1,18 +1,18 @@
-"""SQLite connection, schema v1, idempotent init, and CRUD for commscoach.
+"""SQLite connection, schema v2, idempotent init, and CRUD for commscoach.
 
 This module owns the database foundation: connecting with foreign keys enabled,
-applying schema v1 on demand, and stamping ``_meta.schema_version`` so future
-sessions can branch on version. Session 4 adds CRUD helpers (entries, people,
-feedback), self switching, and the context aggregation used by the coaching
-skill.
+applying schema v2 on demand, and stamping ``_meta.schema_version`` so callers
+can reject stale databases until ``commscoach init`` upgrades them.
 
-Schema v1 invariants enforced at the DB level:
+Schema invariants enforced at the DB level:
 
 * ``people.handle`` is case-insensitive UNIQUE via an expression index on
   ``LOWER(handle)``.
 * At most one row may have ``is_self = 1`` via a partial UNIQUE index.
 * Cascading deletes: removing an entry removes its tag links, people links,
-  and attached feedback. Removing a person removes their entry links.
+  attached feedback, and review-entry links. Removing a review removes its
+  review-entry links. Removing a person removes their entry links.
+* Stored review scopes currently support only ``scope_kind = 'latest'``.
 
 Each public mutator opens its own transaction via ``with conn:`` so callers do
 not need to manage transactions explicitly.
@@ -27,9 +27,17 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from . import paths
-from .models import Entry, EntryContext, Feedback, Person
+from .models import (
+    Entry,
+    EntryContext,
+    Feedback,
+    Person,
+    Review,
+    ReviewContext,
+    ReviewEntryContext,
+)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _EXPECTED_TABLES = frozenset(
     {
@@ -40,6 +48,8 @@ _EXPECTED_TABLES = frozenset(
         "entry_tags",
         "entry_people",
         "feedback",
+        "reviews",
+        "review_entries",
     }
 )
 
@@ -110,6 +120,34 @@ CREATE INDEX IF NOT EXISTS idx_feedback_entry_id ON feedback (entry_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedback (created_at);
 """
 
+_SCHEMA_V2_SQL = """
+CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    body TEXT NOT NULL,
+    scope_kind TEXT NOT NULL CHECK (scope_kind IN ('latest')),
+    scope_limit INTEGER CHECK (scope_limit IS NULL OR scope_limit >= 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_reviews_created_at
+    ON reviews (created_at, id);
+
+CREATE TABLE IF NOT EXISTS review_entries (
+    review_id INTEGER NOT NULL REFERENCES reviews (id) ON DELETE CASCADE,
+    entry_id INTEGER NOT NULL REFERENCES entries (id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    PRIMARY KEY (review_id, entry_id),
+    UNIQUE (review_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_entries_entry_id
+    ON review_entries (entry_id);
+
+CREATE INDEX IF NOT EXISTS idx_review_entries_review_position
+    ON review_entries (review_id, position);
+"""
+
 
 # Sentinel for "argument not provided" in update_* APIs. Using a private
 # object() means it can never collide with a real caller-supplied value.
@@ -136,6 +174,12 @@ class FeedbackNotFoundError(DBError):
     def __init__(self, feedback_id: int) -> None:
         super().__init__(f"feedback {feedback_id} not found")
         self.feedback_id = feedback_id
+
+
+class ReviewNotFoundError(DBError):
+    def __init__(self, review_id: int) -> None:
+        super().__init__(f"review {review_id} not found")
+        self.review_id = review_id
 
 
 class DuplicateHandleError(DBError):
@@ -169,7 +213,7 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
 
 
 def init_db(db_path: Path | str | None = None) -> Path:
-    """Create the data dir, apply schema v1, and chmod the DB file.
+    """Create the data dir, apply schema v2, and chmod the DB file.
 
     Idempotent: re-running ``init_db`` on an existing DB leaves data intact and
     reaffirms the DB parent directory at ``0o700`` and the DB file at ``0o600``.
@@ -207,14 +251,21 @@ def get_schema_version(conn: sqlite3.Connection) -> int | None:
     return int(row[0])
 
 
+def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)",
+        (str(version),),
+    )
+
+
 def _apply_schema(conn: sqlite3.Connection) -> None:
-    """Apply v1 schema idempotently and stamp ``_meta.schema_version``."""
+    """Apply schema v2 idempotently, migrating v1 databases in place."""
     conn.executescript(_SCHEMA_V1_SQL)
-    if get_schema_version(conn) is None:
-        conn.execute(
-            "INSERT INTO _meta (key, value) VALUES ('schema_version', ?)",
-            (str(SCHEMA_VERSION),),
-        )
+    version = get_schema_version(conn)
+    if version not in (None, 1, SCHEMA_VERSION):
+        raise DBError(f"unsupported schema version {version}")
+    conn.executescript(_SCHEMA_V2_SQL)
+    _set_schema_version(conn, SCHEMA_VERSION)
     conn.commit()
 
 
@@ -297,6 +348,29 @@ def _hydrate_entry(conn: sqlite3.Connection, row: sqlite3.Row) -> Entry:
     )
 
 
+def _load_review_entries(conn: sqlite3.Connection, review_id: int) -> tuple[Entry, ...]:
+    rows = conn.execute(
+        "SELECT e.* FROM entries e"
+        " JOIN review_entries re ON re.entry_id = e.id"
+        " WHERE re.review_id = ?"
+        " ORDER BY re.position ASC",
+        (review_id,),
+    ).fetchall()
+    return tuple(_hydrate_entry(conn, row) for row in rows)
+
+
+def _hydrate_review(conn: sqlite3.Connection, row: sqlite3.Row) -> Review:
+    return Review(
+        id=row["id"],
+        body=row["body"],
+        scope_kind=row["scope_kind"],
+        scope_limit=row["scope_limit"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        entries=_load_review_entries(conn, row["id"]),
+    )
+
+
 def _gc_orphan_tags(conn: sqlite3.Connection) -> None:
     """Drop tag rows that no entry references anymore.
 
@@ -343,6 +417,27 @@ def _resolve_person_handles(
             continue
         seen.add(person.id)
         resolved.append(person)
+    return resolved
+
+
+def _resolve_review_entries(
+    conn: sqlite3.Connection, entry_ids: Iterable[int] | None
+) -> list[Entry]:
+    """Resolve entry ids preserving caller order and de-duping first hits."""
+    if entry_ids is None:
+        raise DBError("review must cover at least one entry")
+    resolved: list[Entry] = []
+    seen: set[int] = set()
+    for entry_id in entry_ids:
+        entry = get_entry(conn, entry_id)
+        if entry is None:
+            raise EntryNotFoundError(entry_id)
+        if entry.id in seen:
+            continue
+        seen.add(entry.id)
+        resolved.append(entry)
+    if not resolved:
+        raise DBError("review must cover at least one entry")
     return resolved
 
 
@@ -731,6 +826,99 @@ def get_feedback(conn: sqlite3.Connection, feedback_id: int) -> Feedback | None:
     if row is None:
         return None
     return _row_to_feedback(row)
+
+
+def create_review(
+    conn: sqlite3.Connection,
+    body: str,
+    entry_ids: Iterable[int],
+    scope_kind: str = "latest",
+    scope_limit: int | None = None,
+) -> Review:
+    """Store a review synthesis covering existing entries."""
+    if not body or not body.strip():
+        raise DBError("review body must be a non-empty string")
+    if scope_kind != "latest":
+        raise DBError("review scope_kind must be 'latest'")
+    if scope_limit is not None and scope_limit < 0:
+        raise DBError("review scope_limit must be non-negative")
+    entries = _resolve_review_entries(conn, entry_ids)
+    now = _utcnow_iso()
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO reviews (body, scope_kind, scope_limit, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (body, scope_kind, scope_limit, now, now),
+        )
+        review_id = cur.lastrowid
+        for position, entry in enumerate(entries):
+            conn.execute(
+                "INSERT INTO review_entries (review_id, entry_id, position)"
+                " VALUES (?, ?, ?)",
+                (review_id, entry.id, position),
+            )
+    review = get_review(conn, review_id)
+    assert review is not None
+    return review
+
+
+def get_review(conn: sqlite3.Connection, review_id: int) -> Review | None:
+    row = conn.execute("SELECT * FROM reviews WHERE id = ?", (review_id,)).fetchone()
+    if row is None:
+        return None
+    return _hydrate_review(conn, row)
+
+
+def list_reviews(
+    conn: sqlite3.Connection,
+    limit: int | None = None,
+) -> tuple[Review, ...]:
+    """Return stored reviews newest-first by creation time."""
+    if limit is not None and limit < 0:
+        raise DBError("limit must be non-negative")
+    sql = "SELECT * FROM reviews ORDER BY created_at DESC, id DESC"
+    params: list[Any] = []
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    rows = conn.execute(sql, params).fetchall()
+    return tuple(_hydrate_review(conn, row) for row in rows)
+
+
+def delete_review(conn: sqlite3.Connection, review_id: int) -> bool:
+    """Delete a stored review. Returns ``True`` if a row was deleted."""
+    with conn:
+        cur = conn.execute("DELETE FROM reviews WHERE id = ?", (review_id,))
+    return cur.rowcount > 0
+
+
+def get_review_context(
+    conn: sqlite3.Connection,
+    limit: int = 20,
+    prior_review_limit: int = 3,
+) -> ReviewContext:
+    """Aggregate recent entries and prior reviews for stored review synthesis."""
+    if limit < 0:
+        raise DBError("limit must be non-negative")
+    if prior_review_limit < 0:
+        raise DBError("prior_review_limit must be non-negative")
+    self_person = get_self_person(conn)
+    if self_person is None:
+        raise MissingSelfError()
+
+    latest_entries = list_entries(conn, limit=limit)
+    entry_contexts = tuple(
+        ReviewEntryContext(entry=entry, feedback=list_feedback(conn, entry.id))
+        for entry in reversed(latest_entries)
+    )
+    latest_reviews = list_reviews(conn, limit=prior_review_limit)
+    return ReviewContext(
+        self_person=self_person,
+        scope_kind="latest",
+        scope_limit=limit,
+        entries=entry_contexts,
+        prior_reviews=tuple(reversed(latest_reviews)),
+    )
 
 
 def get_entry_context(

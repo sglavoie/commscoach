@@ -48,6 +48,19 @@ class Feedback:
 
 
 @dataclass(frozen=True, slots=True)
+class Review:
+    """A stored synthesis covering one or more communication entries."""
+
+    id: int
+    body: str
+    scope_kind: str
+    scope_limit: int | None
+    created_at: str
+    updated_at: str
+    entries: tuple[Entry, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True, slots=True)
 class EntryContext:
     """Payload returned by ``commscoach context <entry-id>``.
 
@@ -60,3 +73,22 @@ class EntryContext:
     self_person: Person
     people: tuple[Person, ...]
     prior_feedback: tuple[Feedback, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewEntryContext:
+    """One entry plus its existing feedback for review synthesis."""
+
+    entry: Entry
+    feedback: tuple[Feedback, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewContext:
+    """Payload for generating a stored review across recent entries."""
+
+    self_person: Person
+    scope_kind: str
+    scope_limit: int | None
+    entries: tuple[ReviewEntryContext, ...] = field(default_factory=tuple)
+    prior_reviews: tuple[Review, ...] = field(default_factory=tuple)

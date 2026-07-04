@@ -18,7 +18,15 @@ from typing import Iterator
 from unittest import mock
 
 from commscoach import db
-from commscoach.models import Entry, EntryContext, Feedback, Person
+from commscoach.models import (
+    Entry,
+    EntryContext,
+    Feedback,
+    Person,
+    Review,
+    ReviewContext,
+    ReviewEntryContext,
+)
 
 
 def _ts_iter(values: list[str]) -> Iterator[str]:
@@ -400,6 +408,207 @@ class FeedbackCrudTests(_DBTestCase):
         found = db.get_feedback(self.conn, fb.id)
         self.assertEqual(found, fb)
         self.assertIsNone(db.get_feedback(self.conn, 9999))
+
+
+class ReviewCrudTests(_DBTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.first = db.create_entry(self.conn, "first")
+        self.second = db.create_entry(self.conn, "second")
+        self.third = db.create_entry(self.conn, "third")
+
+    def test_create_review_returns_review_with_entries_in_requested_order(self) -> None:
+        review = db.create_review(
+            self.conn,
+            "weekly synthesis",
+            [self.second.id, self.first.id, self.second.id, self.third.id],
+            scope_limit=3,
+        )
+
+        self.assertIsInstance(review, Review)
+        self.assertEqual(review.body, "weekly synthesis")
+        self.assertEqual(review.scope_kind, "latest")
+        self.assertEqual(review.scope_limit, 3)
+        self.assertEqual(review.created_at, review.updated_at)
+        self.assertEqual(
+            [entry.id for entry in review.entries],
+            [self.second.id, self.first.id, self.third.id],
+        )
+
+    def test_create_review_rejects_empty_body(self) -> None:
+        with self.assertRaises(db.DBError):
+            db.create_review(self.conn, "   ", [self.first.id])
+        self.assertEqual(db.list_reviews(self.conn), ())
+
+    def test_create_review_rejects_empty_entry_list(self) -> None:
+        with self.assertRaises(db.DBError):
+            db.create_review(self.conn, "review", [])
+        self.assertEqual(db.list_reviews(self.conn), ())
+
+    def test_create_review_rejects_missing_entry_list(self) -> None:
+        with self.assertRaises(db.DBError):
+            db.create_review(self.conn, "review", None)  # type: ignore[arg-type]
+        self.assertEqual(db.list_reviews(self.conn), ())
+
+    def test_create_review_unknown_entry_raises_without_writing(self) -> None:
+        with self.assertRaises(db.EntryNotFoundError):
+            db.create_review(self.conn, "review", [self.first.id, 9999])
+        self.assertEqual(db.list_reviews(self.conn), ())
+        (count,) = self.conn.execute(
+            "SELECT COUNT(*) FROM review_entries"
+        ).fetchone()
+        self.assertEqual(count, 0)
+
+    def test_create_review_rejects_negative_scope_limit(self) -> None:
+        with self.assertRaises(db.DBError):
+            db.create_review(self.conn, "review", [self.first.id], scope_limit=-1)
+
+    def test_create_review_rejects_unsupported_scope_kind(self) -> None:
+        with self.assertRaises(db.DBError):
+            db.create_review(self.conn, "review", [self.first.id], scope_kind="all")
+
+    def test_get_review_returns_hydrated_review_or_none(self) -> None:
+        created = db.create_review(
+            self.conn, "review", [self.first.id, self.second.id]
+        )
+        loaded = db.get_review(self.conn, created.id)
+        self.assertEqual(loaded, created)
+        self.assertIsNone(db.get_review(self.conn, 9999))
+
+    def test_list_reviews_newest_first(self) -> None:
+        with mock.patch.object(
+            db,
+            "_utcnow_iso",
+            side_effect=_ts_iter(["t0", "t1", "t2"]).__next__,
+        ):
+            db.create_review(self.conn, "first review", [self.first.id])
+            db.create_review(self.conn, "second review", [self.second.id])
+            db.create_review(self.conn, "third review", [self.third.id])
+        bodies = [review.body for review in db.list_reviews(self.conn)]
+        self.assertEqual(bodies, ["third review", "second review", "first review"])
+
+    def test_list_reviews_honors_limit(self) -> None:
+        for body, entry in (
+            ("first review", self.first),
+            ("second review", self.second),
+            ("third review", self.third),
+        ):
+            db.create_review(self.conn, body, [entry.id])
+        limited = db.list_reviews(self.conn, limit=2)
+        self.assertEqual(len(limited), 2)
+
+    def test_list_reviews_rejects_negative_limit(self) -> None:
+        with self.assertRaises(db.DBError):
+            db.list_reviews(self.conn, limit=-1)
+
+    def test_delete_review_returns_true_and_cascades_review_entries(self) -> None:
+        review = db.create_review(
+            self.conn, "review", [self.first.id, self.second.id]
+        )
+
+        self.assertTrue(db.delete_review(self.conn, review.id))
+        self.assertIsNone(db.get_review(self.conn, review.id))
+        (count,) = self.conn.execute(
+            "SELECT COUNT(*) FROM review_entries WHERE review_id = ?",
+            (review.id,),
+        ).fetchone()
+        self.assertEqual(count, 0)
+
+    def test_delete_review_missing_returns_false(self) -> None:
+        self.assertFalse(db.delete_review(self.conn, 9999))
+
+
+class ReviewContextTests(_DBTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.me = db.create_person(self.conn, "me", is_self=True)
+
+    def test_review_context_returns_latest_entries_oldest_first_with_feedback(self) -> None:
+        with mock.patch.object(
+            db,
+            "_utcnow_iso",
+            side_effect=_ts_iter(
+                [
+                    "e0",
+                    "e1",
+                    "e2",
+                    "e2",
+                    "f0",
+                    "f1",
+                    "f2",
+                    "r0",
+                    "r1",
+                    "r2",
+                    "r3",
+                ]
+            ).__next__,
+        ):
+            first = db.create_entry(self.conn, "first")
+            second = db.create_entry(self.conn, "second")
+            third = db.create_entry(self.conn, "third")
+            fourth = db.create_entry(self.conn, "fourth")
+            db.create_feedback(self.conn, second.id, "second old")
+            db.create_feedback(self.conn, second.id, "second new")
+            db.create_feedback(self.conn, fourth.id, "fourth note")
+            db.create_review(self.conn, "oldest review", [first.id], scope_limit=1)
+            db.create_review(self.conn, "second review", [second.id], scope_limit=1)
+            db.create_review(self.conn, "third review", [third.id], scope_limit=1)
+            db.create_review(self.conn, "fourth review", [fourth.id], scope_limit=1)
+
+        context = db.get_review_context(
+            self.conn, limit=3, prior_review_limit=3
+        )
+
+        self.assertIsInstance(context, ReviewContext)
+        self.assertEqual(context.self_person.id, self.me.id)
+        self.assertEqual(context.scope_kind, "latest")
+        self.assertEqual(context.scope_limit, 3)
+        self.assertEqual(
+            [entry_ctx.entry.id for entry_ctx in context.entries],
+            [second.id, third.id, fourth.id],
+        )
+        self.assertTrue(
+            all(
+                isinstance(entry_ctx, ReviewEntryContext)
+                for entry_ctx in context.entries
+            )
+        )
+        feedback_by_entry = {
+            entry_ctx.entry.id: [feedback.body for feedback in entry_ctx.feedback]
+            for entry_ctx in context.entries
+        }
+        self.assertEqual(feedback_by_entry[second.id], ["second old", "second new"])
+        self.assertEqual(feedback_by_entry[third.id], [])
+        self.assertEqual(feedback_by_entry[fourth.id], ["fourth note"])
+        self.assertEqual(
+            [review.body for review in context.prior_reviews],
+            ["second review", "third review", "fourth review"],
+        )
+
+    def test_review_context_allows_zero_entry_limit(self) -> None:
+        entry = db.create_entry(self.conn, "reviewed")
+        review = db.create_review(self.conn, "prior review", [entry.id], scope_limit=1)
+
+        context = db.get_review_context(
+            self.conn, limit=0, prior_review_limit=1
+        )
+
+        self.assertEqual(context.scope_limit, 0)
+        self.assertEqual(context.entries, ())
+        self.assertEqual([r.id for r in context.prior_reviews], [review.id])
+
+    def test_review_context_missing_self_raises(self) -> None:
+        db.delete_person(self.conn, self.me.id)
+        db.create_entry(self.conn, "orphan")
+
+        with self.assertRaises(db.MissingSelfError):
+            db.get_review_context(self.conn)
+
+    def test_review_context_rejects_negative_limits(self) -> None:
+        with self.assertRaises(db.DBError):
+            db.get_review_context(self.conn, limit=-1)
+        with self.assertRaises(db.DBError):
+            db.get_review_context(self.conn, prior_review_limit=-1)
 
 
 class EntryContextTests(_DBTestCase):

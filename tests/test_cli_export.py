@@ -63,6 +63,18 @@ class ExportTestBase(unittest.TestCase):
         with closing(db.connect(self.db_path)) as conn:
             return db.create_feedback(conn, entry_id, body)
 
+    def _seed_review(
+        self,
+        body: str,
+        entry_ids: list[int],
+        *,
+        scope_limit: int | None = 20,
+    ) -> db.Review:
+        with closing(db.connect(self.db_path)) as conn:
+            return db.create_review(
+                conn, body, entry_ids, scope_limit=scope_limit
+            )
+
 
 class ExportStdoutTests(ExportTestBase):
     def test_empty_db_prints_header_and_no_entries_marker(self) -> None:
@@ -132,6 +144,26 @@ class ExportStdoutTests(ExportTestBase):
         self.assertGreater(idx_third, idx_second)
         self.assertIn("first note", out)
         self.assertIn("third note", out)
+
+    def test_review_section_renders_before_entries(self) -> None:
+        first = self._seed_entry("old entry")
+        second = self._seed_entry("new entry")
+        review = self._seed_review(
+            "weekly synthesis\nnext step",
+            [second.id, first.id],
+            scope_limit=2,
+        )
+        rc, out, _ = self._run("export")
+        self.assertEqual(rc, 0)
+        self.assertIn("## Reviews", out)
+        self.assertIn(f"### Review {review.id}", out)
+        self.assertIn(f"- **Created**: {review.created_at}", out)
+        self.assertIn("- **Scope**: latest (context limit 2)", out)
+        self.assertIn(
+            f"- **Covered entry IDs**: {second.id}, {first.id}", out
+        )
+        self.assertIn("weekly synthesis\nnext step", out)
+        self.assertLess(out.find("## Reviews"), out.find("## Entry "))
 
     def test_entries_emitted_newest_first(self) -> None:
         first = self._seed_entry("oldest entry")

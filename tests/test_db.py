@@ -1,4 +1,4 @@
-"""Tests for SQLite schema v1, idempotent init, and DB-level invariants.
+"""Tests for SQLite schema v2, idempotent init, and DB-level invariants.
 
 These tests use temporary DB files exclusively so the default user DB is never
 mutated.
@@ -25,6 +25,8 @@ _EXPECTED_TABLES = {
     "entry_tags",
     "entry_people",
     "feedback",
+    "reviews",
+    "review_entries",
 }
 
 _NOW = "2026-06-20T00:00:00Z"
@@ -68,6 +70,9 @@ class InitDbSchemaTests(unittest.TestCase):
             "idx_entry_people_person_id",
             "idx_feedback_entry_id",
             "idx_feedback_created_at",
+            "idx_reviews_created_at",
+            "idx_review_entries_entry_id",
+            "idx_review_entries_review_position",
         ):
             self.assertIn(required, indexes)
 
@@ -107,6 +112,35 @@ class InitDbSchemaTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM _meta WHERE key = 'schema_version'"
             ).fetchone()
             self.assertEqual(meta_count, 1)
+
+    def test_init_migrates_v1_database_without_data_loss(self) -> None:
+        paths.ensure_data_dir(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            conn.executescript(db._SCHEMA_V1_SQL)
+            conn.execute(
+                "INSERT INTO _meta (key, value) VALUES ('schema_version', '1')"
+            )
+            conn.execute(
+                "INSERT INTO people (handle, name, is_self, created_at, updated_at)"
+                " VALUES (?, ?, 1, ?, ?)",
+                ("me", "Me", _NOW, _NOW),
+            )
+            conn.execute(
+                "INSERT INTO entries (body, source, occurred_at, created_at, updated_at)"
+                " VALUES (?, ?, NULL, ?, ?)",
+                ("original entry", "email", _NOW, _NOW),
+            )
+            conn.commit()
+
+        db.init_db(self.db_path)
+
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.get_schema_version(conn), db.SCHEMA_VERSION)
+            self.assertTrue(_EXPECTED_TABLES.issubset(_table_names(conn)))
+            person = conn.execute("SELECT handle, name FROM people").fetchone()
+            entry = conn.execute("SELECT body, source FROM entries").fetchone()
+            self.assertEqual(dict(person), {"handle": "me", "name": "Me"})
+            self.assertEqual(dict(entry), {"body": "original entry", "source": "email"})
 
     def test_init_resolves_default_path_when_none(self) -> None:
         fake_db = Path(self._tmp.name) / "from-env.sqlite3"
@@ -160,6 +194,14 @@ class SchemaInvariantTests(unittest.TestCase):
         cur = conn.execute(
             "INSERT INTO entries (body, source, occurred_at, created_at, updated_at)"
             " VALUES (?, NULL, NULL, ?, ?)",
+            (body, _NOW, _NOW),
+        )
+        return cur.lastrowid
+
+    def _insert_review(self, conn: sqlite3.Connection, body: str = "review") -> int:
+        cur = conn.execute(
+            "INSERT INTO reviews (body, scope_kind, scope_limit, created_at, updated_at)"
+            " VALUES (?, 'latest', 20, ?, ?)",
             (body, _NOW, _NOW),
         )
         return cur.lastrowid
@@ -276,6 +318,61 @@ class SchemaInvariantTests(unittest.TestCase):
                     "INSERT INTO entry_people (entry_id, person_id) VALUES (?, ?)",
                     (entry_id, 9999),
                 )
+
+    def test_reviews_scope_kind_only_allows_latest(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            conn.execute(
+                "INSERT INTO reviews (body, scope_kind, scope_limit, created_at, updated_at)"
+                " VALUES (?, 'latest', NULL, ?, ?)",
+                ("ok", _NOW, _NOW),
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO reviews"
+                    " (body, scope_kind, scope_limit, created_at, updated_at)"
+                    " VALUES (?, 'all', NULL, ?, ?)",
+                    ("bad scope", _NOW, _NOW),
+                )
+
+    def test_deleting_review_cascades_to_review_entries(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            entry_id = self._insert_entry(conn)
+            review_id = self._insert_review(conn)
+            conn.execute(
+                "INSERT INTO review_entries (review_id, entry_id, position)"
+                " VALUES (?, ?, 0)",
+                (review_id, entry_id),
+            )
+            conn.commit()
+
+            conn.execute("DELETE FROM reviews WHERE id = ?", (review_id,))
+            conn.commit()
+
+            (count,) = conn.execute(
+                "SELECT COUNT(*) FROM review_entries WHERE review_id = ?",
+                (review_id,),
+            ).fetchone()
+            self.assertEqual(count, 0)
+
+    def test_deleting_entry_cascades_to_review_entries(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            entry_id = self._insert_entry(conn)
+            review_id = self._insert_review(conn)
+            conn.execute(
+                "INSERT INTO review_entries (review_id, entry_id, position)"
+                " VALUES (?, ?, 0)",
+                (review_id, entry_id),
+            )
+            conn.commit()
+
+            conn.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+            conn.commit()
+
+            (count,) = conn.execute(
+                "SELECT COUNT(*) FROM review_entries WHERE entry_id = ?",
+                (entry_id,),
+            ).fetchone()
+            self.assertEqual(count, 0)
 
 
 if __name__ == "__main__":

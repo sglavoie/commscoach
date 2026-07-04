@@ -5,7 +5,15 @@ from __future__ import annotations
 import dataclasses
 import unittest
 
-from commscoach.models import Entry, EntryContext, Feedback, Person
+from commscoach.models import (
+    Entry,
+    EntryContext,
+    Feedback,
+    Person,
+    Review,
+    ReviewContext,
+    ReviewEntryContext,
+)
 
 
 def _make_person(**overrides):
@@ -32,6 +40,31 @@ def _make_entry(**overrides):
     )
     base.update(overrides)
     return Entry(**base)
+
+
+def _make_feedback(**overrides):
+    base = dict(
+        id=5,
+        entry_id=10,
+        body="Nice framing.",
+        created_at="2026-06-20T10:00:00Z",
+        updated_at="2026-06-20T10:00:00Z",
+    )
+    base.update(overrides)
+    return Feedback(**base)
+
+
+def _make_review(**overrides):
+    base = dict(
+        id=20,
+        body="Weekly synthesis",
+        scope_kind="latest",
+        scope_limit=20,
+        created_at="2026-06-20T12:00:00Z",
+        updated_at="2026-06-20T12:00:00Z",
+    )
+    base.update(overrides)
+    return Review(**base)
 
 
 class PersonTests(unittest.TestCase):
@@ -67,15 +100,30 @@ class EntryTests(unittest.TestCase):
 
 class FeedbackTests(unittest.TestCase):
     def test_is_frozen(self):
-        feedback = Feedback(
-            id=5,
-            entry_id=10,
-            body="Nice framing.",
-            created_at="2026-06-20T10:00:00Z",
-            updated_at="2026-06-20T10:00:00Z",
-        )
+        feedback = _make_feedback()
         with self.assertRaises(dataclasses.FrozenInstanceError):
             feedback.body = "edit"  # type: ignore[misc]
+
+
+class ReviewTests(unittest.TestCase):
+    def test_defaults_for_entries(self):
+        review = _make_review()
+        self.assertEqual(review.entries, ())
+
+    def test_entries_are_tuple(self):
+        entry = _make_entry()
+        review = _make_review(entries=(entry,))
+        self.assertIsInstance(review.entries, tuple)
+        self.assertEqual(review.entries[0].id, entry.id)
+
+    def test_scope_limit_allows_none(self):
+        review = _make_review(scope_limit=None)
+        self.assertIsNone(review.scope_limit)
+
+    def test_is_frozen(self):
+        review = _make_review()
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            review.body = "changed"  # type: ignore[misc]
 
 
 class EntryContextTests(unittest.TestCase):
@@ -108,6 +156,63 @@ class EntryContextTests(unittest.TestCase):
         )
         with self.assertRaises(dataclasses.FrozenInstanceError):
             context.people = ()  # type: ignore[misc]
+
+
+class ReviewEntryContextTests(unittest.TestCase):
+    def test_defaults_for_feedback(self):
+        context = ReviewEntryContext(entry=_make_entry())
+        self.assertEqual(context.feedback, ())
+
+    def test_feedback_is_tuple(self):
+        feedback = _make_feedback()
+        context = ReviewEntryContext(entry=_make_entry(), feedback=(feedback,))
+        self.assertIsInstance(context.feedback, tuple)
+        self.assertEqual(context.feedback[0].body, "Nice framing.")
+
+    def test_is_frozen(self):
+        context = ReviewEntryContext(entry=_make_entry())
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            context.feedback = ()  # type: ignore[misc]
+
+
+class ReviewContextTests(unittest.TestCase):
+    def test_defaults_for_entries_and_prior_reviews(self):
+        self_person = _make_person(handle="me", is_self=True)
+        context = ReviewContext(
+            self_person=self_person,
+            scope_kind="latest",
+            scope_limit=20,
+        )
+        self.assertEqual(context.entries, ())
+        self.assertEqual(context.prior_reviews, ())
+
+    def test_holds_review_payload(self):
+        self_person = _make_person(handle="me", is_self=True)
+        entry_context = ReviewEntryContext(
+            entry=_make_entry(),
+            feedback=(_make_feedback(),),
+        )
+        review = _make_review()
+        context = ReviewContext(
+            self_person=self_person,
+            scope_kind="latest",
+            scope_limit=20,
+            entries=(entry_context,),
+            prior_reviews=(review,),
+        )
+        self.assertTrue(context.self_person.is_self)
+        self.assertEqual(context.entries[0].entry.id, entry_context.entry.id)
+        self.assertEqual(context.prior_reviews[0].body, "Weekly synthesis")
+
+    def test_is_frozen(self):
+        self_person = _make_person(handle="me", is_self=True)
+        context = ReviewContext(
+            self_person=self_person,
+            scope_kind="latest",
+            scope_limit=20,
+        )
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            context.scope_kind = "all"  # type: ignore[misc]
 
 
 if __name__ == "__main__":
