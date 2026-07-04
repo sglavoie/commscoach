@@ -1,7 +1,7 @@
 """Tests for SQLite schema v1, idempotent init, and DB-level invariants.
 
-These tests use temporary DB files exclusively so the tracked project DB at
-``data/commscoach.sqlite3`` is never mutated.
+These tests use temporary DB files exclusively so the default user DB is never
+mutated.
 """
 
 from __future__ import annotations

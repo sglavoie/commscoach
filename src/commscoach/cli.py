@@ -92,7 +92,7 @@ def confirm(
 
 
 def resolve_db_path(args: argparse.Namespace) -> Path:
-    """Apply ``--db`` then ``$COMMSCOACH_DB`` then the project default."""
+    """Apply ``--db`` then ``$COMMSCOACH_DB`` then the built-in default."""
     return paths.resolve_db_path(getattr(args, "db", None))
 
 

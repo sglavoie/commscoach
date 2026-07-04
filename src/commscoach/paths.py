@@ -4,11 +4,10 @@ Resolution precedence for the DB path:
 
 1. Explicit ``cli_db`` argument (from the ``--db`` global flag).
 2. ``COMMSCOACH_DB`` environment variable.
-3. The default tracked DB inside the project repository's ``data/`` directory.
+3. The current user's iCloud Drive ``commscoach`` directory.
 
-The default DB lives next to the package source (``<project>/data/commscoach.sqlite3``)
-so that ``uv tool install --editable --force .`` keeps every invocation pointed at
-the same tracked SQLite file regardless of the user's current working directory.
+The default DB is derived from ``Path.home()`` so it follows the current macOS
+user instead of hardcoding an absolute username.
 """
 
 from __future__ import annotations
@@ -20,9 +19,13 @@ ENV_VAR = "COMMSCOACH_DB"
 DATA_DIR_MODE = 0o700
 DB_FILE_MODE = 0o600
 
-_PACKAGE_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = _PACKAGE_DIR.parent.parent
-DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
+DEFAULT_DATA_DIR = (
+    Path.home()
+    / "Library"
+    / "Mobile Documents"
+    / "com~apple~CloudDocs"
+    / "commscoach"
+)
 DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "commscoach.sqlite3"
 
 

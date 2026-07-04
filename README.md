@@ -11,7 +11,7 @@ Ready to use. The CLI, SQLite schema, skill integration, packaging, and Markdown
 ```
 src/commscoach/   # Python package
 tests/            # unittest suite (`uv run python -m unittest discover -s tests`)
-data/             # default SQLite DB lives here (commscoach.sqlite3)
+data/             # legacy local data dir; SQLite DB defaults to iCloud Drive
 ```
 
 ## Development
@@ -48,7 +48,9 @@ for subcommand-specific options.
 
 ## Default database
 
-`/Users/sglavoie/1_dev_projects/sglavoie_commscoach/data/commscoach.sqlite3`
+`~/Library/Mobile Documents/com~apple~CloudDocs/commscoach/commscoach.sqlite3`
+
+At runtime, `~` is resolved from the current user via `Path.home()`.
 
 Overrides (in order of precedence):
 
@@ -58,7 +60,7 @@ Overrides (in order of precedence):
 
 ### Privacy
 
-The SQLite file under `data/` is **not** committed. `.gitignore` excludes `data/*.sqlite3*`; the `data/` directory itself is kept tracked via `data/.gitkeep`. The DB file is created with mode `0600` and the `data/` directory with mode `0700`. Treat the DB as private personal data.
+SQLite files under `data/` are **not** committed. `.gitignore` excludes `data/*.sqlite3*`; the `data/` directory itself is kept tracked via `data/.gitkeep`. The DB file is created with mode `0600` and its parent directory with mode `0700`. Treat the DB as private personal data.
 
 ## Quick start
 

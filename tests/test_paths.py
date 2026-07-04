@@ -44,9 +44,16 @@ class ResolveDBPathTests(unittest.TestCase):
             self.assertFalse(str(resolved).startswith("~"))
             self.assertTrue(resolved.is_absolute())
 
-    def test_default_lives_in_project_data_dir(self):
-        self.assertEqual(paths.DEFAULT_DB_PATH.parent, paths.DEFAULT_DATA_DIR)
-        self.assertEqual(paths.DEFAULT_DB_PATH.name, "commscoach.sqlite3")
+    def test_default_lives_in_current_user_icloud_drive(self):
+        expected_dir = (
+            Path.home()
+            / "Library"
+            / "Mobile Documents"
+            / "com~apple~CloudDocs"
+            / "commscoach"
+        )
+        self.assertEqual(paths.DEFAULT_DATA_DIR, expected_dir)
+        self.assertEqual(paths.DEFAULT_DB_PATH, expected_dir / "commscoach.sqlite3")
 
 
 class EnsureDataDirTests(unittest.TestCase):

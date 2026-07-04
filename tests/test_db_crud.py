@@ -4,10 +4,9 @@ Covers people/entry/feedback CRUD, search, self switching, cascades, tag
 normalization plus orphan GC, and the context aggregation contract used by
 the coaching skill.
 
-Tests use temporary DB files exclusively so the tracked project DB at
-``data/commscoach.sqlite3`` is never mutated. Where timestamps need to differ
-deterministically, ``db._utcnow_iso`` is patched with an iterator so we never
-rely on real clock drift.
+Tests use temporary DB files exclusively so the default user DB is never
+mutated. Where timestamps need to differ deterministically, ``db._utcnow_iso``
+is patched with an iterator so we never rely on real clock drift.
 """
 
 from __future__ import annotations

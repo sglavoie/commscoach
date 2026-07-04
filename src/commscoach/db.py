@@ -172,8 +172,8 @@ def init_db(db_path: Path | str | None = None) -> Path:
     """Create the data dir, apply schema v1, and chmod the DB file.
 
     Idempotent: re-running ``init_db`` on an existing DB leaves data intact and
-    reaffirms ``data/`` at ``0o700`` and the DB file at ``0o600``. Returns the
-    resolved absolute DB path.
+    reaffirms the DB parent directory at ``0o700`` and the DB file at ``0o600``.
+    Returns the resolved DB path.
     """
     resolved = Path(db_path).expanduser() if db_path is not None else paths.resolve_db_path()
     paths.ensure_data_dir(resolved)
