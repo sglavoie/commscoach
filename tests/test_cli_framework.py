@@ -13,6 +13,8 @@ from pathlib import Path
 from unittest import mock
 
 from commscoach import cli, db, paths
+from commscoach.cli import app as cli_app
+from commscoach.db import schema as db_schema
 
 
 class HelperTests(unittest.TestCase):
@@ -205,7 +207,7 @@ class ExitCodeTests(unittest.TestCase):
             raise db.DBError("simulated semantic failure")
 
         err_buf = io.StringIO()
-        with mock.patch.object(cli, "cmd_init", boom), redirect_stderr(err_buf):
+        with mock.patch.object(cli_app, "cmd_init", boom), redirect_stderr(err_buf):
             rc = cli.main(["init"])
         self.assertEqual(rc, 1)
         self.assertIn("simulated semantic failure", err_buf.getvalue())
@@ -215,7 +217,7 @@ class ExitCodeTests(unittest.TestCase):
             raise KeyboardInterrupt()
 
         err_buf = io.StringIO()
-        with mock.patch.object(cli, "cmd_init", boom), redirect_stderr(err_buf):
+        with mock.patch.object(cli_app, "cmd_init", boom), redirect_stderr(err_buf):
             rc = cli.main(["init"])
         self.assertEqual(rc, 1)
         self.assertIn("interrupted", err_buf.getvalue())
@@ -224,7 +226,7 @@ class ExitCodeTests(unittest.TestCase):
         def boom(_args: object) -> int:
             raise RuntimeError("not a DBError")
 
-        with mock.patch.object(cli, "cmd_init", boom):
+        with mock.patch.object(cli_app, "cmd_init", boom):
             with self.assertRaises(RuntimeError):
                 cli.main(["init"])
 
@@ -257,7 +259,7 @@ class OpenDBTests(unittest.TestCase):
         db_path = self.tmpdir / "v1.sqlite3"
         paths.ensure_data_dir(db_path)
         with closing(db.connect(db_path)) as conn:
-            conn.executescript(db._SCHEMA_V1_SQL)
+            conn.executescript(db_schema.SCHEMA_V1_SQL)
             conn.execute(
                 "INSERT INTO _meta (key, value) VALUES ('schema_version', '1')"
             )

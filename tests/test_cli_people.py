@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from commscoach import cli, db
+from commscoach.cli import people as cli_people
 
 
 class PeopleTestBase(unittest.TestCase):
@@ -257,14 +258,14 @@ class PersonRmTests(PeopleTestBase):
 
     def test_rm_confirm_yes_deletes(self) -> None:
         self._seed_person("alice")
-        with mock.patch.object(cli, "confirm", return_value=True):
+        with mock.patch.object(cli_people, "confirm", return_value=True):
             rc, out, _ = self._run("person", "rm", "alice")
         self.assertEqual(rc, 0)
         self.assertIn("deleted", out)
 
     def test_rm_confirm_no_aborts(self) -> None:
         self._seed_person("alice")
-        with mock.patch.object(cli, "confirm", return_value=False):
+        with mock.patch.object(cli_people, "confirm", return_value=False):
             rc, _, err = self._run("person", "rm", "alice")
         self.assertEqual(rc, 1)
         self.assertIn("aborted", err)

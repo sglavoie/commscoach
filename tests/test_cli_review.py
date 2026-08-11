@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from commscoach import cli, db
+from commscoach.cli import reviews as cli_reviews
 
 
 class ReviewTestBase(unittest.TestCase):
@@ -393,7 +394,7 @@ class ReviewRmTests(ReviewTestBase):
         entry = self._seed_entry("entry")
         review = self._seed_review("keep me", [entry.id])
 
-        with mock.patch.object(cli, "confirm", return_value=False):
+        with mock.patch.object(cli_reviews, "confirm", return_value=False):
             rc, _, err = self._run("review", "rm", str(review.id))
 
         self.assertEqual(rc, 1)

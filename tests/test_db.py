@@ -15,6 +15,7 @@ from contextlib import closing
 from pathlib import Path
 
 from commscoach import db, paths
+from commscoach.db import schema as db_schema
 
 
 _EXPECTED_TABLES = {
@@ -116,7 +117,7 @@ class InitDbSchemaTests(unittest.TestCase):
     def test_init_migrates_v1_database_without_data_loss(self) -> None:
         paths.ensure_data_dir(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
-            conn.executescript(db._SCHEMA_V1_SQL)
+            conn.executescript(db_schema.SCHEMA_V1_SQL)
             conn.execute(
                 "INSERT INTO _meta (key, value) VALUES ('schema_version', '1')"
             )
