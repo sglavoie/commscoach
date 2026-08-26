@@ -4,12 +4,15 @@
 - ``read_body`` accepts a literal string, ``-`` (stdin), or ``@PATH`` (file).
 - ``confirm`` prompts on stderr and treats EOF as "no".
 - ``open_db`` is a context manager that closes the connection cleanly.
+- ``prose_lines``/``first_prose_line``/``truncate``/``format_stamp`` build the
+  human-readable previews shared by the ``list`` subcommands.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sqlite3
 import sys
 from contextlib import closing, contextmanager
@@ -32,6 +35,59 @@ def print_json(obj: Any, *, stream: TextIO | None = None) -> None:
     out = stream if stream is not None else sys.stdout
     json.dump(obj, out, indent=2, sort_keys=True, default=str)
     out.write("\n")
+
+
+_HEADING_RE = re.compile(r"^\s*#{1,6}\s")
+_RULE_RE = re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,})\s*$")
+
+
+def truncate(text: str, *, width: int = 80) -> str:
+    """Clip ``text`` to ``width`` characters, marking the cut with an ellipsis."""
+    if len(text) <= width:
+        return text
+    return text[: width - 3] + "..."
+
+
+def prose_lines(body: str) -> list[str]:
+    """Split a markdown body into whitespace-normalized prose paragraphs.
+
+    ATX headings, horizontal rules, and blank lines are dropped; each surviving
+    run of consecutive lines collapses into one paragraph. A body made only of
+    headings falls back to its first non-empty line so a preview is never empty.
+    """
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for line in body.splitlines():
+        if not line.strip() or _HEADING_RE.match(line) or _RULE_RE.match(line):
+            if current:
+                paragraphs.append(" ".join(current))
+                current = []
+            continue
+        current.append(" ".join(line.split()))
+    if current:
+        paragraphs.append(" ".join(current))
+    if not paragraphs:
+        return [body.strip().split("\n", 1)[0]]
+    return paragraphs
+
+
+def first_prose_line(body: str) -> str:
+    """Return the first prose paragraph of ``body``, or an empty string."""
+    lines = prose_lines(body)
+    return lines[0] if lines else ""
+
+
+def format_stamp(iso: str) -> str:
+    """Render a stored ISO-8601 UTC timestamp as local ``YYYY-MM-DD HH:MM``.
+
+    Unparseable values are returned verbatim so a malformed or legacy row never
+    breaks a listing.
+    """
+    try:
+        parsed = datetime.fromisoformat(iso)
+    except ValueError:
+        return iso
+    return parsed.astimezone().strftime("%Y-%m-%d %H:%M")
 
 
 def read_body(value: str, *, stdin: TextIO | None = None) -> str:

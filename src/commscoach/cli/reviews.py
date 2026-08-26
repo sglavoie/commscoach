@@ -9,10 +9,12 @@ from typing import Any
 from .. import db
 from .common import (
     confirm,
+    first_prose_line,
     non_negative_int,
     open_db,
     print_json,
     read_body_arg,
+    truncate,
 )
 from .editor import compose_in_editor
 from .serializers import (
@@ -115,9 +117,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     lst.set_defaults(func=cmd_review_list)
 
-    get = review_sub.add_parser("get", help="Show one review by id.")
-    get.add_argument("review_id", type=int, metavar="REVIEW_ID")
-    get.set_defaults(func=cmd_review_get)
+    show = review_sub.add_parser("show", help="Show one review by id.")
+    show.add_argument("review_id", type=int, metavar="REVIEW_ID")
+    show.set_defaults(func=cmd_review_show)
 
     rm = review_sub.add_parser("rm", help="Delete one review.")
     rm.add_argument("review_id", type=int, metavar="REVIEW_ID")
@@ -166,9 +168,6 @@ def _format_review_human(review: db.Review) -> str:
 
 
 def _format_review_short(review: db.Review) -> str:
-    first_line = review.body.strip().split("\n", 1)[0]
-    if len(first_line) > 80:
-        first_line = first_line[:77] + "..."
     entry_ids = ",".join(str(entry.id) for entry in review.entries)
     parts = [
         f"[{review.id}]",
@@ -179,7 +178,7 @@ def _format_review_short(review: db.Review) -> str:
         parts.append(f"context-limit:{review.scope_limit}")
     if entry_ids:
         parts.append(f"entries:{entry_ids}")
-    parts.append(first_line)
+    parts.append(truncate(first_prose_line(review.body)))
     return " ".join(parts)
 
 
@@ -248,7 +247,7 @@ def cmd_review_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_review_get(args: argparse.Namespace) -> int:
+def cmd_review_show(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         review = db.get_review(conn, args.review_id)
     if review is None:

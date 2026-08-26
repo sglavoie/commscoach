@@ -368,12 +368,12 @@ class ReviewListTests(ReviewTestBase):
         self.assertEqual(ctx.exception.code, 2)
 
 
-class ReviewGetTests(ReviewTestBase):
-    def test_get_existing_prints_human(self) -> None:
+class ReviewShowTests(ReviewTestBase):
+    def test_show_existing_prints_human(self) -> None:
         entry = self._seed_entry("entry")
         review = self._seed_review("strong summary", [entry.id])
 
-        rc, out, _ = self._run("review", "get", str(review.id))
+        rc, out, _ = self._run("review", "show", str(review.id))
 
         self.assertEqual(rc, 0)
         self.assertIn(f"[{review.id}]", out)
@@ -381,11 +381,11 @@ class ReviewGetTests(ReviewTestBase):
         self.assertIn("strong summary", out)
         self.assertIn(f"entries: {entry.id}", out)
 
-    def test_get_json_round_trip(self) -> None:
+    def test_show_json_round_trip(self) -> None:
         entry = self._seed_entry("entry")
         review = self._seed_review("stored summary", [entry.id])
 
-        rc, out, _ = self._run("--json", "review", "get", str(review.id))
+        rc, out, _ = self._run("--json", "review", "show", str(review.id))
 
         self.assertEqual(rc, 0)
         payload = json.loads(out)
@@ -393,15 +393,15 @@ class ReviewGetTests(ReviewTestBase):
         self.assertEqual(payload["body"], "stored summary")
         self.assertEqual(payload["entry_ids"], [entry.id])
 
-    def test_get_missing_exits_one(self) -> None:
-        rc, _, err = self._run("review", "get", "9999")
+    def test_show_missing_exits_one(self) -> None:
+        rc, _, err = self._run("review", "show", "9999")
         self.assertEqual(rc, 1)
         self.assertIn("9999", err)
 
-    def test_get_non_integer_exits_two(self) -> None:
+    def test_show_non_integer_exits_two(self) -> None:
         with redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as ctx:
-                cli.main(["--db", str(self.db_path), "review", "get", "abc"])
+                cli.main(["--db", str(self.db_path), "review", "show", "abc"])
         self.assertEqual(ctx.exception.code, 2)
 
 
@@ -451,7 +451,7 @@ class ReviewHelpTests(ReviewTestBase):
         self.assertIn("context", out)
         self.assertIn("add", out)
         self.assertIn("list", out)
-        self.assertIn("get", out)
+        self.assertIn("show", out)
         self.assertIn("rm", out)
 
 

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+import textwrap
 
 from .. import db
-from .common import open_db, print_json, read_body_arg
+from .common import format_stamp, open_db, print_json, prose_lines, read_body_arg
 from .editor import compose_in_editor
 from .serializers import feedback_to_dict
 
@@ -52,9 +53,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     lst.add_argument("entry_id", type=int, metavar="ENTRY_ID")
     lst.set_defaults(func=cmd_feedback_list)
 
-    get = feedback_sub.add_parser("get", help="Show one feedback note by id.")
-    get.add_argument("feedback_id", type=int, metavar="FEEDBACK_ID")
-    get.set_defaults(func=cmd_feedback_get)
+    show = feedback_sub.add_parser("show", help="Show one feedback note by id.")
+    show.add_argument("feedback_id", type=int, metavar="FEEDBACK_ID")
+    show.set_defaults(func=cmd_feedback_show)
 
 
 def _format_feedback_human(feedback: db.Feedback) -> str:
@@ -65,11 +66,22 @@ def _format_feedback_human(feedback: db.Feedback) -> str:
     return "\n".join([header, "---", feedback.body])
 
 
+PREVIEW_WIDTH = 76
+PREVIEW_LINES = 3
+
+
 def _format_feedback_short(feedback: db.Feedback) -> str:
-    first_line = feedback.body.strip().split("\n", 1)[0]
-    if len(first_line) > 80:
-        first_line = first_line[:77] + "..."
-    return f"[{feedback.id}] {feedback.created_at} {first_line}"
+    """Render a listing block: an id/time/entry header over indented prose."""
+    header = (
+        f"[{feedback.id}] {format_stamp(feedback.created_at)}"
+        f" · entry {feedback.entry_id}"
+    )
+    preview = " · ".join(prose_lines(feedback.body))
+    wrapped = textwrap.wrap(preview, PREVIEW_WIDTH)
+    if len(wrapped) > PREVIEW_LINES:
+        wrapped = wrapped[:PREVIEW_LINES]
+        wrapped[-1] += "…"
+    return "\n".join([header, *(f"    {line}" for line in wrapped)])
 
 
 def _emit_feedback(
@@ -95,7 +107,9 @@ def _emit_feedback_list(
     if not items:
         print("(no feedback)")
         return
-    for feedback in items:
+    for index, feedback in enumerate(items):
+        if index:
+            print()
         print(_format_feedback_short(feedback))
 
 
@@ -123,7 +137,7 @@ def cmd_feedback_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_feedback_get(args: argparse.Namespace) -> int:
+def cmd_feedback_show(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         feedback = db.get_feedback(conn, args.feedback_id)
     if feedback is None:

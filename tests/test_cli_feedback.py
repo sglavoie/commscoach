@@ -176,25 +176,64 @@ class FeedbackListTests(FeedbackTestBase):
         self.assertEqual([row["id"] for row in payload], [first.id, second.id])
         self.assertEqual(payload[0]["body"], "first")
 
+    def test_list_skips_markdown_headings(self) -> None:
+        entry = self._seed_entry()
+        feedback = self._seed_feedback(
+            entry.id,
+            "## Situation\nStandup update ran long.\n\n## Impact\nThe lead lost the thread.",
+        )
+        rc, out, _ = self._run("feedback", "list", str(entry.id))
+        self.assertEqual(rc, 0)
+        self.assertNotIn("## Situation", out)
+        self.assertNotIn("## Impact", out)
+        self.assertIn("Standup update ran long.", out)
+        self.assertIn(f"[{feedback.id}]", out)
+        self.assertIn(f"entry {entry.id}", out)
 
-class FeedbackGetTests(FeedbackTestBase):
-    def test_get_existing_prints_human(self) -> None:
+    def test_list_caps_preview_at_three_lines_with_ellipsis(self) -> None:
+        entry = self._seed_entry()
+        self._seed_feedback(entry.id, "## Situation\n" + "word " * 200)
+        rc, out, _ = self._run("feedback", "list", str(entry.id))
+        self.assertEqual(rc, 0)
+        preview = [line for line in out.splitlines() if line.startswith("    ")]
+        self.assertEqual(len(preview), 3)
+        self.assertTrue(preview[-1].endswith("…"))
+
+    def test_list_heading_only_body_falls_back(self) -> None:
+        entry = self._seed_entry()
+        self._seed_feedback(entry.id, "## Situation\n### Impact\n")
+        rc, out, _ = self._run("feedback", "list", str(entry.id))
+        self.assertEqual(rc, 0)
+        self.assertIn("    ## Situation", out)
+
+    def test_list_separates_blocks_with_a_blank_line(self) -> None:
+        entry = self._seed_entry()
+        self._seed_feedback(entry.id, "## Situation\nfirst note")
+        self._seed_feedback(entry.id, "## Situation\nsecond note")
+        rc, out, _ = self._run("feedback", "list", str(entry.id))
+        self.assertEqual(rc, 0)
+        self.assertIn("first note\n\n[", out)
+        self.assertIn("second note", out)
+
+
+class FeedbackShowTests(FeedbackTestBase):
+    def test_show_existing_prints_human(self) -> None:
         entry = self._seed_entry()
         feedback = self._seed_feedback(entry.id, "great job")
-        rc, out, _ = self._run("feedback", "get", str(feedback.id))
+        rc, out, _ = self._run("feedback", "show", str(feedback.id))
         self.assertEqual(rc, 0)
         self.assertIn(f"[{feedback.id}]", out)
         self.assertIn("great job", out)
 
-    def test_get_missing_exits_one(self) -> None:
-        rc, _, err = self._run("feedback", "get", "9999")
+    def test_show_missing_exits_one(self) -> None:
+        rc, _, err = self._run("feedback", "show", "9999")
         self.assertEqual(rc, 1)
         self.assertIn("9999", err)
 
-    def test_get_json_round_trip(self) -> None:
+    def test_show_json_round_trip(self) -> None:
         entry = self._seed_entry()
         feedback = self._seed_feedback(entry.id, "round-trip")
-        rc, out, _ = self._run("--json", "feedback", "get", str(feedback.id))
+        rc, out, _ = self._run("--json", "feedback", "show", str(feedback.id))
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual(payload["id"], feedback.id)
@@ -208,7 +247,7 @@ class FeedbackHelpTests(FeedbackTestBase):
         self.assertEqual(rc, 0)
         self.assertIn("add", out)
         self.assertIn("list", out)
-        self.assertIn("get", out)
+        self.assertIn("show", out)
 
 
 if __name__ == "__main__":

@@ -9,12 +9,14 @@ from typing import Any
 from .. import db
 from .common import (
     confirm,
+    first_prose_line,
     non_negative_int,
     open_db,
     parse_date_bound,
     parse_when_or_raise,
     print_json,
     read_body_arg,
+    truncate,
 )
 from .editor import compose_in_editor
 from .people import ensure_people
@@ -79,9 +81,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     add.set_defaults(func=cmd_entry_add)
 
-    get = entry_sub.add_parser("get", help="Show one entry by id.")
-    get.add_argument("entry_id", type=int, metavar="ENTRY_ID")
-    get.set_defaults(func=cmd_entry_get)
+    show = entry_sub.add_parser("show", help="Show one entry by id.")
+    show.add_argument("entry_id", type=int, metavar="ENTRY_ID")
+    show.set_defaults(func=cmd_entry_show)
 
     edit = entry_sub.add_parser("edit", help="Update an existing entry.")
     edit.add_argument("entry_id", type=int, metavar="ENTRY_ID")
@@ -233,10 +235,7 @@ def _format_entry_human(entry: db.Entry) -> str:
 
 
 def _format_entry_short(entry: db.Entry) -> str:
-    first_line = entry.body.strip().split("\n", 1)[0]
-    if len(first_line) > 80:
-        first_line = first_line[:77] + "..."
-    parts = [f"[{entry.id}]", first_line]
+    parts = [f"[{entry.id}]", truncate(first_prose_line(entry.body))]
     if entry.tags:
         parts.append("#" + ",".join(entry.tags))
     if entry.people:
@@ -297,7 +296,7 @@ def cmd_entry_add(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_entry_get(args: argparse.Namespace) -> int:
+def cmd_entry_show(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         entry = db.get_entry(conn, args.entry_id)
     if entry is None:
