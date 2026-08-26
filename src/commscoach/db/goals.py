@@ -1,0 +1,221 @@
+"""CRUD for coaching goals and short-horizon experiments."""
+
+from __future__ import annotations
+
+import sqlite3
+from typing import Any
+
+from ..models import Goal, Person, Review
+from . import common
+from .errors import DBError, GoalNotFoundError, ReviewNotFoundError
+from .people import resolve_person_handles
+from .reviews import get_review
+from .rows import hydrate_goal
+
+GOAL_STATUSES = frozenset({"active", "done", "dropped"})
+
+
+def _validate_title(title: Any) -> str:
+    if not isinstance(title, str) or not title.strip():
+        raise DBError("goal title must be a non-empty string")
+    return title
+
+
+def _validate_status(status: Any) -> str:
+    if status not in GOAL_STATUSES:
+        raise DBError("goal status must be 'active', 'done', or 'dropped'")
+    return status
+
+
+def _resolve_person(
+    conn: sqlite3.Connection, person_handle: str | None
+) -> Person | None:
+    if person_handle is None:
+        return None
+    return resolve_person_handles(conn, (person_handle,))[0]
+
+
+def _resolve_review(
+    conn: sqlite3.Connection, review_id: int | None
+) -> Review | None:
+    if review_id is None:
+        return None
+    review = get_review(conn, review_id)
+    if review is None:
+        raise ReviewNotFoundError(review_id)
+    return review
+
+
+def create_goal(
+    conn: sqlite3.Connection,
+    title: str,
+    *,
+    detail: str | None = None,
+    person_handle: str | None = None,
+    review_id: int | None = None,
+    now: str | None = None,
+) -> Goal:
+    """Create an active goal after resolving all references."""
+    title = _validate_title(title)
+    person = _resolve_person(conn, person_handle)
+    review = _resolve_review(conn, review_id)
+    timestamp = now if now is not None else common.utcnow_iso()
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO goals"
+            " (title, detail, status, person_id, review_id, outcome, closed_at,"
+            " created_at, updated_at)"
+            " VALUES (?, ?, 'active', ?, ?, NULL, NULL, ?, ?)",
+            (
+                title,
+                detail,
+                person.id if person is not None else None,
+                review.id if review is not None else None,
+                timestamp,
+                timestamp,
+            ),
+        )
+    goal = get_goal(conn, cur.lastrowid)
+    assert goal is not None
+    return goal
+
+
+def update_goal(
+    conn: sqlite3.Connection,
+    goal_id: int,
+    *,
+    title: Any = common.UNSET,
+    detail: Any = common.UNSET,
+    person_handle: Any = common.UNSET,
+    review_id: Any = common.UNSET,
+    status: Any = common.UNSET,
+    now: str | None = None,
+) -> Goal:
+    """Update supplied goal fields, explicitly maintaining ``closed_at``."""
+    current = get_goal(conn, goal_id)
+    if current is None:
+        raise GoalNotFoundError(goal_id)
+
+    if title is not common.UNSET:
+        title = _validate_title(title)
+    if status is not common.UNSET:
+        status = _validate_status(status)
+    person = (
+        _resolve_person(conn, person_handle)
+        if person_handle is not common.UNSET
+        else common.UNSET
+    )
+    review = (
+        _resolve_review(conn, review_id)
+        if review_id is not common.UNSET
+        else common.UNSET
+    )
+
+    updates: list[str] = []
+    params: list[Any] = []
+    for column, value in (("title", title), ("detail", detail)):
+        if value is not common.UNSET:
+            updates.append(f"{column} = ?")
+            params.append(value)
+    if person is not common.UNSET:
+        updates.append("person_id = ?")
+        params.append(person.id if person is not None else None)
+    if review is not common.UNSET:
+        updates.append("review_id = ?")
+        params.append(review.id if review is not None else None)
+
+    if not updates and status is common.UNSET:
+        return current
+
+    timestamp = now if now is not None else common.utcnow_iso()
+    if status is not common.UNSET:
+        updates.extend(("status = ?", "closed_at = ?"))
+        params.extend((status, None if status == "active" else timestamp))
+    updates.append("updated_at = ?")
+    params.append(timestamp)
+    params.append(goal_id)
+    with conn:
+        conn.execute(
+            f"UPDATE goals SET {', '.join(updates)} WHERE id = ?",
+            params,
+        )
+    updated = get_goal(conn, goal_id)
+    assert updated is not None
+    return updated
+
+
+def close_goal(
+    conn: sqlite3.Connection,
+    goal_id: int,
+    *,
+    outcome: str | None = None,
+    dropped: bool = False,
+    now: str | None = None,
+) -> Goal:
+    """Close a goal as done (or dropped) with an optional outcome."""
+    if get_goal(conn, goal_id) is None:
+        raise GoalNotFoundError(goal_id)
+    timestamp = now if now is not None else common.utcnow_iso()
+    status = "dropped" if dropped else "done"
+    with conn:
+        conn.execute(
+            "UPDATE goals SET status = ?, outcome = ?, closed_at = ?, updated_at = ?"
+            " WHERE id = ?",
+            (status, outcome, timestamp, timestamp, goal_id),
+        )
+    goal = get_goal(conn, goal_id)
+    assert goal is not None
+    return goal
+
+
+def get_goal(conn: sqlite3.Connection, goal_id: int) -> Goal | None:
+    row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    if row is None:
+        return None
+    return hydrate_goal(conn, row)
+
+
+def list_goals(
+    conn: sqlite3.Connection,
+    *,
+    status: str | None = "active",
+    person_handle: str | None = None,
+    limit: int | None = None,
+) -> tuple[Goal, ...]:
+    """List goals newest-first; all-status lists put active goals first."""
+    if status is not None:
+        status = _validate_status(status)
+    if limit is not None and limit < 0:
+        raise DBError("limit must be non-negative")
+    where: list[str] = []
+    params: list[Any] = []
+    if status is not None:
+        where.append("status = ?")
+        params.append(status)
+    if person_handle is not None:
+        where.append(
+            "EXISTS (SELECT 1 FROM people p"
+            " WHERE p.id = goals.person_id AND LOWER(p.handle) = LOWER(?))"
+        )
+        params.append(person_handle)
+    sql = "SELECT * FROM goals"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    if status is None:
+        sql += (
+            " ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END,"
+            " created_at DESC, id DESC"
+        )
+    else:
+        sql += " ORDER BY created_at DESC, id DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    rows = conn.execute(sql, params).fetchall()
+    return tuple(hydrate_goal(conn, row) for row in rows)
+
+
+def delete_goal(conn: sqlite3.Connection, goal_id: int) -> bool:
+    with conn:
+        cur = conn.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
+    return cur.rowcount > 0

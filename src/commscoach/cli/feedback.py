@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 from .. import db
-from .common import open_db, print_json, read_body_or_raise
+from .common import open_db, print_json, read_body_arg
+from .editor import compose_in_editor
 from .serializers import feedback_to_dict
+
+
+FEEDBACK_PREAMBLE = (
+    "Write the feedback body below. Lines beginning with #> are ignored."
+)
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -30,7 +37,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add.add_argument("entry_id", type=int, metavar="ENTRY_ID")
     add.add_argument(
         "body",
-        help="Feedback body (literal text, '-' for stdin, or '@PATH' for a UTF-8 file).",
+        nargs="?",
+        default=None,
+        help=(
+            "Feedback body (literal text, '-' for stdin, '@PATH' for a UTF-8"
+            " file, or omit to open $EDITOR)."
+        ),
     )
     add.set_defaults(func=cmd_feedback_add)
 
@@ -88,7 +100,14 @@ def _emit_feedback_list(
 
 
 def cmd_feedback_add(args: argparse.Namespace) -> int:
-    body = read_body_or_raise(args.body)
+    body = read_body_arg(
+        args.body,
+        what="body",
+        template="",
+        preamble=FEEDBACK_PREAMBLE,
+        isatty=sys.stdin.isatty,
+        compose=compose_in_editor,
+    )
     with open_db(args) as conn:
         feedback = db.create_feedback(conn, args.entry_id, body)
     _emit_feedback(args, feedback, human_prefix="created")

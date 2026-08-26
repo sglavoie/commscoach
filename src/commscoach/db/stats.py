@@ -1,0 +1,242 @@
+"""Windowed aggregate statistics for the communication journal."""
+
+from __future__ import annotations
+
+import sqlite3
+from collections import Counter
+from datetime import date, timedelta
+from typing import Any
+
+from ..models import Stats
+from .errors import DBError
+
+
+def _date_window(
+    since: str | None,
+    until: str | None,
+) -> tuple[str | None, str | None]:
+    if since is not None:
+        try:
+            since = date.fromisoformat(since).isoformat()
+        except (TypeError, ValueError) as exc:
+            raise DBError("since must be an ISO date (YYYY-MM-DD)") from exc
+    until_exclusive: str | None = None
+    if until is not None:
+        try:
+            until_exclusive = (
+                date.fromisoformat(until) + timedelta(days=1)
+            ).isoformat()
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise DBError("until must be an ISO date (YYYY-MM-DD)") from exc
+    return since, until_exclusive
+
+
+def _where_window(
+    expression: str,
+    since: str | None,
+    until_exclusive: str | None,
+) -> tuple[str, list[str]]:
+    clauses: list[str] = []
+    params: list[str] = []
+    if since is not None:
+        clauses.append(f"{expression} >= ?")
+        params.append(since)
+    if until_exclusive is not None:
+        clauses.append(f"{expression} < ?")
+        params.append(until_exclusive)
+    return (" AND ".join(clauses) if clauses else "1 = 1"), params
+
+
+def _count(conn: sqlite3.Connection, sql: str, params: list[Any]) -> int:
+    row = conn.execute(sql, params).fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+def _ranked_counts(
+    conn: sqlite3.Connection,
+    sql: str,
+    params: list[Any],
+) -> tuple[tuple[str, int], ...]:
+    return tuple((str(row[0]), int(row[1])) for row in conn.execute(sql, params))
+
+
+def _monday(value: str) -> date:
+    try:
+        day = date.fromisoformat(value[:10])
+    except (TypeError, ValueError) as exc:
+        raise DBError(f"invalid effective entry timestamp: {value!r}") from exc
+    return day - timedelta(days=day.weekday())
+
+
+def _weekly_metrics(
+    timestamps: list[str],
+) -> tuple[float, int, int, tuple[tuple[str, int], ...]]:
+    if not timestamps:
+        return 0.0, 0, 0, ()
+
+    counts = Counter(_monday(timestamp) for timestamp in timestamps)
+    occupied = sorted(counts)
+    first_monday, last_monday = occupied[0], occupied[-1]
+    span_weeks = ((last_monday - first_monday).days // 7) + 1
+
+    buckets: list[tuple[str, int]] = []
+    cursor = first_monday
+    while cursor <= last_monday:
+        buckets.append((cursor.isoformat(), counts.get(cursor, 0)))
+        cursor += timedelta(days=7)
+
+    longest = 1
+    run = 1
+    for previous, current in zip(occupied, occupied[1:]):
+        if (current - previous).days == 7:
+            run += 1
+        else:
+            run = 1
+        longest = max(longest, run)
+
+    current_streak = 1
+    for previous, current in zip(reversed(occupied[:-1]), reversed(occupied[1:])):
+        if (current - previous).days != 7:
+            break
+        current_streak += 1
+
+    return len(timestamps) / span_weeks, current_streak, longest, tuple(buckets)
+
+
+def get_stats(
+    conn: sqlite3.Connection,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    top: int = 5,
+) -> Stats:
+    """Return windowed counts, weekly cadence, streaks, and top dimensions.
+
+    Entry cadence and linked-dimension counts use the entry's effective time,
+    ``COALESCE(occurred_at, created_at)``. Feedback coverage is likewise based
+    on entries in that window. Reviews use ``created_at``; active goals use
+    ``created_at`` and closed goals use ``closed_at``.
+    """
+    if top < 0:
+        raise DBError("top must be non-negative")
+    since, until_exclusive = _date_window(since, until)
+    entry_where, entry_params = _where_window(
+        "COALESCE(e.occurred_at, e.created_at)", since, until_exclusive
+    )
+    review_where, review_params = _where_window(
+        "r.created_at", since, until_exclusive
+    )
+    open_goal_where, open_goal_params = _where_window(
+        "g.created_at", since, until_exclusive
+    )
+    closed_goal_where, closed_goal_params = _where_window(
+        "g.closed_at", since, until_exclusive
+    )
+
+    entry_rows = conn.execute(
+        "SELECT e.id, COALESCE(e.occurred_at, e.created_at) AS effective_at "
+        f"FROM entries e WHERE {entry_where} "
+        "ORDER BY effective_at ASC, e.id ASC",
+        entry_params,
+    ).fetchall()
+    entry_count = len(entry_rows)
+    timestamps = [str(row["effective_at"]) for row in entry_rows]
+    entries_per_week, current_streak, longest_streak, buckets = _weekly_metrics(
+        timestamps
+    )
+
+    feedback_count = _count(
+        conn,
+        "SELECT COUNT(*) FROM feedback f JOIN entries e ON e.id = f.entry_id "
+        f"WHERE {entry_where}",
+        entry_params,
+    )
+    entries_with_feedback = _count(
+        conn,
+        "SELECT COUNT(DISTINCT e.id) FROM entries e "
+        "JOIN feedback f ON f.entry_id = e.id "
+        f"WHERE {entry_where}",
+        entry_params,
+    )
+    people_count = _count(
+        conn,
+        "SELECT COUNT(DISTINCT ep.person_id) FROM entry_people ep "
+        "JOIN entries e ON e.id = ep.entry_id "
+        f"WHERE {entry_where}",
+        entry_params,
+    )
+    tag_count = _count(
+        conn,
+        "SELECT COUNT(DISTINCT et.tag_id) FROM entry_tags et "
+        "JOIN entries e ON e.id = et.entry_id "
+        f"WHERE {entry_where}",
+        entry_params,
+    )
+    review_count = _count(
+        conn,
+        f"SELECT COUNT(*) FROM reviews r WHERE {review_where}",
+        review_params,
+    )
+    last_review_row = conn.execute(
+        "SELECT r.created_at FROM reviews r "
+        f"WHERE {review_where} ORDER BY r.created_at DESC, r.id DESC LIMIT 1",
+        review_params,
+    ).fetchone()
+    open_goal_count = _count(
+        conn,
+        "SELECT COUNT(*) FROM goals g WHERE g.status = 'active' "
+        f"AND {open_goal_where}",
+        open_goal_params,
+    )
+    closed_goal_count = _count(
+        conn,
+        "SELECT COUNT(*) FROM goals g WHERE g.status != 'active' "
+        f"AND {closed_goal_where}",
+        closed_goal_params,
+    )
+
+    top_tags = _ranked_counts(
+        conn,
+        "SELECT t.name, COUNT(*) AS uses FROM entry_tags et "
+        "JOIN tags t ON t.id = et.tag_id JOIN entries e ON e.id = et.entry_id "
+        f"WHERE {entry_where} GROUP BY t.id, t.name "
+        "ORDER BY uses DESC, t.name COLLATE NOCASE ASC LIMIT ?",
+        [*entry_params, top],
+    )
+    top_sources = _ranked_counts(
+        conn,
+        "SELECT e.source, COUNT(*) AS uses FROM entries e "
+        f"WHERE {entry_where} AND e.source IS NOT NULL AND e.source != '' "
+        "GROUP BY e.source ORDER BY uses DESC, e.source COLLATE NOCASE ASC LIMIT ?",
+        [*entry_params, top],
+    )
+    top_people = _ranked_counts(
+        conn,
+        "SELECT p.handle, COUNT(*) AS uses FROM entry_people ep "
+        "JOIN people p ON p.id = ep.person_id JOIN entries e ON e.id = ep.entry_id "
+        f"WHERE {entry_where} GROUP BY p.id, p.handle "
+        "ORDER BY uses DESC, p.handle COLLATE NOCASE ASC LIMIT ?",
+        [*entry_params, top],
+    )
+
+    return Stats(
+        entry_count=entry_count,
+        people_count=people_count,
+        tag_count=tag_count,
+        feedback_count=feedback_count,
+        review_count=review_count,
+        entries_with_feedback=entries_with_feedback,
+        open_goal_count=open_goal_count,
+        closed_goal_count=closed_goal_count,
+        first_entry=timestamps[0] if timestamps else None,
+        last_entry=timestamps[-1] if timestamps else None,
+        last_review=str(last_review_row[0]) if last_review_row is not None else None,
+        entries_per_week=entries_per_week,
+        current_weekly_streak=current_streak,
+        longest_weekly_streak=longest_streak,
+        weekly_buckets=buckets,
+        top_tags=top_tags,
+        top_sources=top_sources,
+        top_people=top_people,
+    )

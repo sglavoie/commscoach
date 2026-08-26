@@ -69,21 +69,48 @@ class ContextSuccessTests(ContextTestBase):
         )
         first = self._seed_feedback(entry.id, "first note")
         second = self._seed_feedback(entry.id, "second note")
+        with closing(db.connect(self.db_path)) as conn:
+            alice = db.get_person_by_handle(conn, "alice")
+            assert alice is not None
+            db.set_person_note(conn, alice.id, "Use concise asks")
+            prior_entry = db.create_entry(conn, "prior hello", people=["alice"])
+            history_feedback = db.create_feedback(
+                conn, prior_entry.id, "Good follow-through"
+            )
+            review = db.create_review(conn, "weekly synthesis", [prior_entry.id])
+            goal = db.create_goal(conn, "Ask one question")
 
         rc, out, _ = self._run("context", str(entry.id))
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual(
             set(payload.keys()),
-            {"entry", "self", "people", "prior_feedback"},
+            {
+                "entry",
+                "self",
+                "people",
+                "prior_feedback",
+                "goals",
+                "prior_reviews",
+            },
         )
         self.assertEqual(payload["entry"]["id"], entry.id)
         self.assertEqual(payload["entry"]["body"], "hello")
         self.assertEqual(payload["entry"]["tags"], ["review"])
         self.assertEqual(payload["self"]["handle"], "me")
         self.assertTrue(payload["self"]["is_self"])
+        self.assertEqual(payload["people"][0]["handle"], "alice")
         people_handles = sorted(p["handle"] for p in payload["people"])
         self.assertEqual(people_handles, ["alice", "bob"])
+        alice_payload = next(
+            p for p in payload["people"] if p["handle"] == "alice"
+        )
+        self.assertEqual(alice_payload["notes"], "Use concise asks")
+        self.assertEqual(alice_payload["history"][0]["entry"]["id"], prior_entry.id)
+        self.assertEqual(
+            alice_payload["history"][0]["feedback"][0]["id"],
+            history_feedback.id,
+        )
         for person in payload["people"]:
             self.assertFalse(person["is_self"])
         self.assertEqual(
@@ -92,6 +119,10 @@ class ContextSuccessTests(ContextTestBase):
         )
         self.assertEqual(
             payload["prior_feedback"][0]["body"], "first note"
+        )
+        self.assertEqual([item["id"] for item in payload["goals"]], [goal.id])
+        self.assertEqual(
+            [item["id"] for item in payload["prior_reviews"]], [review.id]
         )
 
     def test_context_excludes_self_from_people(self) -> None:
@@ -122,6 +153,30 @@ class ContextSuccessTests(ContextTestBase):
         payload = json.loads(out)
         self.assertEqual(payload["prior_feedback"], [])
         self.assertEqual(payload["people"], [])
+        self.assertEqual(payload["goals"], [])
+        self.assertEqual(payload["prior_reviews"], [])
+
+    def test_context_limit_flags_disable_history_and_prior_reviews(self) -> None:
+        self._seed_self()
+        self._seed_person("alice")
+        prior = self._seed_entry("prior", people=("alice",))
+        current = self._seed_entry("current", people=("alice",))
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_review(conn, "review", [prior.id])
+
+        rc, out, _ = self._run(
+            "context",
+            str(current.id),
+            "--history",
+            "0",
+            "--prior-review-limit",
+            "0",
+        )
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["people"][0]["history"], [])
+        self.assertEqual(payload["prior_reviews"], [])
 
     def test_context_output_validates_as_json(self) -> None:
         self._seed_self()

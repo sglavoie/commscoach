@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from typing import Any
 
 from .. import db
@@ -11,14 +12,19 @@ from .common import (
     non_negative_int,
     open_db,
     print_json,
-    read_body_or_raise,
+    read_body_arg,
 )
+from .editor import compose_in_editor
 from .serializers import (
     entry_to_dict,
     feedback_to_dict,
+    goal_to_dict,
     person_to_dict,
     review_to_dict,
 )
+
+
+REVIEW_PREAMBLE = "Write the review body below. Lines beginning with #> are ignored."
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -53,12 +59,24 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="N",
         help="Number of prior review syntheses to include.",
     )
+    context_cmd.add_argument(
+        "--goal-limit",
+        type=non_negative_int,
+        default=10,
+        metavar="N",
+        help="Number of active goals to include.",
+    )
     context_cmd.set_defaults(func=cmd_review_context)
 
     add = review_sub.add_parser("add", help="Store a review synthesis.")
     add.add_argument(
         "body",
-        help="Review body (literal text, '-' for stdin, or '@PATH' for a UTF-8 file).",
+        nargs="?",
+        default=None,
+        help=(
+            "Review body (literal text, '-' for stdin, '@PATH' for a UTF-8 file,"
+            " or omit to open $EDITOR)."
+        ),
     )
     add.add_argument(
         "--entry",
@@ -124,6 +142,7 @@ def _review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
         "prior_reviews": [
             review_to_dict(review) for review in context.prior_reviews
         ],
+        "goals": [goal_to_dict(goal) for goal in context.goals],
     }
 
 
@@ -195,13 +214,21 @@ def cmd_review_context(args: argparse.Namespace) -> int:
             conn,
             limit=args.limit,
             prior_review_limit=args.prior_review_limit,
+            goal_limit=args.goal_limit,
         )
     print_json(_review_context_to_dict(context))
     return 0
 
 
 def cmd_review_add(args: argparse.Namespace) -> int:
-    body = read_body_or_raise(args.body)
+    body = read_body_arg(
+        args.body,
+        what="body",
+        template="",
+        preamble=REVIEW_PREAMBLE,
+        isatty=sys.stdin.isatty,
+        compose=compose_in_editor,
+    )
     with open_db(args) as conn:
         review = db.create_review(
             conn,

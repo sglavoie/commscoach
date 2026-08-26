@@ -75,6 +75,23 @@ class ExportTestBase(unittest.TestCase):
                 conn, body, entry_ids, scope_limit=scope_limit
             )
 
+    def _seed_goal(
+        self,
+        title: str,
+        *,
+        detail: str | None = None,
+        person_handle: str | None = None,
+        review_id: int | None = None,
+    ) -> db.Goal:
+        with closing(db.connect(self.db_path)) as conn:
+            return db.create_goal(
+                conn,
+                title,
+                detail=detail,
+                person_handle=person_handle,
+                review_id=review_id,
+            )
+
 
 class ExportStdoutTests(ExportTestBase):
     def test_empty_db_prints_header_and_no_entries_marker(self) -> None:
@@ -164,6 +181,33 @@ class ExportStdoutTests(ExportTestBase):
         )
         self.assertIn("weekly synthesis\nnext step", out)
         self.assertLess(out.find("## Reviews"), out.find("## Entry "))
+
+    def test_goal_section_follows_reviews_with_active_goals_first(self) -> None:
+        person = self._seed_person("alex")
+        entry = self._seed_entry("source entry")
+        review = self._seed_review("source review", [entry.id])
+        active = self._seed_goal(
+            "Active goal",
+            detail="Ask one question",
+            person_handle=person.handle,
+            review_id=review.id,
+        )
+        closed = self._seed_goal("Closed goal")
+        with closing(db.connect(self.db_path)) as conn:
+            db.close_goal(conn, closed.id, outcome="It worked")
+
+        rc, out, _ = self._run("export")
+
+        self.assertEqual(rc, 0)
+        self.assertLess(out.find("## Reviews"), out.find("## Goals"))
+        self.assertLess(out.find("## Goals"), out.find("## Entry "))
+        self.assertLess(
+            out.find(f"### Goal {active.id}"), out.find(f"### Goal {closed.id}")
+        )
+        self.assertIn("- **Person**: @alex", out)
+        self.assertIn(f"- **Review**: {review.id}", out)
+        self.assertIn("#### Outcome", out)
+        self.assertIn("It worked", out)
 
     def test_entries_emitted_newest_first(self) -> None:
         first = self._seed_entry("oldest entry")
@@ -277,6 +321,7 @@ class ExportHelpTests(ExportTestBase):
         self.assertEqual(ctx.exception.code, 0)
         rendered = out_buf.getvalue()
         self.assertIn("--out", rendered)
+        self.assertIn("--format", rendered)
         self.assertIn("Markdown", rendered)
 
 

@@ -1,4 +1,4 @@
-"""SQLite connection, schema v2 DDL, and idempotent init.
+"""SQLite connection, schema v3 DDL, and idempotent init.
 
 Schema invariants enforced at the DB level:
 
@@ -7,7 +7,8 @@ Schema invariants enforced at the DB level:
 * At most one row may have ``is_self = 1`` via a partial UNIQUE index.
 * Cascading deletes: removing an entry removes its tag links, people links,
   attached feedback, and review-entry links. Removing a review removes its
-  review-entry links. Removing a person removes their entry links.
+  review-entry links and clears goal references. Removing a person removes
+  their entry links and note while clearing goal references.
 * Stored review scopes currently support only ``scope_kind = 'latest'``.
 """
 
@@ -18,9 +19,10 @@ from contextlib import closing
 from pathlib import Path
 
 from .. import paths
+from ..timeparse import TimeParseError, parse_when
 from .errors import DBError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 EXPECTED_TABLES = frozenset(
     {
@@ -33,6 +35,8 @@ EXPECTED_TABLES = frozenset(
         "feedback",
         "reviews",
         "review_entries",
+        "goals",
+        "person_notes",
     }
 )
 
@@ -66,7 +70,6 @@ CREATE TABLE IF NOT EXISTS entries (
     updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_entries_occurred_at ON entries (occurred_at);
 CREATE INDEX IF NOT EXISTS idx_entries_created_at ON entries (created_at);
 
 CREATE TABLE IF NOT EXISTS tags (
@@ -129,11 +132,81 @@ CREATE INDEX IF NOT EXISTS idx_review_entries_entry_id
 
 CREATE INDEX IF NOT EXISTS idx_review_entries_review_position
     ON review_entries (review_id, position);
+
+CREATE INDEX IF NOT EXISTS idx_entries_effective_at
+    ON entries (COALESCE(occurred_at, created_at) DESC);
+"""
+
+SCHEMA_V3_SQL = """
+CREATE TABLE IF NOT EXISTS goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    detail TEXT,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'done', 'dropped')),
+    person_id INTEGER REFERENCES people (id) ON DELETE SET NULL,
+    review_id INTEGER REFERENCES reviews (id) ON DELETE SET NULL,
+    outcome TEXT,
+    closed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK ((status = 'active') = (closed_at IS NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_goals_status
+    ON goals (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_goals_person_id ON goals (person_id);
+CREATE INDEX IF NOT EXISTS idx_goals_review_id ON goals (review_id);
+
+CREATE TABLE IF NOT EXISTS person_notes (
+    person_id INTEGER PRIMARY KEY REFERENCES people (id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+_OCCURRED_AT_BACKFILL_KEY = "occurred_at_utc_backfill_v1"
+_FTS5_META_KEY = "fts5"
+
+_FTS5_TABLE_SQL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+    body,
+    content='entries',
+    content_rowid='id',
+    tokenize='unicode61 remove_diacritics 2'
+);
+"""
+
+_FTS5_TRIGGER_SQL = """
+CREATE TRIGGER IF NOT EXISTS entries_fts_after_insert
+AFTER INSERT ON entries BEGIN
+    INSERT INTO entries_fts(rowid, body) VALUES (new.id, new.body);
+END;
+
+CREATE TRIGGER IF NOT EXISTS entries_fts_after_delete
+AFTER DELETE ON entries BEGIN
+    INSERT INTO entries_fts(entries_fts, rowid, body)
+    VALUES ('delete', old.id, old.body);
+END;
+
+CREATE TRIGGER IF NOT EXISTS entries_fts_after_update
+AFTER UPDATE ON entries BEGIN
+    INSERT INTO entries_fts(entries_fts, rowid, body)
+    VALUES ('delete', old.id, old.body);
+    INSERT INTO entries_fts(rowid, body) VALUES (new.id, new.body);
+END;
+"""
+
+_FTS5_DROP_TRIGGER_SQL = """
+DROP TRIGGER IF EXISTS entries_fts_after_insert;
+DROP TRIGGER IF EXISTS entries_fts_after_delete;
+DROP TRIGGER IF EXISTS entries_fts_after_update;
 """
 
 
 def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
-    """Open a SQLite connection with row factory and foreign keys enabled.
+    """Open a SQLite connection with safe sync semantics and foreign keys enabled.
 
     ``foreign_keys`` is a per-connection PRAGMA in SQLite; it must be enabled
     every time a new connection is opened, not just at schema creation time.
@@ -143,11 +216,15 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(Path(db_path).expanduser()))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # DELETE leaves exactly one database file at rest. WAL's persistent -wal
+    # and -shm files can be replicated independently by whole-file syncers,
+    # producing a torn database when those files arrive out of order.
+    conn.execute("PRAGMA journal_mode = DELETE")
     return conn
 
 
 def init_db(db_path: Path | str | None = None) -> Path:
-    """Create the data dir, apply schema v2, and chmod the DB file.
+    """Create the data dir, apply schema v3, and chmod the DB file.
 
     Idempotent: re-running ``init_db`` on an existing DB leaves data intact and
     reaffirms the DB parent directory at ``0o700`` and the DB file at ``0o600``.
@@ -192,12 +269,83 @@ def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
     )
 
 
+def _normalize_occurred_at_once(conn: sqlite3.Connection) -> None:
+    """Normalize parseable legacy occurrence timestamps once per database."""
+    already_done = conn.execute(
+        "SELECT 1 FROM _meta WHERE key = ?", (_OCCURRED_AT_BACKFILL_KEY,)
+    ).fetchone()
+    if already_done is not None:
+        return
+
+    has_values = conn.execute(
+        "SELECT 1 FROM entries WHERE occurred_at IS NOT NULL LIMIT 1"
+    ).fetchone()
+    if has_values is not None:
+        rows = conn.execute(
+            "SELECT id, occurred_at FROM entries WHERE occurred_at IS NOT NULL"
+        ).fetchall()
+        for row in rows:
+            try:
+                normalized = parse_when(row["occurred_at"])
+            except TimeParseError:
+                continue
+            if normalized != row["occurred_at"]:
+                conn.execute(
+                    "UPDATE entries SET occurred_at = ? WHERE id = ?",
+                    (normalized, row["id"]),
+                )
+
+    conn.execute(
+        "INSERT INTO _meta (key, value) VALUES (?, '1')",
+        (_OCCURRED_AT_BACKFILL_KEY,),
+    )
+
+
+def _probe_fts5(conn: sqlite3.Connection) -> bool:
+    """Create the FTS table when the active SQLite library supports FTS5."""
+    try:
+        conn.execute(_FTS5_TABLE_SQL)
+    except sqlite3.OperationalError:
+        return False
+    return True
+
+
+def _rebuild_fts5(conn: sqlite3.Connection) -> None:
+    conn.execute("INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')")
+
+
+def _configure_fts5(conn: sqlite3.Connection) -> None:
+    """Probe and configure optional FTS5 support for this database."""
+    enabled = _probe_fts5(conn)
+    if enabled:
+        conn.executescript(_FTS5_TRIGGER_SQL)
+        entry_count = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+        indexed_count = conn.execute(
+            "SELECT COUNT(*) FROM entries_fts_docsize"
+        ).fetchone()[0]
+        if indexed_count != entry_count:
+            _rebuild_fts5(conn)
+    else:
+        # A database may move between Python/SQLite builds. Keep writes working
+        # when the current build cannot load an FTS table created elsewhere.
+        conn.executescript(_FTS5_DROP_TRIGGER_SQL)
+
+    conn.execute(
+        "INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)",
+        (_FTS5_META_KEY, "1" if enabled else "0"),
+    )
+
+
 def _apply_schema(conn: sqlite3.Connection) -> None:
-    """Apply schema v2 idempotently, migrating v1 databases in place."""
+    """Apply schema v3 idempotently, migrating v1/v2 databases in place."""
     conn.executescript(SCHEMA_V1_SQL)
     version = get_schema_version(conn)
-    if version not in (None, 1, SCHEMA_VERSION):
+    if version is not None and not 1 <= version <= SCHEMA_VERSION:
         raise DBError(f"unsupported schema version {version}")
+    conn.execute("DROP INDEX IF EXISTS idx_entries_occurred_at")
+    _normalize_occurred_at_once(conn)
     conn.executescript(SCHEMA_V2_SQL)
+    conn.executescript(SCHEMA_V3_SQL)
+    _configure_fts5(conn)
     _set_schema_version(conn, SCHEMA_VERSION)
     conn.commit()

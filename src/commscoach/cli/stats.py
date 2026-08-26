@@ -1,0 +1,110 @@
+"""The ``commscoach stats`` activity summary command."""
+
+from __future__ import annotations
+
+import argparse
+
+from .. import db
+from .common import open_db, parse_date_bound, print_json
+from .serializers import stats_to_dict
+
+
+def register(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "stats",
+        help="Summarize journal activity, coaching coverage, and weekly cadence.",
+    )
+    parser.add_argument(
+        "--since",
+        default=None,
+        metavar="DATE",
+        help="Include activity on or after DATE (ISO-8601 or relative).",
+    )
+    parser.add_argument(
+        "--until",
+        default=None,
+        metavar="DATE",
+        help="Include activity through DATE (ISO-8601 or relative).",
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=5,
+        metavar="N",
+        help="Show at most N tags, sources, and people (default: 5).",
+    )
+    parser.add_argument(
+        "--weeks",
+        type=int,
+        default=12,
+        metavar="N",
+        help="Show at most N recent weekly buckets (default: 12).",
+    )
+    parser.set_defaults(func=cmd_stats)
+
+
+def _format_ranked(title: str, items: tuple[tuple[str, int], ...]) -> list[str]:
+    lines = [f"{title}:"]
+    lines.extend(f"  {name}: {count}" for name, count in items)
+    if not items:
+        lines.append("  (none)")
+    return lines
+
+
+def _format_human(stats: db.Stats, *, weeks: int) -> str:
+    coverage = (
+        stats.entries_with_feedback / stats.entry_count
+        if stats.entry_count
+        else 0.0
+    )
+    buckets = stats.weekly_buckets[-weeks:] if weeks else ()
+    lines = [
+        f"Entries: {stats.entry_count}",
+        f"People: {stats.people_count}",
+        f"Tags: {stats.tag_count}",
+        f"Feedback: {stats.feedback_count}",
+        (
+            "Feedback coverage: "
+            f"{stats.entries_with_feedback}/{stats.entry_count} ({coverage:.1%})"
+        ),
+        f"Reviews: {stats.review_count}",
+        f"Goals: {stats.open_goal_count} open, {stats.closed_goal_count} closed",
+        f"First entry: {stats.first_entry or '(none)'}",
+        f"Last entry: {stats.last_entry or '(none)'}",
+        f"Last review: {stats.last_review or '(none)'}",
+        f"Entries/week: {stats.entries_per_week:.2f}",
+        f"Weekly streak: {stats.current_weekly_streak} current, "
+        f"{stats.longest_weekly_streak} longest",
+    ]
+    lines.extend(_format_ranked("Top tags", stats.top_tags))
+    lines.extend(_format_ranked("Top sources", stats.top_sources))
+    lines.extend(_format_ranked("Top people", stats.top_people))
+    lines.append("Recent weeks:")
+    lines.extend(f"  {week}: {count}" for week, count in buckets)
+    if not buckets:
+        lines.append("  (none)")
+    return "\n".join(lines)
+
+
+def cmd_stats(args: argparse.Namespace) -> int:
+    if args.top < 0:
+        raise db.DBError("top must be non-negative")
+    if args.weeks < 0:
+        raise db.DBError("weeks must be non-negative")
+    since = (
+        parse_date_bound(args.since, flag="--since")
+        if args.since is not None
+        else None
+    )
+    until = (
+        parse_date_bound(args.until, flag="--until")
+        if args.until is not None
+        else None
+    )
+    with open_db(args) as conn:
+        summary = db.get_stats(conn, since=since, until=until, top=args.top)
+    if args.json:
+        print_json(stats_to_dict(summary, weeks=args.weeks))
+    else:
+        print(_format_human(summary, weeks=args.weeks))
+    return 0

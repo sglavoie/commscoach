@@ -23,6 +23,16 @@ class Person:
 
 
 @dataclass(frozen=True, slots=True)
+class PersonNote:
+    """Private coaching context stored separately from a person row."""
+
+    person_id: int
+    body: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
 class Entry:
     """A communication entry: something said, sent, or observed."""
 
@@ -61,18 +71,83 @@ class Review:
 
 
 @dataclass(frozen=True, slots=True)
+class Goal:
+    """A concrete coaching goal or short-horizon experiment."""
+
+    id: int
+    title: str
+    detail: str | None
+    status: str
+    person: Person | None
+    review: Review | None
+    outcome: str | None
+    closed_at: str | None
+    created_at: str
+    updated_at: str
+
+    @property
+    def is_open(self) -> bool:
+        return self.status == "active"
+
+
+@dataclass(frozen=True, slots=True)
+class Stats:
+    """Windowed activity and coaching-coverage summary."""
+
+    entry_count: int
+    people_count: int
+    tag_count: int
+    feedback_count: int
+    review_count: int
+    entries_with_feedback: int
+    open_goal_count: int
+    closed_goal_count: int
+    first_entry: str | None
+    last_entry: str | None
+    last_review: str | None
+    entries_per_week: float
+    current_weekly_streak: int
+    longest_weekly_streak: int
+    weekly_buckets: tuple[tuple[str, int], ...] = field(default_factory=tuple)
+    top_tags: tuple[tuple[str, int], ...] = field(default_factory=tuple)
+    top_sources: tuple[tuple[str, int], ...] = field(default_factory=tuple)
+    top_people: tuple[tuple[str, int], ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True, slots=True)
+class PersonHistoryItem:
+    """One prior entry involving a person plus its coaching feedback."""
+
+    entry: Entry
+    feedback: tuple[Feedback, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True, slots=True)
+class PersonContext:
+    """A counterparty enriched with private notes and prior interactions."""
+
+    person: Person
+    notes: str | None
+    history: tuple[PersonHistoryItem, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True, slots=True)
 class EntryContext:
     """Payload returned by ``commscoach context <entry-id>``.
 
-    ``self_person`` is the global self. ``people`` are the entry's linked
-    non-self counterparties. ``prior_feedback`` is feedback already attached
-    to this entry, ordered oldest-first by the DB layer.
+    ``self_person`` is the global self. ``people`` enrich the entry's linked
+    non-self counterparties with notes and history. ``prior_feedback`` is
+    feedback already attached to this entry, ordered oldest-first by the DB
+    layer. With the default limits this payload is roughly 6--10x larger than
+    the original flat context; the CLI exposes each growth limit explicitly.
     """
 
     entry: Entry
     self_person: Person
-    people: tuple[Person, ...]
+    people: tuple[PersonContext, ...]
     prior_feedback: tuple[Feedback, ...]
+    goals: tuple[Goal, ...] = field(default_factory=tuple)
+    prior_reviews: tuple[Review, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,3 +167,4 @@ class ReviewContext:
     scope_limit: int | None
     entries: tuple[ReviewEntryContext, ...] = field(default_factory=tuple)
     prior_reviews: tuple[Review, ...] = field(default_factory=tuple)
+    goals: tuple[Goal, ...] = field(default_factory=tuple)

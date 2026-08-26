@@ -73,13 +73,15 @@ class ReviewContextTests(ReviewTestBase):
         third = self._seed_entry("third")
         self._seed_feedback(second.id, "second note")
         prior = self._seed_review("prior review", [first.id], scope_limit=1)
+        with closing(db.connect(self.db_path)) as conn:
+            goal = db.create_goal(conn, "Practice concise openings")
 
         rc, out, _ = self._run("review", "context", "--limit", "2")
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual(
             set(payload.keys()),
-            {"self", "scope", "entries", "prior_reviews"},
+            {"self", "scope", "entries", "prior_reviews", "goals"},
         )
         self.assertEqual(payload["self"]["handle"], "coach")
         self.assertEqual(
@@ -97,6 +99,7 @@ class ReviewContextTests(ReviewTestBase):
         self.assertEqual(feedback_by_entry[third.id], [])
         self.assertEqual([row["id"] for row in payload["prior_reviews"]], [prior.id])
         self.assertEqual(payload["prior_reviews"][0]["entry_ids"], [first.id])
+        self.assertEqual([row["id"] for row in payload["goals"]], [goal.id])
 
     def test_context_missing_self_exits_one(self) -> None:
         self._seed_entry("orphan")
@@ -166,6 +169,16 @@ class ReviewContextTests(ReviewTestBase):
                 )
         self.assertEqual(ctx.exception.code, 2)
 
+    def test_context_goal_limit_zero(self) -> None:
+        self._seed_self("coach")
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_goal(conn, "goal")
+
+        rc, out, _ = self._run("review", "context", "--goal-limit", "0")
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["goals"], [])
+
 
 class ReviewAddTests(ReviewTestBase):
     def test_add_creates_review_with_default_scope(self) -> None:
@@ -190,6 +203,20 @@ class ReviewAddTests(ReviewTestBase):
         self.assertEqual(review.scope_kind, "latest")
         self.assertEqual(review.scope_limit, 20)
         self.assertEqual([entry.id for entry in review.entries], [second.id, first.id])
+
+    def test_add_without_body_on_non_tty_exits_one_without_writing(self) -> None:
+        entry = self._seed_entry()
+        with mock.patch.object(cli_reviews.sys, "stdin", io.StringIO()):
+            rc, _, err = self._run(
+                "review",
+                "add",
+                "--entry",
+                str(entry.id),
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("body required", err)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.list_reviews(conn), ())
 
     def test_add_json_output_uses_review_shape(self) -> None:
         first = self._seed_entry("first")

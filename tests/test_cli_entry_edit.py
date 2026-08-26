@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import unittest
 from contextlib import closing
+from unittest import mock
 
 from commscoach import db
+from commscoach.cli import entries as cli_entries
 
 from .cli_entry_case import EntryTestBase
 
@@ -21,6 +23,28 @@ class EntryEditTests(EntryTestBase):
             updated = db.get_entry(conn, entry.id)
         assert updated is not None
         self.assertEqual(updated.body, "new body")
+
+    def test_edit_bare_body_opens_editor_seeded_with_current_body(self) -> None:
+        entry = self._seed_entry("old body")
+
+        def compose(*, template: str, preamble: str) -> str:
+            self.assertEqual(template, "old body")
+            self.assertIn("#>", preamble)
+            return "edited body"
+
+        tty = mock.Mock()
+        tty.isatty.return_value = True
+        with mock.patch.object(cli_entries.sys, "stdin", tty), mock.patch.object(
+            cli_entries,
+            "compose_in_editor",
+            side_effect=compose,
+        ):
+            rc, _, _ = self._run("entry", "edit", str(entry.id), "--body")
+        self.assertEqual(rc, 0)
+        with closing(db.connect(self.db_path)) as conn:
+            updated = db.get_entry(conn, entry.id)
+        assert updated is not None
+        self.assertEqual(updated.body, "edited body")
 
     def test_edit_body_from_file(self) -> None:
         entry = self._seed_entry("old body")
@@ -44,14 +68,39 @@ class EntryEditTests(EntryTestBase):
             "--source",
             "email",
             "--occurred-at",
-            "2026-02-02",
+            "2026-02-02T00:00:00+00:00",
         )
         self.assertEqual(rc, 0)
         with closing(db.connect(self.db_path)) as conn:
             updated = db.get_entry(conn, entry.id)
         assert updated is not None
         self.assertEqual(updated.source, "email")
-        self.assertEqual(updated.occurred_at, "2026-02-02")
+        self.assertEqual(updated.occurred_at, "2026-02-02T00:00:00+00:00")
+
+    def test_edit_empty_occurred_at_clears_it(self) -> None:
+        entry = self._seed_entry("body", occurred_at="2026-01-01")
+        rc, _, _ = self._run(
+            "entry", "edit", str(entry.id), "--occurred-at", ""
+        )
+        self.assertEqual(rc, 0)
+        with closing(db.connect(self.db_path)) as conn:
+            updated = db.get_entry(conn, entry.id)
+        assert updated is not None
+        self.assertIsNone(updated.occurred_at)
+
+    def test_edit_bad_occurred_at_exits_one_without_changing_entry(self) -> None:
+        entry = self._seed_entry(
+            "body", occurred_at="2026-01-01T00:00:00+00:00"
+        )
+        rc, _, err = self._run(
+            "entry", "edit", str(entry.id), "--occurred-at", "next week"
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("accepted forms", err)
+        with closing(db.connect(self.db_path)) as conn:
+            updated = db.get_entry(conn, entry.id)
+        assert updated is not None
+        self.assertEqual(updated.occurred_at, "2026-01-01T00:00:00+00:00")
 
     def test_edit_source_empty_string_clears(self) -> None:
         entry = self._seed_entry("body", source="slack")
@@ -171,6 +220,36 @@ class EntryEditTests(EntryTestBase):
             after = db.get_entry(conn, entry.id)
         assert after is not None
         self.assertEqual(set(after.tags), {"keep"})
+
+    def test_edit_unknown_person_with_yes_creates_and_links(self) -> None:
+        entry = self._seed_entry("body")
+        rc, _, _ = self._run(
+            "--yes",
+            "entry",
+            "edit",
+            str(entry.id),
+            "--person",
+            "ghost",
+        )
+        self.assertEqual(rc, 0)
+        with closing(db.connect(self.db_path)) as conn:
+            updated = db.get_entry(conn, entry.id)
+        assert updated is not None
+        self.assertEqual([person.handle for person in updated.people], ["ghost"])
+
+    def test_edit_missing_entry_does_not_auto_create_person(self) -> None:
+        rc, _, err = self._run(
+            "--yes",
+            "entry",
+            "edit",
+            "9999",
+            "--person",
+            "ghost",
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("9999", err)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertIsNone(db.get_person_by_handle(conn, "ghost"))
 
     def test_edit_json_output(self) -> None:
         entry = self._seed_entry("body")

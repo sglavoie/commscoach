@@ -1,8 +1,9 @@
-"""The ``commscoach export`` command: Markdown rendering of the whole DB."""
+"""The ``commscoach export`` command: Markdown or lossless JSON output."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -14,13 +15,23 @@ from .common import open_db, print_err
 def register(subparsers: argparse._SubParsersAction) -> None:
     export_parser = subparsers.add_parser(
         "export",
-        help="Export all entries to Markdown (stdout by default).",
+        help="Export the database as lossy Markdown or restorable JSON.",
+        description=(
+            "Export the database. Markdown is human-readable and lossy; "
+            "JSON is complete and restorable."
+        ),
+    )
+    export_parser.add_argument(
+        "--format",
+        choices=("markdown", "json"),
+        default="markdown",
+        help="Export format: Markdown is readable/lossy; JSON is complete/restorable.",
     )
     export_parser.add_argument(
         "--out",
         default=None,
         metavar="PATH",
-        help="Write Markdown to this file with mode 0600. Default: stdout.",
+        help="Write output to this file with mode 0600. Default: stdout.",
     )
     export_parser.set_defaults(func=cmd_export)
 
@@ -79,10 +90,29 @@ def _format_markdown_review(review: db.Review) -> str:
     return "\n".join(lines)
 
 
+def _format_markdown_goal(goal: db.Goal) -> str:
+    lines: list[str] = [f"### Goal {goal.id} — {goal.title}", ""]
+    lines.append(f"- **Status**: {goal.status}")
+    lines.append(f"- **Created**: {goal.created_at}")
+    if goal.closed_at is not None:
+        lines.append(f"- **Closed**: {goal.closed_at}")
+    if goal.person is not None:
+        lines.append(f"- **Person**: @{goal.person.handle}")
+    if goal.review is not None:
+        lines.append(f"- **Review**: {goal.review.id}")
+    if goal.detail is not None:
+        lines.extend(("", goal.detail.rstrip("\n")))
+    if goal.outcome is not None:
+        lines.extend(("", "#### Outcome", "", goal.outcome.rstrip("\n")))
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _render_markdown_export(
     entries: tuple[db.Entry, ...],
     feedback_by_entry: dict[int, tuple[db.Feedback, ...]],
     reviews: tuple[db.Review, ...],
+    goals: tuple[db.Goal, ...] = (),
 ) -> str:
     sections: list[str] = ["# commscoach export", ""]
     if reviews:
@@ -90,6 +120,12 @@ def _render_markdown_export(
         sections.append("")
         rendered_reviews = [_format_markdown_review(review) for review in reviews]
         sections.append("\n---\n\n".join(rendered_reviews).rstrip("\n"))
+        sections.append("")
+    if goals:
+        sections.append("## Goals")
+        sections.append("")
+        rendered_goals = [_format_markdown_goal(goal) for goal in goals]
+        sections.append("\n---\n\n".join(rendered_goals).rstrip("\n"))
         sections.append("")
     if not entries:
         sections.append("_No entries._")
@@ -107,7 +143,7 @@ def _render_markdown_export(
 
 
 def _write_export_file(out_path: Path, content: str) -> None:
-    """Write the rendered Markdown to ``out_path`` with restricted permissions.
+    """Write rendered export content to ``out_path`` with restricted permissions.
 
     Opens with ``O_CREAT | O_WRONLY | O_TRUNC`` and mode ``0o600`` so a fresh
     file is never world-readable, then calls ``paths.secure_file`` to enforce
@@ -124,12 +160,23 @@ def _write_export_file(out_path: Path, content: str) -> None:
 
 def cmd_export(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
-        reviews = db.list_reviews(conn)
-        entries = db.list_entries(conn)
-        feedback_by_entry = {
-            entry.id: db.list_feedback(conn, entry.id) for entry in entries
-        }
-    rendered = _render_markdown_export(entries, feedback_by_entry, reviews)
+        if args.format == "json":
+            rendered = json.dumps(
+                db.dump_to_dict(conn),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        else:
+            reviews = db.list_reviews(conn)
+            goals = db.list_goals(conn, status=None)
+            entries = db.list_entries(conn)
+            feedback_by_entry = {
+                entry.id: db.list_feedback(conn, entry.id) for entry in entries
+            }
+            rendered = _render_markdown_export(
+                entries, feedback_by_entry, reviews, goals
+            )
     if not rendered.endswith("\n"):
         rendered += "\n"
     if args.out is None:

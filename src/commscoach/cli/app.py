@@ -14,7 +14,19 @@ import argparse
 from typing import Callable
 
 from .. import __version__, db
-from . import context, entries, export, feedback, people, reviews
+from . import (
+    backup,
+    context,
+    doctor,
+    entries,
+    export,
+    feedback,
+    goals,
+    people,
+    porting,
+    reviews,
+    stats,
+)
 from .common import print_err, print_json, resolve_db_path
 
 PROG = "commscoach"
@@ -51,12 +63,17 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
 
     _register_init(subparsers)
+    doctor.register(subparsers)
+    backup.register(subparsers)
     entries.register(subparsers)
     people.register(subparsers)
     feedback.register(subparsers)
+    goals.register(subparsers)
     context.register(subparsers)
     reviews.register(subparsers)
     export.register(subparsers)
+    porting.register(subparsers)
+    stats.register(subparsers)
 
     return parser
 

@@ -13,10 +13,12 @@ import json
 import sqlite3
 import sys
 from contextlib import closing, contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator, TextIO
 
 from .. import db, paths
+from ..timeparse import TimeParseError, parse_when
 
 
 def print_err(message: str, *, stream: TextIO | None = None) -> None:
@@ -56,6 +58,46 @@ def read_body_or_raise(value: str) -> str:
         raise db.DBError(f"cannot read body: {exc}") from exc
 
 
+def read_body_arg(
+    value: str | None,
+    *,
+    what: str,
+    template: str,
+    preamble: str,
+    isatty: Callable[[], bool],
+    compose: Callable[..., str],
+) -> str:
+    """Resolve an optional body argument, composing interactively when omitted."""
+    if value is not None:
+        return read_body_or_raise(value)
+    if not isatty():
+        raise db.DBError(
+            f"{what} required: pass BODY, '-' for stdin, or '@PATH'"
+        )
+    return compose(template=template, preamble=preamble)
+
+
+def parse_when_or_raise(value: str, *, now: datetime | None = None) -> str:
+    """Parse an occurrence timestamp, mapping failures to ``db.DBError``."""
+    try:
+        return parse_when(value, now=now)
+    except TimeParseError as exc:
+        raise db.DBError(str(exc)) from exc
+
+
+def parse_date_bound(
+    value: str,
+    *,
+    flag: str,
+    now: datetime | None = None,
+) -> str:
+    """Parse a CLI date bound and name ``flag`` in any semantic error."""
+    try:
+        return parse_when(value, now=now)[:10]
+    except TimeParseError as exc:
+        raise db.DBError(f"{flag}: {exc}") from exc
+
+
 def confirm(
     prompt: str,
     *,
@@ -83,7 +125,10 @@ def confirm(
 
 def resolve_db_path(args: argparse.Namespace) -> Path:
     """Apply ``--db`` then ``$COMMSCOACH_DB`` then the built-in default."""
-    return paths.resolve_db_path(getattr(args, "db", None))
+    try:
+        return paths.resolve_db_path(getattr(args, "db", None))
+    except paths.LegacyDatabaseMigrationRequired as exc:
+        raise db.DBError(str(exc)) from exc
 
 
 def non_negative_int(value: str) -> int:
@@ -102,6 +147,12 @@ def open_db(args: argparse.Namespace) -> Iterator[Any]:
     """Yield a ``sqlite3.Connection`` resolved from CLI/env/default, closing it on exit."""
     db_path = resolve_db_path(args)
     if not db_path.exists():
+        if paths.icloud_placeholder_for(db_path).exists():
+            raise db.DBError(
+                f"{db_path} is an iCloud placeholder (not downloaded). "
+                "Open its folder in Finder or run 'brctl download', then retry. "
+                "Do NOT run 'commscoach init' — it would create an empty database here."
+            )
         raise db.DBError("run 'commscoach init' first")
     try:
         conn = db.connect(db_path)

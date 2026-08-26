@@ -14,6 +14,7 @@ from unittest import mock
 
 from commscoach import cli, db, paths
 from commscoach.cli import app as cli_app
+from commscoach.cli.common import read_body_arg
 from commscoach.db import schema as db_schema
 
 
@@ -58,6 +59,35 @@ class HelperTests(unittest.TestCase):
     def test_read_body_at_prefix_missing_file_raises(self) -> None:
         with self.assertRaises(FileNotFoundError):
             cli.read_body("@/nonexistent/path/should/not/exist.txt")
+
+    def test_read_body_arg_non_tty_fails_without_composing(self) -> None:
+        compose = mock.Mock()
+        with self.assertRaisesRegex(
+            db.DBError,
+            "body required: pass BODY, '-' for stdin, or '@PATH'",
+        ):
+            read_body_arg(
+                None,
+                what="body",
+                template="",
+                preamble="instructions",
+                isatty=lambda: False,
+                compose=compose,
+            )
+        compose.assert_not_called()
+
+    def test_read_body_arg_composes_on_tty(self) -> None:
+        compose = mock.Mock(return_value="composed")
+        result = read_body_arg(
+            None,
+            what="body",
+            template="seed",
+            preamble="instructions",
+            isatty=lambda: True,
+            compose=compose,
+        )
+        self.assertEqual(result, "composed")
+        compose.assert_called_once_with(template="seed", preamble="instructions")
 
     def test_confirm_assume_yes_skips_prompt(self) -> None:
         calls: list[str] = []
@@ -120,9 +150,25 @@ class ResolveDBPathTests(unittest.TestCase):
 
     def test_falls_through_to_default_when_neither_set(self) -> None:
         args = mock.Mock(spec=["db"], db=None)
-        with mock.patch.dict(os.environ, {}, clear=False):
+        expected = Path("/tmp/default.sqlite3")
+        with mock.patch.dict(os.environ, {}, clear=False), mock.patch.object(
+            paths, "default_db_path", return_value=expected
+        ), mock.patch.object(
+            paths, "LEGACY_ICLOUD_DB_PATH", Path("/tmp/missing-legacy.sqlite3")
+        ):
             os.environ.pop(paths.ENV_VAR, None)
-            self.assertEqual(cli.resolve_db_path(args), paths.DEFAULT_DB_PATH)
+            self.assertEqual(cli.resolve_db_path(args), expected)
+
+    def test_legacy_migration_error_is_a_cli_semantic_error(self) -> None:
+        args = mock.Mock(spec=["db"], db=None)
+        with mock.patch.object(
+            paths,
+            "resolve_db_path",
+            side_effect=paths.LegacyDatabaseMigrationRequired("move the database"),
+        ):
+            with self.assertRaises(db.DBError) as raised:
+                cli.resolve_db_path(args)
+        self.assertEqual(str(raised.exception), "move the database")
 
 
 class InitCommandTests(unittest.TestCase):

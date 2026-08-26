@@ -14,6 +14,7 @@ from .common import (
     print_err,
     print_json,
     read_body,
+    read_body_arg,
     resolve_db_path,
 )
 
@@ -27,5 +28,6 @@ __all__ = [
     "print_err",
     "print_json",
     "read_body",
+    "read_body_arg",
     "resolve_db_path",
 ]

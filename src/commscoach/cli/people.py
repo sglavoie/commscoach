@@ -3,11 +3,26 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any
+from typing import Any, Iterable
 
 from .. import db
-from .common import confirm, open_db, print_json
+from .common import confirm, open_db, print_json, read_body_or_raise
 from .serializers import person_to_dict
+
+
+def ensure_people(
+    conn: Any,
+    handles: Iterable[str],
+    *,
+    assume_yes: bool,
+) -> None:
+    """Confirm and create any people handles that do not already exist."""
+    for handle in handles:
+        if db.get_person_by_handle(conn, handle) is not None:
+            continue
+        if not confirm(f"Create person @{handle}?", assume_yes=assume_yes):
+            raise db.PersonNotFoundError(handle)
+        db.create_person(conn, handle, name=None)
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -42,7 +57,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     show.add_argument("handle", metavar="HANDLE")
     show.set_defaults(func=cmd_person_show)
 
-    edit = person_sub.add_parser("edit", help="Update handle or name for a person.")
+    edit = person_sub.add_parser(
+        "edit", help="Update handle, name, or private notes for a person."
+    )
     edit.add_argument("handle", metavar="HANDLE", help="Existing handle to update.")
     edit.add_argument(
         "--handle",
@@ -55,6 +72,18 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--name",
         default=None,
         help="Replace the name. Pass an empty string to clear it.",
+    )
+    notes = edit.add_mutually_exclusive_group()
+    notes.add_argument(
+        "--notes",
+        default=None,
+        metavar="TEXT|-|@PATH",
+        help="Set private notes from text, stdin, or a UTF-8 file.",
+    )
+    notes.add_argument(
+        "--clear-notes",
+        action="store_true",
+        help="Remove existing private notes.",
     )
     edit.set_defaults(func=cmd_person_edit)
 
@@ -91,15 +120,22 @@ def _emit_person(
     person: db.Person,
     *,
     human_prefix: str | None = None,
+    note: db.PersonNote | None = None,
+    include_notes: bool = False,
 ) -> None:
     if args.json:
-        print_json(person_to_dict(person))
+        payload = person_to_dict(person)
+        if include_notes:
+            payload["notes"] = note.body if note is not None else None
+        print_json(payload)
         return
     line = _format_person_human(person)
     if human_prefix:
         print(f"{human_prefix} {line}")
     else:
         print(line)
+    if include_notes and note is not None:
+        print(f"\nNotes:\n{note.body}")
 
 
 def _emit_people(args: argparse.Namespace, people: tuple[db.Person, ...]) -> None:
@@ -135,7 +171,8 @@ def cmd_person_add(args: argparse.Namespace) -> int:
 def cmd_person_show(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         person = _resolve_existing_person(conn, args.handle)
-    _emit_person(args, person)
+        note = db.get_person_note(conn, person.id)
+    _emit_person(args, person, note=note, include_notes=True)
     return 0
 
 
@@ -145,13 +182,25 @@ def cmd_person_edit(args: argparse.Namespace) -> int:
         update_kwargs["handle"] = args.new_handle
     if args.name is not None:
         update_kwargs["name"] = args.name if args.name else None
+    note_body = read_body_or_raise(args.notes) if args.notes is not None else None
 
-    if not update_kwargs:
-        raise db.DBError("person edit requires at least one of --handle/--name")
+    if not update_kwargs and note_body is None and not args.clear_notes:
+        raise db.DBError(
+            "person edit requires at least one of"
+            " --handle/--name/--notes/--clear-notes"
+        )
 
     with open_db(args) as conn:
         person = _resolve_existing_person(conn, args.handle)
-        updated = db.update_person(conn, person.id, **update_kwargs)
+        updated = (
+            db.update_person(conn, person.id, **update_kwargs)
+            if update_kwargs
+            else person
+        )
+        if note_body is not None:
+            db.set_person_note(conn, person.id, note_body)
+        elif args.clear_notes:
+            db.clear_person_note(conn, person.id)
     _emit_person(args, updated, human_prefix="updated")
     return 0
 

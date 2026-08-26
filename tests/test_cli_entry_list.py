@@ -5,9 +5,10 @@ from __future__ import annotations
 import io
 import json
 import unittest
-from contextlib import redirect_stderr
+from contextlib import closing, redirect_stderr
+from datetime import datetime, timedelta, timezone
 
-from commscoach import cli
+from commscoach import cli, db
 
 from .cli_entry_case import EntryTestBase
 
@@ -68,6 +69,27 @@ class EntryListTests(EntryTestBase):
         self.assertEqual([p["id"] for p in payload], [second.id, first.id])
         self.assertEqual(payload[0]["tags"], ["hello"])
 
+    def test_list_filters_by_inclusive_date_bounds(self) -> None:
+        included = self._seed_entry(
+            "included", occurred_at="2026-06-02T23:59:59+00:00"
+        )
+        self._seed_entry("too early", occurred_at="2026-05-31T23:59:59+00:00")
+        self._seed_entry("too late", occurred_at="2026-06-03T00:00:00+00:00")
+
+        rc, out, _ = self._run(
+            "entry", "list", "--since", "2026-06-01", "--until", "2026-06-02"
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertIn(f"[{included.id}]", out)
+        self.assertNotIn("too early", out)
+        self.assertNotIn("too late", out)
+
+    def test_list_bad_since_exits_one_and_names_flag(self) -> None:
+        rc, _, err = self._run("entry", "list", "--since", "not-a-date")
+        self.assertEqual(rc, 1)
+        self.assertIn("--since", err)
+
 
 class EntrySearchTests(EntryTestBase):
     def test_search_by_query_substring_case_insensitive(self) -> None:
@@ -77,6 +99,16 @@ class EntrySearchTests(EntryTestBase):
         self.assertEqual(rc, 0)
         self.assertIn(f"[{match.id}]", out)
         self.assertNotIn("standup", out.lower())
+
+    def test_search_exact_finds_midword_substring(self) -> None:
+        match = self._seed_entry("Quarterly review meeting")
+
+        rc, out, _ = self._run(
+            "entry", "search", "--query", "arter", "--exact"
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertIn(f"[{match.id}]", out)
 
     def test_search_by_tag(self) -> None:
         match = self._seed_entry("body", tags=("review",))
@@ -154,6 +186,68 @@ class EntrySearchTests(EntryTestBase):
                     ]
                 )
         self.assertEqual(ctx.exception.code, 2)
+
+    def test_search_date_bounds_combine_with_existing_filters(self) -> None:
+        self._create_person("alice")
+        match = self._seed_entry(
+            "match",
+            occurred_at="2026-06-10T12:00:00+00:00",
+            tags=("work",),
+            people=("alice",),
+        )
+        self._seed_entry(
+            "wrong date",
+            occurred_at="2026-06-09T23:59:59+00:00",
+            tags=("work",),
+            people=("alice",),
+        )
+
+        rc, out, _ = self._run(
+            "entry",
+            "search",
+            "--tag",
+            "work",
+            "--person",
+            "alice",
+            "--since",
+            "2026-06-10",
+            "--until",
+            "2026-06-10",
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertIn(f"[{match.id}]", out)
+        self.assertNotIn("wrong date", out)
+
+    def test_search_no_feedback_returns_coaching_backlog(self) -> None:
+        backlog = self._seed_entry("needs coaching")
+        reviewed = self._seed_entry("already reviewed")
+
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_feedback(conn, reviewed.id, "done")
+
+        rc, out, _ = self._run("entry", "search", "--no-feedback")
+
+        self.assertEqual(rc, 0)
+        self.assertIn(f"[{backlog.id}]", out)
+        self.assertNotIn("already reviewed", out)
+
+    def test_search_accepts_relative_date_bound(self) -> None:
+        yesterday = datetime.now().astimezone() - timedelta(days=1)
+        match = self._seed_entry(
+            "yesterday entry",
+            occurred_at=yesterday.astimezone(timezone.utc).isoformat(),
+        )
+
+        rc, out, _ = self._run("entry", "search", "--since", "yesterday")
+
+        self.assertEqual(rc, 0)
+        self.assertIn(f"[{match.id}]", out)
+
+    def test_search_bad_until_exits_one_and_names_flag(self) -> None:
+        rc, _, err = self._run("entry", "search", "--until", "not-a-date")
+        self.assertEqual(rc, 1)
+        self.assertIn("--until", err)
 
 
 if __name__ == "__main__":

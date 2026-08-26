@@ -15,12 +15,13 @@ def normalize_tag_list(tags: Iterable[str]) -> list[str]:
     """Normalize and de-duplicate a tag iterable, dropping empties."""
     seen: set[str] = set()
     result: list[str] = []
-    for tag in tags:
-        normalized = normalize_tag(tag)
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        result.append(normalized)
+    for value in tags:
+        for tag in value.split(","):
+            normalized = normalize_tag(tag)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(normalized)
     return result
 
 

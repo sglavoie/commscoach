@@ -9,10 +9,15 @@ from commscoach.models import (
     Entry,
     EntryContext,
     Feedback,
+    Goal,
     Person,
+    PersonContext,
+    PersonHistoryItem,
+    PersonNote,
     Review,
     ReviewContext,
     ReviewEntryContext,
+    Stats,
 )
 
 
@@ -67,6 +72,23 @@ def _make_review(**overrides):
     return Review(**base)
 
 
+def _make_goal(**overrides):
+    base = dict(
+        id=30,
+        title="Ask a clarifying question",
+        detail=None,
+        status="active",
+        person=None,
+        review=None,
+        outcome=None,
+        closed_at=None,
+        created_at="2026-06-20T12:00:00Z",
+        updated_at="2026-06-20T12:00:00Z",
+    )
+    base.update(overrides)
+    return Goal(**base)
+
+
 class PersonTests(unittest.TestCase):
     def test_is_frozen(self):
         person = _make_person()
@@ -76,6 +98,19 @@ class PersonTests(unittest.TestCase):
     def test_optional_name_allows_none(self):
         person = _make_person(name=None)
         self.assertIsNone(person.name)
+
+
+class PersonNoteTests(unittest.TestCase):
+    def test_is_frozen_and_holds_side_table_fields(self):
+        note = PersonNote(
+            person_id=1,
+            body="context",
+            created_at="2026-06-20T00:00:00Z",
+            updated_at="2026-06-20T00:00:00Z",
+        )
+        self.assertEqual(note.person_id, 1)
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            note.body = "changed"  # type: ignore[misc]
 
 
 class EntryTests(unittest.TestCase):
@@ -126,6 +161,51 @@ class ReviewTests(unittest.TestCase):
             review.body = "changed"  # type: ignore[misc]
 
 
+class GoalTests(unittest.TestCase):
+    def test_is_open_is_derived_from_status(self):
+        self.assertTrue(_make_goal().is_open)
+        self.assertFalse(
+            _make_goal(status="done", closed_at="2026-06-21T00:00:00Z").is_open
+        )
+
+    def test_relationships_and_optional_fields(self):
+        person = _make_person()
+        review = _make_review()
+        goal = _make_goal(person=person, review=review, detail="detail")
+        self.assertEqual(goal.person, person)
+        self.assertEqual(goal.review, review)
+        self.assertEqual(goal.detail, "detail")
+
+    def test_is_frozen(self):
+        goal = _make_goal()
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            goal.title = "changed"  # type: ignore[misc]
+
+
+class StatsTests(unittest.TestCase):
+    def test_collection_defaults_and_frozen_contract(self):
+        stats = Stats(
+            entry_count=0,
+            people_count=0,
+            tag_count=0,
+            feedback_count=0,
+            review_count=0,
+            entries_with_feedback=0,
+            open_goal_count=0,
+            closed_goal_count=0,
+            first_entry=None,
+            last_entry=None,
+            last_review=None,
+            entries_per_week=0.0,
+            current_weekly_streak=0,
+            longest_weekly_streak=0,
+        )
+        self.assertEqual(stats.weekly_buckets, ())
+        self.assertEqual(stats.top_tags, ())
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            stats.entry_count = 1  # type: ignore[misc]
+
+
 class EntryContextTests(unittest.TestCase):
     def test_holds_aggregated_payload(self):
         self_person = _make_person(id=1, handle="me", is_self=True)
@@ -141,11 +221,11 @@ class EntryContextTests(unittest.TestCase):
         context = EntryContext(
             entry=entry,
             self_person=self_person,
-            people=(other,),
+            people=(PersonContext(person=other, notes=None),),
             prior_feedback=(feedback,),
         )
         self.assertTrue(context.self_person.is_self)
-        self.assertEqual(context.people, (other,))
+        self.assertEqual(context.people[0].person, other)
         self.assertEqual(context.prior_feedback[0].entry_id, entry.id)
 
     def test_is_frozen(self):
@@ -156,6 +236,25 @@ class EntryContextTests(unittest.TestCase):
         )
         with self.assertRaises(dataclasses.FrozenInstanceError):
             context.people = ()  # type: ignore[misc]
+
+
+class PersonContextTests(unittest.TestCase):
+    def test_holds_notes_and_oldest_first_history_items(self):
+        person = _make_person()
+        older = PersonHistoryItem(
+            entry=_make_entry(id=8),
+            feedback=(_make_feedback(entry_id=8),),
+        )
+        newer = PersonHistoryItem(entry=_make_entry(id=9))
+        context = PersonContext(
+            person=person,
+            notes="Prefers direct feedback",
+            history=(older, newer),
+        )
+        self.assertEqual(context.person, person)
+        self.assertEqual(context.notes, "Prefers direct feedback")
+        self.assertEqual([item.entry.id for item in context.history], [8, 9])
+        self.assertEqual(context.history[0].feedback[0].entry_id, 8)
 
 
 class ReviewEntryContextTests(unittest.TestCase):
@@ -185,6 +284,7 @@ class ReviewContextTests(unittest.TestCase):
         )
         self.assertEqual(context.entries, ())
         self.assertEqual(context.prior_reviews, ())
+        self.assertEqual(context.goals, ())
 
     def test_holds_review_payload(self):
         self_person = _make_person(handle="me", is_self=True)

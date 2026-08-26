@@ -19,7 +19,11 @@ from commscoach.db import common
 
 
 def patch_timestamps(*values: str) -> Any:
-    """Patch the DB clock so ``created_at``/``updated_at`` follow ``values``."""
+    """Patch the DB clock so ``created_at``/``updated_at`` follow ``values``.
+
+    Opaque fakes such as ``"e0"`` are not valid operands for date-filter tests;
+    those tests must supply canonical ISO timestamps.
+    """
     return mock.patch.object(
         common, "utcnow_iso", side_effect=iter(values).__next__
     )

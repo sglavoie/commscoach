@@ -31,6 +31,12 @@ class ReviewNotFoundError(DBError):
         self.review_id = review_id
 
 
+class GoalNotFoundError(DBError):
+    def __init__(self, goal_id: int) -> None:
+        super().__init__(f"goal {goal_id} not found")
+        self.goal_id = goal_id
+
+
 class DuplicateHandleError(DBError):
     def __init__(self, handle: str) -> None:
         super().__init__(f"handle {handle!r} already exists")

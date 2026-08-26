@@ -1,4 +1,4 @@
-"""Tests for SQLite schema v2, idempotent init, and DB-level invariants.
+"""Tests for SQLite schema v3, idempotent init, and DB-level invariants.
 
 These tests use temporary DB files exclusively so the default user DB is never
 mutated.
@@ -13,6 +13,7 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest import mock
 
 from commscoach import db, paths
 from commscoach.db import schema as db_schema
@@ -28,6 +29,8 @@ _EXPECTED_TABLES = {
     "feedback",
     "reviews",
     "review_entries",
+    "goals",
+    "person_notes",
 }
 
 _NOW = "2026-06-20T00:00:00Z"
@@ -62,10 +65,13 @@ class InitDbSchemaTests(unittest.TestCase):
         db.init_db(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
             indexes = _index_names(conn)
+            effective_index_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'idx_entries_effective_at'"
+            ).fetchone()["sql"]
         for required in (
             "idx_people_handle_lower",
             "idx_people_one_self",
-            "idx_entries_occurred_at",
+            "idx_entries_effective_at",
             "idx_entries_created_at",
             "idx_entry_tags_tag_id",
             "idx_entry_people_person_id",
@@ -74,13 +80,94 @@ class InitDbSchemaTests(unittest.TestCase):
             "idx_reviews_created_at",
             "idx_review_entries_entry_id",
             "idx_review_entries_review_position",
+            "idx_goals_status",
+            "idx_goals_person_id",
+            "idx_goals_review_id",
         ):
             self.assertIn(required, indexes)
+        self.assertIn(
+            "COALESCE(occurred_at, created_at) DESC", effective_index_sql
+        )
 
     def test_init_stamps_schema_version(self) -> None:
         db.init_db(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
-            self.assertEqual(db.get_schema_version(conn), db.SCHEMA_VERSION)
+            self.assertEqual(db.SCHEMA_VERSION, 3)
+            self.assertEqual(db.get_schema_version(conn), 3)
+
+    def test_init_feature_detects_fts5_and_creates_sync_triggers(self) -> None:
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT value FROM _meta WHERE key = 'fts5'"
+                ).fetchone()["value"],
+                "1",
+            )
+            self.assertIn("entries_fts", _table_names(conn))
+            self.assertNotIn("entries_fts", db_schema.EXPECTED_TABLES)
+            fts_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'entries_fts'"
+            ).fetchone()["sql"]
+            triggers = {
+                row["name"]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+                )
+            }
+            db.validate_schema(conn)
+        self.assertIn("content='entries'", fts_sql)
+        self.assertIn("content_rowid='id'", fts_sql)
+        self.assertIn("tokenize='unicode61 remove_diacritics 2'", fts_sql)
+        self.assertEqual(
+            triggers,
+            {
+                "entries_fts_after_insert",
+                "entries_fts_after_delete",
+                "entries_fts_after_update",
+            },
+        )
+
+    def test_init_stamps_fts5_zero_when_probe_fails(self) -> None:
+        with mock.patch.object(db_schema, "_probe_fts5", return_value=False):
+            db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT value FROM _meta WHERE key = 'fts5'"
+                ).fetchone()["value"],
+                "0",
+            )
+            self.assertNotIn("entries_fts", _table_names(conn))
+            match = db.create_entry(conn, "Quarterly planning")
+            self.assertEqual(
+                [entry.id for entry in db.search_entries(conn, query="arter")],
+                [match.id],
+            )
+
+    def test_init_backfills_fts_once_when_counts_differ(self) -> None:
+        paths.ensure_data_dir(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            conn.executescript(db_schema.SCHEMA_V1_SQL)
+            conn.execute(
+                "INSERT INTO entries (body, source, occurred_at, created_at, updated_at)"
+                " VALUES ('legacy searchable body', NULL, NULL, ?, ?)",
+                (_NOW, _NOW),
+            )
+            conn.commit()
+
+        with mock.patch.object(
+            db_schema, "_rebuild_fts5", wraps=db_schema._rebuild_fts5
+        ) as rebuild:
+            db.init_db(self.db_path)
+            db.init_db(self.db_path)
+
+        rebuild.assert_called_once()
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(
+                [entry.body for entry in db.search_entries(conn, query="searchable")],
+                ["legacy searchable body"],
+            )
 
     def test_init_returns_resolved_path(self) -> None:
         returned = db.init_db(self.db_path)
@@ -119,6 +206,9 @@ class InitDbSchemaTests(unittest.TestCase):
         with closing(db.connect(self.db_path)) as conn:
             conn.executescript(db_schema.SCHEMA_V1_SQL)
             conn.execute(
+                "CREATE INDEX idx_entries_occurred_at ON entries (occurred_at)"
+            )
+            conn.execute(
                 "INSERT INTO _meta (key, value) VALUES ('schema_version', '1')"
             )
             conn.execute(
@@ -128,8 +218,19 @@ class InitDbSchemaTests(unittest.TestCase):
             )
             conn.execute(
                 "INSERT INTO entries (body, source, occurred_at, created_at, updated_at)"
-                " VALUES (?, ?, NULL, ?, ?)",
-                ("original entry", "email", _NOW, _NOW),
+                " VALUES (?, ?, ?, ?, ?)",
+                (
+                    "original entry",
+                    "email",
+                    "2026-06-20T14:00:00-04:00",
+                    _NOW,
+                    _NOW,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO entries (body, source, occurred_at, created_at, updated_at)"
+                " VALUES (?, NULL, ?, ?, ?)",
+                ("unparseable entry", "legacy-value", _NOW, _NOW),
             )
             conn.commit()
 
@@ -139,9 +240,57 @@ class InitDbSchemaTests(unittest.TestCase):
             self.assertEqual(db.get_schema_version(conn), db.SCHEMA_VERSION)
             self.assertTrue(_EXPECTED_TABLES.issubset(_table_names(conn)))
             person = conn.execute("SELECT handle, name FROM people").fetchone()
-            entry = conn.execute("SELECT body, source FROM entries").fetchone()
+            entries = conn.execute(
+                "SELECT body, source, occurred_at FROM entries ORDER BY id"
+            ).fetchall()
             self.assertEqual(dict(person), {"handle": "me", "name": "Me"})
-            self.assertEqual(dict(entry), {"body": "original entry", "source": "email"})
+            self.assertEqual(
+                dict(entries[0]),
+                {
+                    "body": "original entry",
+                    "source": "email",
+                    "occurred_at": "2026-06-20T18:00:00+00:00",
+                },
+            )
+            self.assertEqual(entries[1]["occurred_at"], "legacy-value")
+            indexes = _index_names(conn)
+            self.assertIn("idx_entries_effective_at", indexes)
+            self.assertNotIn("idx_entries_occurred_at", indexes)
+
+    def test_init_migrates_v2_database_without_data_loss(self) -> None:
+        paths.ensure_data_dir(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            conn.executescript(db_schema.SCHEMA_V1_SQL)
+            conn.executescript(db_schema.SCHEMA_V2_SQL)
+            conn.execute(
+                "INSERT INTO _meta (key, value) VALUES ('schema_version', '2')"
+            )
+            conn.execute(
+                "INSERT INTO entries (body, source, occurred_at, created_at, updated_at)"
+                " VALUES ('kept entry', NULL, NULL, ?, ?)",
+                (_NOW, _NOW),
+            )
+            conn.execute(
+                "INSERT INTO reviews"
+                " (body, scope_kind, scope_limit, created_at, updated_at)"
+                " VALUES ('kept review', 'latest', 1, ?, ?)",
+                (_NOW, _NOW),
+            )
+            conn.commit()
+
+        db.init_db(self.db_path)
+
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.get_schema_version(conn), 3)
+            self.assertTrue(_EXPECTED_TABLES.issubset(_table_names(conn)))
+            self.assertEqual(
+                conn.execute("SELECT body FROM entries").fetchone()["body"],
+                "kept entry",
+            )
+            self.assertEqual(
+                conn.execute("SELECT body FROM reviews").fetchone()["body"],
+                "kept review",
+            )
 
     def test_init_resolves_default_path_when_none(self) -> None:
         fake_db = Path(self._tmp.name) / "from-env.sqlite3"
@@ -169,6 +318,13 @@ class ConnectionTests(unittest.TestCase):
         with closing(db.connect(self.db_path)) as conn:
             (fk_on,) = conn.execute("PRAGMA foreign_keys").fetchone()
             self.assertEqual(fk_on, 1)
+
+    def test_connection_pins_delete_journal_mode(self) -> None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute("PRAGMA journal_mode = WAL")
+        with closing(db.connect(self.db_path)) as conn:
+            (mode,) = conn.execute("PRAGMA journal_mode").fetchone()
+            self.assertEqual(mode.lower(), "delete")
 
     def test_connection_returns_row_objects(self) -> None:
         with closing(db.connect(self.db_path)) as conn:

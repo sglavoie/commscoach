@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Iterable
+from datetime import date, timedelta
+from typing import Any, Iterable, Literal
 
 from ..models import Entry
+from ..timeparse import TimeParseError, parse_when
 from . import common, tags as tags_mod
 from .errors import DBError, EntryNotFoundError
 from .people import resolve_person_handles
 from .rows import hydrate_entry
+
+
+def _validate_occurred_at(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise DBError("occurred_at must be a string or None")
+    try:
+        return parse_when(value)
+    except TimeParseError as exc:
+        raise DBError(f"invalid occurred_at: {exc}") from exc
 
 
 def create_entry(
@@ -29,6 +42,7 @@ def create_entry(
     """
     if not body or not body.strip():
         raise DBError("entry body must be a non-empty string")
+    occurred_at = _validate_occurred_at(occurred_at)
     normalized_tags = tags_mod.normalize_tag_list(tags)
     resolved_people = resolve_person_handles(conn, people)
     now = common.utcnow_iso()
@@ -83,6 +97,7 @@ def update_entry(
         column_updates.append("source = ?")
         params.append(source)
     if occurred_at is not common.UNSET:
+        occurred_at = _validate_occurred_at(occurred_at)
         column_updates.append("occurred_at = ?")
         params.append(occurred_at)
 
@@ -139,17 +154,37 @@ def get_entry(conn: sqlite3.Connection, entry_id: int) -> Entry | None:
 def list_entries(
     conn: sqlite3.Connection,
     *,
+    since: str | None = None,
+    until: str | None = None,
     limit: int | None = None,
 ) -> tuple[Entry, ...]:
-    """Return entries newest-first by ``created_at``, optionally bounded by ``limit``."""
-    if limit is not None and limit < 0:
+    """Return entries newest-first, optionally bounded by date and count."""
+    return search_entries(
+        conn,
+        since=since,
+        until=until,
+        limit=limit,
+    )
+
+
+def list_entries_with_person(
+    conn: sqlite3.Connection,
+    person_id: int,
+    *,
+    exclude_entry_id: int,
+    limit: int,
+) -> tuple[Entry, ...]:
+    """Return one person's other entries newest-first, capped by ``limit``."""
+    if limit < 0:
         raise DBError("limit must be non-negative")
-    sql = "SELECT * FROM entries ORDER BY created_at DESC, id DESC"
-    params: list[Any] = []
-    if limit is not None:
-        sql += " LIMIT ?"
-        params.append(limit)
-    rows = conn.execute(sql, params).fetchall()
+    rows = conn.execute(
+        "SELECT e.* FROM entries e"
+        " JOIN entry_people ep ON ep.entry_id = e.id"
+        " WHERE ep.person_id = ? AND e.id != ?"
+        " ORDER BY COALESCE(e.occurred_at, e.created_at) DESC, e.id DESC"
+        " LIMIT ?",
+        (person_id, exclude_entry_id, limit),
+    ).fetchall()
     return tuple(hydrate_entry(conn, row) for row in rows)
 
 
@@ -169,21 +204,44 @@ def search_entries(
     query: str | None = None,
     tag: str | None = None,
     person_handle: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    without_feedback: bool = False,
     limit: int | None = None,
+    mode: Literal["auto", "like", "fts"] = "auto",
 ) -> tuple[Entry, ...]:
-    """Filter entries by body substring, tag name, and/or person handle.
+    """Filter entries by content, relationships, effective date, and feedback.
 
-    All filters combine with AND. ``query`` is a case-insensitive LIKE against
-    ``entries.body``; ``tag`` matches the normalized tag name;
-    ``person_handle`` matches case-insensitively. Results are newest-first.
+    All filters combine with AND. ``query`` uses FTS5 when ``mode`` is ``auto``
+    and the initialized database advertises support, while ``like`` forces a
+    case-insensitive substring match and ``fts`` explicitly requests FTS5.
+    Malformed automatic FTS queries silently retry with LIKE. ``tag`` matches
+    the normalized tag name; ``person_handle`` matches case-insensitively.
+    ``since`` and ``until`` are
+    inclusive ISO dates applied to ``COALESCE(occurred_at, created_at)``;
+    ``without_feedback`` selects the coaching backlog. Results are newest-first.
     """
     if limit is not None and limit < 0:
         raise DBError("limit must be non-negative")
+    if mode not in {"auto", "like", "fts"}:
+        raise DBError("mode must be one of: auto, like, fts")
     where: list[str] = []
     params: list[Any] = []
+    use_fts = False
     if query:
-        where.append("e.body LIKE ? COLLATE NOCASE")
-        params.append(f"%{query}%")
+        fts_row = conn.execute(
+            "SELECT value FROM _meta WHERE key = 'fts5'"
+        ).fetchone()
+        fts_enabled = fts_row is not None and fts_row[0] == "1"
+        if mode == "fts" and not fts_enabled:
+            raise DBError("FTS5 search is unavailable")
+        use_fts = mode in {"auto", "fts"} and fts_enabled
+        if use_fts:
+            where.append("entries_fts MATCH ?")
+            params.append(query)
+        else:
+            where.append("e.body LIKE ? COLLATE NOCASE")
+            params.append(f"%{query}%")
     if tag:
         where.append(
             "EXISTS ("
@@ -200,12 +258,50 @@ def search_entries(
             " WHERE ep.entry_id = e.id AND LOWER(p.handle) = LOWER(?))"
         )
         params.append(person_handle)
+    if since is not None:
+        try:
+            since = date.fromisoformat(since).isoformat()
+        except (TypeError, ValueError) as exc:
+            raise DBError("since must be an ISO date (YYYY-MM-DD)") from exc
+        where.append("COALESCE(e.occurred_at, e.created_at) >= ?")
+        params.append(since)
+    if until is not None:
+        try:
+            until_exclusive = (
+                date.fromisoformat(until) + timedelta(days=1)
+            ).isoformat()
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise DBError("until must be an ISO date (YYYY-MM-DD)") from exc
+        where.append("COALESCE(e.occurred_at, e.created_at) < ?")
+        params.append(until_exclusive)
+    if without_feedback:
+        where.append(
+            "NOT EXISTS ("
+            "SELECT 1 FROM feedback f WHERE f.entry_id = e.id)"
+        )
     sql = "SELECT e.* FROM entries e"
+    if use_fts:
+        sql += " JOIN entries_fts ON entries_fts.rowid = e.id"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY e.created_at DESC, e.id DESC"
+    sql += " ORDER BY COALESCE(e.occurred_at, e.created_at) DESC, e.id DESC"
     if limit is not None:
         sql += " LIMIT ?"
         params.append(limit)
-    rows = conn.execute(sql, params).fetchall()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    except sqlite3.OperationalError:
+        if not use_fts or mode != "auto":
+            raise
+        return search_entries(
+            conn,
+            query=query,
+            tag=tag,
+            person_handle=person_handle,
+            since=since,
+            until=until,
+            without_feedback=without_feedback,
+            limit=limit,
+            mode="like",
+        )
     return tuple(hydrate_entry(conn, row) for row in rows)

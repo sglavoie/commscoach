@@ -138,6 +138,21 @@ class PersonShowTests(PeopleTestBase):
         self.assertEqual(payload["handle"], "alice")
         self.assertEqual(payload["name"], "Alice")
         self.assertTrue(payload["is_self"])
+        self.assertIsNone(payload["notes"])
+
+    def test_show_renders_notes_human_and_json(self) -> None:
+        person = self._seed_person("alice")
+        with closing(db.connect(self.db_path)) as conn:
+            db.set_person_note(conn, person.id, "Prefers async updates\nAsk why.")
+
+        rc, out, _ = self._run("person", "show", "alice")
+        self.assertEqual(rc, 0)
+        self.assertIn("Notes:", out)
+        self.assertIn("Prefers async updates\nAsk why.", out)
+
+        rc, out, _ = self._run("--json", "person", "show", "alice")
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["notes"], "Prefers async updates\nAsk why.")
 
 
 class PersonEditTests(PeopleTestBase):
@@ -208,6 +223,75 @@ class PersonEditTests(PeopleTestBase):
         payload = json.loads(out)
         self.assertEqual(payload["handle"], "alice")
         self.assertEqual(payload["name"], "Alice")
+
+    def test_edit_notes_from_literal_stdin_and_file(self) -> None:
+        person = self._seed_person("alice")
+
+        rc, _, _ = self._run("person", "edit", "alice", "--notes", "literal")
+        self.assertEqual(rc, 0)
+        rc, _, _ = self._run(
+            "person", "edit", "alice", "--notes", "-", stdin=io.StringIO("stdin\n")
+        )
+        self.assertEqual(rc, 0)
+        note_path = self.tmpdir / "note.txt"
+        note_path.write_text("from file", encoding="utf-8")
+        rc, _, _ = self._run(
+            "person", "edit", "alice", "--notes", f"@{note_path}"
+        )
+        self.assertEqual(rc, 0)
+
+        with closing(db.connect(self.db_path)) as conn:
+            note = db.get_person_note(conn, person.id)
+        assert note is not None
+        self.assertEqual(note.body, "from file")
+
+    def test_edit_clear_notes(self) -> None:
+        person = self._seed_person("alice")
+        with closing(db.connect(self.db_path)) as conn:
+            db.set_person_note(conn, person.id, "note")
+
+        rc, _, _ = self._run("person", "edit", "alice", "--clear-notes")
+
+        self.assertEqual(rc, 0)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertIsNone(db.get_person_note(conn, person.id))
+
+    def test_edit_notes_and_clear_notes_are_mutually_exclusive(self) -> None:
+        self._seed_person("alice")
+        err_buf = io.StringIO()
+        with redirect_stderr(err_buf), self.assertRaises(SystemExit) as raised:
+            cli.main(
+                [
+                    "--db",
+                    str(self.db_path),
+                    "person",
+                    "edit",
+                    "alice",
+                    "--notes",
+                    "note",
+                    "--clear-notes",
+                ]
+            )
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("not allowed with argument", err_buf.getvalue())
+
+    def test_edit_notes_file_error_exits_one_without_mutating_person(self) -> None:
+        person = self._seed_person("alice", name="Original")
+        rc, _, err = self._run(
+            "person",
+            "edit",
+            "alice",
+            "--name",
+            "Changed",
+            "--notes",
+            "@/definitely/missing/person-note.txt",
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("cannot read body", err)
+        with closing(db.connect(self.db_path)) as conn:
+            unchanged = db.get_person(conn, person.id)
+        assert unchanged is not None
+        self.assertEqual(unchanged.name, "Original")
 
 
 class PersonListTests(PeopleTestBase):

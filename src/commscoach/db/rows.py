@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from ..models import Entry, Feedback, Person, Review
+from ..models import Entry, Feedback, Goal, Person, Review
 
 
 def row_to_person(row: sqlite3.Row) -> Person:
@@ -83,4 +83,29 @@ def hydrate_review(conn: sqlite3.Connection, row: sqlite3.Row) -> Review:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         entries=load_review_entries(conn, row["id"]),
+    )
+
+
+def hydrate_goal(conn: sqlite3.Connection, row: sqlite3.Row) -> Goal:
+    person_row = None
+    if row["person_id"] is not None:
+        person_row = conn.execute(
+            "SELECT * FROM people WHERE id = ?", (row["person_id"],)
+        ).fetchone()
+    review_row = None
+    if row["review_id"] is not None:
+        review_row = conn.execute(
+            "SELECT * FROM reviews WHERE id = ?", (row["review_id"],)
+        ).fetchone()
+    return Goal(
+        id=row["id"],
+        title=row["title"],
+        detail=row["detail"],
+        status=row["status"],
+        person=row_to_person(person_row) if person_row is not None else None,
+        review=hydrate_review(conn, review_row) if review_row is not None else None,
+        outcome=row["outcome"],
+        closed_at=row["closed_at"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from typing import Any
 
 from .. import db
@@ -10,10 +11,17 @@ from .common import (
     confirm,
     non_negative_int,
     open_db,
+    parse_date_bound,
+    parse_when_or_raise,
     print_json,
-    read_body_or_raise,
+    read_body_arg,
 )
+from .editor import compose_in_editor
+from .people import ensure_people
 from .serializers import entry_to_dict
+
+
+ENTRY_PREAMBLE = "Write the entry body below. Lines beginning with #> are ignored."
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -34,7 +42,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add = entry_sub.add_parser("add", help="Create a new entry.")
     add.add_argument(
         "body",
-        help="Entry body (literal text, '-' for stdin, or '@PATH' for a UTF-8 file).",
+        nargs="?",
+        default=None,
+        help=(
+            "Entry body (literal text, '-' for stdin, '@PATH' for a UTF-8 file,"
+            " or omit to open $EDITOR)."
+        ),
     )
     add.add_argument(
         "--source",
@@ -46,7 +59,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         dest="occurred_at",
         default=None,
         metavar="TS",
-        help="Optional ISO-8601 timestamp when the communication happened.",
+        help="When it happened (ISO-8601 or a supported relative timestamp).",
     )
     add.add_argument(
         "--tag",
@@ -74,8 +87,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     edit.add_argument("entry_id", type=int, metavar="ENTRY_ID")
     edit.add_argument(
         "--body",
+        nargs="?",
+        const="",
         default=None,
-        help="Replace the body (literal text, '-' for stdin, or '@PATH' for a file).",
+        help=(
+            "Replace the body (text, '-', or '@PATH'); omit the value to open"
+            " $EDITOR with the current body."
+        ),
     )
     edit.add_argument(
         "--source",
@@ -87,7 +105,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         dest="occurred_at",
         default=None,
         metavar="TS",
-        help="Replace occurred_at. Pass an empty string to clear it.",
+        help="Replace occurred_at (ISO-8601/relative); empty clears it.",
     )
     edit.add_argument(
         "--tag",
@@ -127,6 +145,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="N",
         help="Cap the number of entries returned.",
     )
+    _add_date_bounds(lst)
     lst.set_defaults(func=cmd_entry_list)
 
     srch = entry_sub.add_parser(
@@ -136,7 +155,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--query",
         default=None,
         metavar="TEXT",
-        help="Case-insensitive body substring filter.",
+        help="Body search query (FTS5 when available).",
+    )
+    srch.add_argument(
+        "--exact",
+        action="store_true",
+        help="Force case-insensitive substring matching instead of token search.",
     )
     srch.add_argument(
         "--tag", default=None, metavar="TAG", help="Filter by a single normalized tag."
@@ -147,6 +171,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="HANDLE",
         help="Filter by linked person handle (case-insensitive).",
     )
+    _add_date_bounds(srch)
+    srch.add_argument(
+        "--no-feedback",
+        action="store_true",
+        help="Show entries without feedback (the coaching backlog).",
+    )
     srch.add_argument("--limit", type=non_negative_int, default=None, metavar="N")
     srch.set_defaults(func=cmd_entry_search)
 
@@ -155,6 +185,35 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     rm.add_argument("entry_id", type=int, metavar="ENTRY_ID")
     rm.set_defaults(func=cmd_entry_rm)
+
+
+def _add_date_bounds(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--since",
+        default=None,
+        metavar="DATE",
+        help="Include entries on or after DATE (ISO-8601 or relative).",
+    )
+    parser.add_argument(
+        "--until",
+        default=None,
+        metavar="DATE",
+        help="Include entries through DATE (ISO-8601 or relative).",
+    )
+
+
+def _parse_date_bounds(args: argparse.Namespace) -> tuple[str | None, str | None]:
+    since = (
+        parse_date_bound(args.since, flag="--since")
+        if args.since is not None
+        else None
+    )
+    until = (
+        parse_date_bound(args.until, flag="--until")
+        if args.until is not None
+        else None
+    )
+    return since, until
 
 
 def _format_entry_human(entry: db.Entry) -> str:
@@ -211,13 +270,26 @@ def _emit_entries(args: argparse.Namespace, entries: tuple[db.Entry, ...]) -> No
 
 
 def cmd_entry_add(args: argparse.Namespace) -> int:
-    body = read_body_or_raise(args.body)
+    body = read_body_arg(
+        args.body,
+        what="body",
+        template="",
+        preamble=ENTRY_PREAMBLE,
+        isatty=sys.stdin.isatty,
+        compose=compose_in_editor,
+    )
+    occurred_at = (
+        parse_when_or_raise(args.occurred_at)
+        if args.occurred_at is not None
+        else None
+    )
     with open_db(args) as conn:
+        ensure_people(conn, args.people, assume_yes=args.yes)
         entry = db.create_entry(
             conn,
             body,
             source=args.source,
-            occurred_at=args.occurred_at,
+            occurred_at=occurred_at,
             tags=args.tags,
             people=args.people,
         )
@@ -241,12 +313,21 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
         raise db.DBError("--clear-people cannot be combined with --person")
 
     update_kwargs: dict[str, Any] = {}
-    if args.body is not None:
-        update_kwargs["body"] = read_body_or_raise(args.body)
+    if args.body not in (None, ""):
+        update_kwargs["body"] = read_body_arg(
+            args.body,
+            what="body",
+            template="",
+            preamble=ENTRY_PREAMBLE,
+            isatty=sys.stdin.isatty,
+            compose=compose_in_editor,
+        )
     if args.source is not None:
         update_kwargs["source"] = args.source if args.source else None
     if args.occurred_at is not None:
-        update_kwargs["occurred_at"] = args.occurred_at if args.occurred_at else None
+        update_kwargs["occurred_at"] = (
+            parse_when_or_raise(args.occurred_at) if args.occurred_at else None
+        )
     if args.clear_tags:
         update_kwargs["tags"] = ()
     elif args.tags is not None:
@@ -256,33 +337,60 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
     elif args.people is not None:
         update_kwargs["people"] = tuple(args.people)
 
-    if not update_kwargs:
+    if not update_kwargs and args.body != "":
         raise db.DBError(
             "entry edit requires at least one of "
             "--body/--source/--occurred-at/--tag/--clear-tags/--person/--clear-people"
         )
 
     with open_db(args) as conn:
+        if args.body == "":
+            current = db.get_entry(conn, args.entry_id)
+            if current is None:
+                raise db.EntryNotFoundError(args.entry_id)
+            update_kwargs["body"] = read_body_arg(
+                None,
+                what="body",
+                template=current.body,
+                preamble=ENTRY_PREAMBLE,
+                isatty=sys.stdin.isatty,
+                compose=compose_in_editor,
+            )
+        if args.people is not None:
+            if db.get_entry(conn, args.entry_id) is None:
+                raise db.EntryNotFoundError(args.entry_id)
+            ensure_people(conn, args.people, assume_yes=args.yes)
         entry = db.update_entry(conn, args.entry_id, **update_kwargs)
     _emit_entry(args, entry, human_prefix="updated")
     return 0
 
 
 def cmd_entry_list(args: argparse.Namespace) -> int:
+    since, until = _parse_date_bounds(args)
     with open_db(args) as conn:
-        entries = db.list_entries(conn, limit=args.limit)
+        entries = db.list_entries(
+            conn,
+            since=since,
+            until=until,
+            limit=args.limit,
+        )
     _emit_entries(args, entries)
     return 0
 
 
 def cmd_entry_search(args: argparse.Namespace) -> int:
+    since, until = _parse_date_bounds(args)
     with open_db(args) as conn:
         entries = db.search_entries(
             conn,
             query=args.query,
             tag=args.tag,
             person_handle=args.person,
+            since=since,
+            until=until,
+            without_feedback=args.no_feedback,
             limit=args.limit,
+            mode="like" if args.exact else "auto",
         )
     _emit_entries(args, entries)
     return 0

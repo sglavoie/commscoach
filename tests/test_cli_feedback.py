@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from commscoach import cli, db
+from commscoach.cli import feedback as cli_feedback
 
 
 class FeedbackTestBase(unittest.TestCase):
@@ -68,6 +69,15 @@ class FeedbackAddTests(FeedbackTestBase):
         )
         self.assertEqual(rc, 1)
         self.assertIn("9999", err)
+
+    def test_add_without_body_on_non_tty_exits_one_without_writing(self) -> None:
+        entry = self._seed_entry()
+        with mock.patch.object(cli_feedback.sys, "stdin", io.StringIO()):
+            rc, _, err = self._run("feedback", "add", str(entry.id))
+        self.assertEqual(rc, 1)
+        self.assertIn("body required", err)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.list_feedback(conn, entry.id), ())
 
     def test_add_empty_body_exits_one(self) -> None:
         entry = self._seed_entry()
