@@ -211,6 +211,8 @@ A scope that matches nothing returns an empty entry list rather than failing —
 
 A person-scoped review stores the handle alongside the foreign key, so after `commscoach --yes person rm alice` the review is still findable by `review list --person alice` and still prints `@alice`. `doctor`'s `review_scope` check reports those reviews as a warning — retained history, not corruption.
 
+The JSON review shape carries that stored handle as its own `scope_person_handle` key, beside the `scope_person` object: `--json review show`, `--json review list`, and the `prior_reviews` block of `review context` all emit it. `scope_person` is a live lookup and becomes `null` once the person is deleted, so `scope_person_handle` is what still names them.
+
 `commscoach person edit alice --handle ally` carries the rename into that stored handle, the same way `tag rename` carries a tag rename into tag-scoped reviews. The person's review history follows them: `review list --person ally` finds it, a `review context --person ally` counts it among the prior reviews, and every surface prints `@ally`. Delete them afterwards and `@ally` — the handle they last had — is what remains as history.
 
 ## Correcting stored coaching

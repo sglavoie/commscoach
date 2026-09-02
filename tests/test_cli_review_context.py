@@ -442,7 +442,32 @@ class ScopedPriorReviewTests(ScopedContextBase):
         prior = payload["prior_reviews"][0]
         self.assertEqual(prior["scope_kind"], "person")
         self.assertEqual(prior["scope_person"]["handle"], "alice")
+        self.assertEqual(prior["scope_person_handle"], "alice")
         self.assertIsNone(prior["scope_tag"])
+
+    def test_prior_reviews_keep_the_deleted_person_handle_json(self) -> None:
+        """A prior review outlives its scoped person; the payload must say who.
+
+        The context is taken unscoped on purpose: a ``--person alice`` context
+        cannot be built once alice is gone, so an unfiltered ``latest`` context
+        is the only surface that still reaches her orphaned review.
+        """
+        about_alice = self._seed_review(
+            "about alice",
+            [self.first.id],
+            scope_kind="person",
+            scope_person_handle="alice",
+        )
+        with closing(db.connect(self.db_path)) as conn:
+            db.delete_person(conn, self.alice.id)
+
+        payload = self._scope()
+
+        prior = payload["prior_reviews"][0]
+        self.assertEqual(prior["id"], about_alice.id)
+        self.assertEqual(prior["scope_kind"], "person")
+        self.assertIsNone(prior["scope_person"])
+        self.assertEqual(prior["scope_person_handle"], "alice")
 
     def test_range_scope_sees_unfiltered_prior_reviews(self) -> None:
         general = self._seed_review("general", [self.unrelated.id])

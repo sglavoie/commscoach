@@ -53,6 +53,16 @@ def review_to_dict(review: db.Review) -> dict[str, Any]:
     The scope axis keys were added on top of the original shape rather than
     replacing anything: ``scope_kind`` and ``scope_limit`` keep their existing
     keys and meaning, and the axes not owned by ``scope_kind`` are ``null``.
+
+    ``scope_person`` is a live lookup that becomes ``null`` once that person is
+    deleted, so ``scope_person_handle`` is emitted beside it: it is the stored
+    denormalized column, verbatim, and it survives the deletion the same way the
+    human and Markdown surfaces do. It is deliberately not overridden by the
+    live person's handle -- a consumer that wants the current handle reads
+    ``scope_person["handle"]`` (what ``common.format_scope`` prefers), and
+    keeping this key verbatim is what lets a consumer see the two disagree at
+    all. They can only disagree on a row ``import`` restored from an archive
+    written before ``update_person`` began rewriting the column.
     """
     return {
         "id": review.id,
@@ -64,6 +74,7 @@ def review_to_dict(review: db.Review) -> dict[str, Any]:
             if review.scope_person is not None
             else None
         ),
+        "scope_person_handle": review.scope_person_handle,
         "scope_tag": review.scope_tag,
         "scope_since": review.scope_since,
         "scope_until": review.scope_until,

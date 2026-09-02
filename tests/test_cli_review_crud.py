@@ -84,6 +84,7 @@ class ReviewAddTests(ReviewTestBase):
                 "scope_kind",
                 "scope_limit",
                 "scope_person",
+                "scope_person_handle",
                 "scope_tag",
                 "scope_since",
                 "scope_until",
@@ -97,6 +98,7 @@ class ReviewAddTests(ReviewTestBase):
         self.assertEqual(payload["scope_kind"], "latest")
         self.assertEqual(payload["scope_limit"], 5)
         self.assertIsNone(payload["scope_person"])
+        self.assertIsNone(payload["scope_person_handle"])
         self.assertIsNone(payload["scope_tag"])
         self.assertIsNone(payload["scope_since"])
         self.assertIsNone(payload["scope_until"])
@@ -356,6 +358,7 @@ class ScopedAddTests(ReviewTestBase):
         self.assertEqual(payload["scope_limit"], 10)
         self.assertEqual(payload["scope_person"]["handle"], "alice")
         self.assertEqual(payload["scope_person"]["name"], "Alice")
+        self.assertEqual(payload["scope_person_handle"], "alice")
         self.assertIsNone(payload["scope_tag"])
 
 
@@ -657,6 +660,84 @@ class ScopeRenderingTests(ReviewTestBase):
         long_out, short_out = self._lines(review)
         self.assertIn("scope range:2026-07-01..", long_out)
         self.assertIn("scope:range:2026-07-01..", short_out)
+
+
+class DeletedPersonJsonTests(ReviewTestBase):
+    """``scope_person_handle`` is the JSON counterpart of the human fallback.
+
+    ``scope_person`` is a live lookup, so the JSON surfaces lose the person
+    entirely once she is deleted; the denormalized handle is what keeps a
+    machine consumer able to say *whose* review it is read.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Created as ``Alice`` and scoped as ``alice``: ``create_review``
+        # canonicalizes to the person's own casing, so the stored handle is the
+        # canonical one and not whatever the caller typed.
+        self.alice = self._seed_person("Alice")
+        self.entry = self._seed_entry("seed")
+        self.review = self._seed_review(
+            "body",
+            [self.entry.id],
+            scope_kind="person",
+            scope_person_handle="alice",
+        )
+
+    def _delete_alice(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            db.delete_person(conn, self.alice.id)
+
+    def _show(self) -> dict:
+        rc, out, err = self._run("--json", "review", "show", str(self.review.id))
+        self.assertEqual(rc, 0, err)
+        return json.loads(out)
+
+    def _list(self) -> dict:
+        rc, out, err = self._run("--json", "review", "list")
+        self.assertEqual(rc, 0, err)
+        rows = json.loads(out)
+        self.assertEqual([row["id"] for row in rows], [self.review.id])
+        return rows[0]
+
+    def test_show_keeps_the_deleted_person_handle_json(self) -> None:
+        live = self._show()
+        self.assertEqual(live["scope_person"]["handle"], "Alice")
+        self.assertEqual(live["scope_person_handle"], "Alice")
+
+        self._delete_alice()
+
+        orphaned = self._show()
+        self.assertEqual(orphaned["scope_kind"], "person")
+        self.assertIsNone(orphaned["scope_person"])
+        self.assertEqual(orphaned["scope_person_handle"], "Alice")
+
+    def test_list_keeps_the_deleted_person_handle_json(self) -> None:
+        self.assertEqual(self._list()["scope_person_handle"], "Alice")
+
+        self._delete_alice()
+
+        orphaned = self._list()
+        self.assertIsNone(orphaned["scope_person"])
+        self.assertEqual(orphaned["scope_person_handle"], "Alice")
+
+    def test_show_json_keeps_the_stored_handle_over_a_desynced_live_person(
+        self,
+    ) -> None:
+        """The key reports the column, not the live person's current handle.
+
+        ``update_person`` keeps the two in sync, so this state is only reachable
+        through an ``import`` of an archive written before that fix. The human
+        formatters resolve it by preferring the live person; the JSON shape
+        instead reports both values so a consumer can see them disagree.
+        """
+        with closing(db.connect(self.db_path)) as conn, conn:
+            conn.execute("UPDATE people SET handle = 'ally' WHERE handle = 'Alice'")
+
+        payload = self._show()
+
+        self.assertEqual(payload["scope_person"]["handle"], "ally")
+        self.assertEqual(payload["scope_person_handle"], "Alice")
 
 
 class ReviewShowTests(ReviewTestBase):
