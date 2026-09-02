@@ -47,6 +47,11 @@ EXPECTED_TABLES = frozenset(
     }
 )
 
+# The subset of EXPECTED_TABLES that has existed since schema v1, so it is
+# present in every released version. This is what identifies a file as "a
+# commscoach database" independently of which version it was stamped at.
+_BASELINE_TABLES = frozenset({"_meta", "people", "entries"})
+
 SCHEMA_V1_SQL = """
 CREATE TABLE IF NOT EXISTS _meta (
     key TEXT PRIMARY KEY,
@@ -293,6 +298,39 @@ def validate_schema(conn: sqlite3.Connection) -> None:
         raise DBError("run 'commscoach init' first") from exc
     if version != SCHEMA_VERSION or not EXPECTED_TABLES.issubset(tables):
         raise DBError("run 'commscoach init' first")
+
+
+def validate_backup_source(conn: sqlite3.Connection) -> int:
+    """Raise ``DBError`` unless ``conn`` is a commscoach database of ANY version.
+
+    ``validate_schema`` demands the current version because every read and
+    write path is written against it. Copying a database is different: the
+    online backup API works at the page level and does not care what the
+    schema looks like, and the moment a snapshot matters most is precisely
+    *before* the ``init`` that migrates it. Validating the post-migration
+    schema in ``backup`` therefore made the protective command refuse the
+    databases it exists to protect.
+
+    The bar is only "this is recognizably ours": ``_meta`` carries an integer
+    ``schema_version`` and the v1 baseline tables are present. Versions newer
+    than :data:`SCHEMA_VERSION` are accepted too — refusing to protect data
+    written by a later release would recreate the same bug in the other
+    direction.
+
+    Returns the stamped schema version.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        tables = {row[0] for row in rows}
+        version = get_schema_version(conn) if "_meta" in tables else None
+    except (sqlite3.Error, ValueError) as exc:
+        raise DBError("run 'commscoach init' first") from exc
+    if version is None or version < 1 or not _BASELINE_TABLES.issubset(tables):
+        raise DBError("run 'commscoach init' first")
+    return version
 
 
 def get_schema_version(conn: sqlite3.Connection) -> int | None:

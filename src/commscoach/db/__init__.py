@@ -104,6 +104,7 @@ from .schema import (
     connect,
     get_schema_version,
     init_db,
+    validate_backup_source,
     validate_schema,
 )
 from .stats import get_stats
@@ -193,6 +194,7 @@ __all__ = [
     "update_goal",
     "update_person",
     "update_review",
+    "validate_backup_source",
     "validate_dump",
     "validate_schema",
 ]

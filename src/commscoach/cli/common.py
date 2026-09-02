@@ -3,7 +3,8 @@
 - ``--db PATH`` / ``$COMMSCOACH_DB`` precedence is resolved by ``resolve_db_path``.
 - ``read_body`` accepts a literal string, ``-`` (stdin), or ``@PATH`` (file).
 - ``confirm`` prompts on stderr and treats EOF as "no".
-- ``open_db`` is a context manager that closes the connection cleanly.
+- ``open_db`` is a context manager that closes the connection cleanly; its
+  ``allow_legacy_schema`` flag lets ``backup`` snapshot a pre-migration store.
 - ``prose_lines``/``first_prose_line``/``truncate``/``format_stamp`` build the
   human-readable previews shared by the ``list`` subcommands.
 - ``add_date_bounds``/``parse_date_bounds`` declare and resolve the shared
@@ -269,8 +270,21 @@ def non_negative_int(value: str) -> int:
 
 
 @contextmanager
-def open_db(args: argparse.Namespace) -> Iterator[Any]:
-    """Yield a ``sqlite3.Connection`` resolved from CLI/env/default, closing it on exit."""
+def open_db(
+    args: argparse.Namespace,
+    *,
+    allow_legacy_schema: bool = False,
+) -> Iterator[Any]:
+    """Yield a ``sqlite3.Connection`` resolved from CLI/env/default, closing it on exit.
+
+    Every command that reads or writes rows needs the current schema, so the
+    default runs ``db.validate_schema``. ``allow_legacy_schema`` relaxes that
+    to ``db.validate_backup_source`` — "a commscoach database of some version"
+    — and exists for exactly one caller, ``backup``, which must be able to
+    snapshot a database *before* the ``init`` that migrates it. Do not widen
+    it to a command that touches columns: a pre-v4 database has none of the
+    ``reviews`` scope columns.
+    """
     db_path = resolve_db_path(args)
     if not db_path.exists():
         if paths.icloud_placeholder_for(db_path).exists():
@@ -285,5 +299,8 @@ def open_db(args: argparse.Namespace) -> Iterator[Any]:
     except sqlite3.Error as exc:
         raise db.DBError(f"cannot open database {db_path}: {exc}") from exc
     with closing(conn) as conn:
-        db.validate_schema(conn)
+        if allow_legacy_schema:
+            db.validate_backup_source(conn)
+        else:
+            db.validate_schema(conn)
         yield conn

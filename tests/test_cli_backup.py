@@ -16,7 +16,18 @@ from pathlib import Path
 from commscoach import cli, db, paths
 from commscoach.cli import backup as backup_cli
 
+from .db_schema_case import build_v3_database
+
 _NOW = "2026-08-25T12:00:00+00:00"
+
+_V3_REVIEW_COLUMNS = [
+    "id",
+    "body",
+    "scope_kind",
+    "scope_limit",
+    "created_at",
+    "updated_at",
+]
 
 
 class BackupCommandTests(unittest.TestCase):
@@ -118,6 +129,141 @@ class BackupCommandTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         with closing(db.connect(self.db_path)) as conn:
             db.validate_schema(conn)
+
+
+class LegacySchemaBackupTests(unittest.TestCase):
+    """``backup`` must run on the pre-v4 database it exists to protect.
+
+    The README's migration recipe tells a v3 user to snapshot *before*
+    ``commscoach init`` upgrades them, so this command has to accept the exact
+    database that every other command correctly refuses. It used to open
+    through the schema-validating path and answer "run 'commscoach init'
+    first" — telling the user to perform the very migration the backup was
+    supposed to make safe.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.db_path = Path(self._tmp.name) / "data" / "commscoach.sqlite3"
+        self.destination = (
+            Path(self._tmp.name) / "Backups" / "commscoach-pre-v4.sqlite3"
+        )
+        build_v3_database(self.db_path)
+
+    def _run_backup(self) -> int:
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return cli.main(
+                [
+                    "--db",
+                    str(self.db_path),
+                    "backup",
+                    "--out",
+                    str(self.destination),
+                ]
+            )
+
+    @staticmethod
+    def _rows(conn: sqlite3.Connection, sql: str) -> list[dict[str, object]]:
+        return [dict(row) for row in conn.execute(sql)]
+
+    def test_backup_accepts_pre_v4_database(self) -> None:
+        rc = self._run_backup()
+
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.destination.exists())
+        self.assertEqual(
+            stat.S_IMODE(self.destination.stat().st_mode), paths.DB_FILE_MODE
+        )
+
+    def test_backup_accepts_pre_v4_database_preserving_schema_and_data(self) -> None:
+        with closing(db.connect(self.db_path)) as source:
+            before_reviews = self._rows(
+                source,
+                f"SELECT {', '.join(_V3_REVIEW_COLUMNS)} FROM reviews ORDER BY id",
+            )
+            before_links = self._rows(
+                source,
+                "SELECT review_id, entry_id, position FROM review_entries"
+                " ORDER BY review_id, position",
+            )
+            before_goals = self._rows(
+                source, "SELECT id, title, review_id FROM goals ORDER BY id"
+            )
+
+        self.assertEqual(self._run_backup(), 0)
+
+        with closing(db.connect(self.destination)) as copied:
+            # The snapshot is pre-migration: still stamped v3, and the reviews
+            # table still carries none of the v4 scope columns.
+            self.assertEqual(db.get_schema_version(copied), 3)
+            columns = {row[1] for row in copied.execute("PRAGMA table_info(reviews)")}
+            self.assertEqual(columns, set(_V3_REVIEW_COLUMNS))
+            self.assertEqual(
+                self._rows(
+                    copied,
+                    f"SELECT {', '.join(_V3_REVIEW_COLUMNS)} FROM reviews ORDER BY id",
+                ),
+                before_reviews,
+            )
+            self.assertEqual(
+                self._rows(
+                    copied,
+                    "SELECT review_id, entry_id, position FROM review_entries"
+                    " ORDER BY review_id, position",
+                ),
+                before_links,
+            )
+            self.assertEqual(
+                self._rows(copied, "SELECT id, title, review_id FROM goals ORDER BY id"),
+                before_goals,
+            )
+            self.assertEqual(
+                [row[0] for row in copied.execute("PRAGMA integrity_check")], ["ok"]
+            )
+            self.assertEqual(copied.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_backup_accepts_pre_v4_database_then_init_migrates_only_the_source(
+        self,
+    ) -> None:
+        """The README procedure end to end: back up, then migrate."""
+        self.assertEqual(self._run_backup(), 0)
+
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["--db", str(self.db_path), "init"]), 0)
+
+        with closing(db.connect(self.db_path)) as source:
+            db.validate_schema(source)
+            self.assertEqual(db.get_schema_version(source), db.SCHEMA_VERSION)
+        with closing(db.connect(self.destination)) as copied:
+            self.assertEqual(db.get_schema_version(copied), 3)
+
+    def test_row_commands_still_refuse_a_pre_v4_database(self) -> None:
+        """The relaxation is backup-only; a reader would hit missing columns."""
+        err_buf = io.StringIO()
+        with redirect_stderr(err_buf), redirect_stdout(io.StringIO()):
+            rc = cli.main(["--db", str(self.db_path), "review", "list"])
+
+        self.assertEqual(rc, 1)
+        self.assertIn("run 'commscoach init' first", err_buf.getvalue())
+
+    def test_backup_refuses_a_sqlite_file_that_is_not_a_commscoach_database(
+        self,
+    ) -> None:
+        foreign = Path(self._tmp.name) / "data" / "notes.sqlite3"
+        with closing(sqlite3.connect(foreign)) as conn:
+            conn.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
+            conn.commit()
+
+        err_buf = io.StringIO()
+        with redirect_stderr(err_buf), redirect_stdout(io.StringIO()):
+            rc = cli.main(
+                ["--db", str(foreign), "backup", "--out", str(self.destination)]
+            )
+
+        self.assertEqual(rc, 1)
+        self.assertIn("run 'commscoach init' first", err_buf.getvalue())
+        self.assertFalse(self.destination.exists())
 
 
 if __name__ == "__main__":

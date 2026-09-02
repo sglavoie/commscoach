@@ -1,4 +1,10 @@
-"""The ``commscoach backup`` command."""
+"""The ``commscoach backup`` command.
+
+Unlike every other command, this one opens the store with
+``allow_legacy_schema=True``: a backup is a page-level copy that works on any
+schema version, and the README's migration recipe depends on being able to
+take one *before* ``init`` upgrades the database.
+"""
 
 from __future__ import annotations
 
@@ -50,7 +56,10 @@ def cmd_backup(args: argparse.Namespace, *, now: datetime | None = None) -> int:
     )
     if destination.resolve() == source_path.resolve():
         raise db.DBError("backup destination must differ from the source database")
-    with open_db(args) as conn:
+    # Legacy schemas are accepted on purpose: the documented way to survive a
+    # migration is to back up first, so refusing a pre-migration database
+    # would make this command useless at the one moment it matters most.
+    with open_db(args, allow_legacy_schema=True) as conn:
         created = db.backup_database(conn, destination)
     removed = db.prune_backups(created.parent, args.keep) if args.keep is not None else ()
     payload = {

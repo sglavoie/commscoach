@@ -18,7 +18,13 @@ from unittest import mock
 from commscoach import db, paths
 from commscoach.db import schema as db_schema
 
-from tests.db_schema_case import EXPECTED_TABLES, NOW, index_names, table_names
+from tests.db_schema_case import (
+    EXPECTED_TABLES,
+    NOW,
+    build_v3_database,
+    index_names,
+    table_names,
+)
 
 
 class InitDbSchemaTests(unittest.TestCase):
@@ -307,6 +313,76 @@ class ConnectionTests(unittest.TestCase):
         with closing(db.connect(self.db_path)) as conn:
             row = conn.execute("SELECT 1 AS value").fetchone()
             self.assertEqual(row["value"], 1)
+
+
+class ValidateBackupSourceTests(unittest.TestCase):
+    """The relaxed check that lets ``backup`` snapshot a pre-migration store.
+
+    ``validate_schema`` gates every row-touching command on the current
+    version. This one gates only on "recognizably a commscoach database", so
+    the tests are about where that looser line falls.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.db_path = Path(self._tmp.name) / "data" / "commscoach.sqlite3"
+
+    def _assert_rejected(self) -> None:
+        with closing(db.connect(self.db_path)) as conn, self.assertRaisesRegex(
+            db.DBError, "run 'commscoach init' first"
+        ):
+            db.validate_backup_source(conn)
+
+    def test_accepts_a_released_v3_database(self) -> None:
+        build_v3_database(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.validate_backup_source(conn), 3)
+
+    def test_accepts_the_current_schema(self) -> None:
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.validate_backup_source(conn), db.SCHEMA_VERSION)
+
+    def test_accepts_a_version_newer_than_this_build(self) -> None:
+        """Refusing to copy a future release's data would be the same bug."""
+        db.init_db(self.db_path)
+        future = db.SCHEMA_VERSION + 1
+        with closing(db.connect(self.db_path)) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO _meta (key, value)"
+                " VALUES ('schema_version', ?)",
+                (str(future),),
+            )
+            conn.commit()
+            self.assertEqual(db.validate_backup_source(conn), future)
+
+    def test_rejects_an_empty_file(self) -> None:
+        paths.ensure_data_dir(self.db_path)
+        self.db_path.touch()
+        self._assert_rejected()
+
+    def test_rejects_a_sqlite_file_that_is_not_ours(self) -> None:
+        paths.ensure_data_dir(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            conn.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
+            conn.commit()
+        self._assert_rejected()
+
+    def test_rejects_a_meta_table_with_no_stamped_version(self) -> None:
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            conn.execute("DELETE FROM _meta WHERE key = 'schema_version'")
+            conn.commit()
+        self._assert_rejected()
+
+    def test_rejects_a_stamped_version_that_lost_the_baseline_tables(self) -> None:
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute("DROP TABLE entries")
+            conn.commit()
+        self._assert_rejected()
 
 
 if __name__ == "__main__":

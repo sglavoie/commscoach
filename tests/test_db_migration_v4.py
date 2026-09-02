@@ -21,42 +21,12 @@ from unittest import mock
 from commscoach import db, paths
 from commscoach.db import schema as db_schema
 
-from .db_schema_case import EXPECTED_TABLES, NOW, index_names, table_names
-
-# The pre-v4 shape of SCHEMA_V2_SQL, pinned here as a fixture. It is copied
-# rather than imported precisely because the source constant now describes the
-# v4 shape: importing it would make this test migrate a table that is already
-# migrated and silently assert nothing.
-SCHEMA_V2_SQL_V3_ERA = """
-CREATE TABLE IF NOT EXISTS reviews (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    body TEXT NOT NULL,
-    scope_kind TEXT NOT NULL CHECK (scope_kind IN ('latest')),
-    scope_limit INTEGER CHECK (scope_limit IS NULL OR scope_limit >= 0),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_reviews_created_at
-    ON reviews (created_at, id);
-
-CREATE TABLE IF NOT EXISTS review_entries (
-    review_id INTEGER NOT NULL REFERENCES reviews (id) ON DELETE CASCADE,
-    entry_id INTEGER NOT NULL REFERENCES entries (id) ON DELETE CASCADE,
-    position INTEGER NOT NULL CHECK (position >= 0),
-    PRIMARY KEY (review_id, entry_id),
-    UNIQUE (review_id, position)
-);
-
-CREATE INDEX IF NOT EXISTS idx_review_entries_entry_id
-    ON review_entries (entry_id);
-
-CREATE INDEX IF NOT EXISTS idx_review_entries_review_position
-    ON review_entries (review_id, position);
-
-CREATE INDEX IF NOT EXISTS idx_entries_effective_at
-    ON entries (COALESCE(occurred_at, created_at) DESC);
-"""
+from .db_schema_case import (
+    EXPECTED_TABLES,
+    build_v3_database,
+    index_names,
+    table_names,
+)
 
 _OLD_REVIEW_COLUMNS = (
     "id",
@@ -88,68 +58,9 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
         self._build_v3_database()
 
     def _build_v3_database(self) -> None:
-        """Create a genuine v3 database carrying the old ``reviews`` shape."""
-        paths.ensure_data_dir(self.db_path)
+        """Build the shared v3 fixture and snapshot what must survive the rebuild."""
+        build_v3_database(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
-            conn.executescript(db_schema.SCHEMA_V1_SQL)
-            conn.executescript(SCHEMA_V2_SQL_V3_ERA)
-            conn.executescript(db_schema.SCHEMA_V3_SQL)
-            conn.execute(
-                "INSERT INTO _meta (key, value) VALUES ('schema_version', '3')"
-            )
-            for handle, is_self in (("me", 1), ("alex", 0)):
-                conn.execute(
-                    "INSERT INTO people (handle, name, is_self, created_at, updated_at)"
-                    " VALUES (?, NULL, ?, ?, ?)",
-                    (handle, is_self, NOW, NOW),
-                )
-            for body in ("first", "second", "third"):
-                conn.execute(
-                    "INSERT INTO entries"
-                    " (body, source, occurred_at, created_at, updated_at)"
-                    " VALUES (?, NULL, NULL, ?, ?)",
-                    (body, NOW, NOW),
-                )
-            conn.execute(
-                "INSERT INTO reviews"
-                " (body, scope_kind, scope_limit, created_at, updated_at)"
-                " VALUES ('weekly synthesis', 'latest', 3, ?, ?)",
-                (NOW, NOW),
-            )
-            conn.execute(
-                "INSERT INTO reviews"
-                " (body, scope_kind, scope_limit, created_at, updated_at)"
-                " VALUES ('unlimited synthesis', 'latest', NULL, ?, ?)",
-                (NOW, NOW),
-            )
-            for review_id, entry_id, position in (
-                (1, 3, 0),
-                (1, 2, 1),
-                (1, 1, 2),
-                (2, 1, 0),
-            ):
-                conn.execute(
-                    "INSERT INTO review_entries (review_id, entry_id, position)"
-                    " VALUES (?, ?, ?)",
-                    (review_id, entry_id, position),
-                )
-            conn.execute(
-                "INSERT INTO goals"
-                " (title, detail, status, person_id, review_id, outcome,"
-                " closed_at, created_at, updated_at)"
-                " VALUES ('Ask more questions', NULL, 'active', 2, 1, NULL,"
-                " NULL, ?, ?)",
-                (NOW, NOW),
-            )
-            conn.execute(
-                "INSERT INTO goals"
-                " (title, detail, status, person_id, review_id, outcome,"
-                " closed_at, created_at, updated_at)"
-                " VALUES ('Slow down', NULL, 'done', NULL, 2, 'worked',"
-                " ?, ?, ?)",
-                (NOW, NOW, NOW),
-            )
-            conn.commit()
             self.before_reviews = _rows(
                 conn,
                 f"SELECT {', '.join(_OLD_REVIEW_COLUMNS)} FROM reviews ORDER BY id",
