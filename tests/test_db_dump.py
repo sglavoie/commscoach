@@ -11,6 +11,7 @@ from pathlib import Path
 from commscoach import db
 
 from .db_case import DBTestCase
+from .db_schema_case import NOW
 
 
 def seed_complete_store(conn: object) -> None:
@@ -115,9 +116,98 @@ class DumpRoundTripTests(DBTestCase):
 
     def test_newer_format_version_is_a_hard_error(self) -> None:
         payload = db.dump_to_dict(self.conn)
-        payload["format_version"] = 2
+        payload["format_version"] = db.FORMAT_VERSION + 1
 
         with self.assertRaisesRegex(db.DumpFormatError, "unsupported dump format"):
+            db.validate_dump(payload)
+
+    def test_current_format_version_is_two(self) -> None:
+        self.assertEqual(db.FORMAT_VERSION, 2)
+        self.assertEqual(db.dump_to_dict(self.conn)["format_version"], 2)
+
+    def test_round_trip_preserves_every_review_scope_column(self) -> None:
+        # The CRUD layer cannot write these yet, so drive the columns directly.
+        person_id = self.conn.execute(
+            "SELECT id FROM people WHERE handle = 'alex'"
+        ).fetchone()["id"]
+        self.conn.execute(
+            "INSERT INTO reviews (body, scope_kind, scope_limit,"
+            " scope_person_id, scope_person_handle, created_at, updated_at)"
+            " VALUES ('about alex', 'person', NULL, ?, 'alex', ?, ?)",
+            (person_id, NOW, NOW),
+        )
+        self.conn.execute(
+            "INSERT INTO reviews (body, scope_kind, scope_tag,"
+            " created_at, updated_at)"
+            " VALUES ('conflict theme', 'tag', 'conflict', ?, ?)",
+            (NOW, NOW),
+        )
+        self.conn.execute(
+            "INSERT INTO reviews (body, scope_kind, scope_since, scope_until,"
+            " created_at, updated_at)"
+            " VALUES ('june', 'range', '2026-06-01', '2026-06-30', ?, ?)",
+            (NOW, NOW),
+        )
+        self.conn.commit()
+        original = db.dump_to_dict(self.conn)
+        restored = self._fresh_connection()
+
+        db.load_from_dict(restored, original)
+
+        self.assertEqual(db.dump_to_dict(restored), original)
+        scoped = {
+            review["body"]: review
+            for review in db.dump_to_dict(restored)["reviews"]
+        }
+        self.assertEqual(scoped["about alex"]["scope_person_handle"], "alex")
+        self.assertEqual(scoped["conflict theme"]["scope_tag"], "conflict")
+        self.assertEqual(scoped["june"]["scope_since"], "2026-06-01")
+        self.assertEqual(scoped["june"]["scope_until"], "2026-06-30")
+
+    def test_format_version_one_archive_restores_with_null_scope_columns(self) -> None:
+        # Hand-built: exactly what a pre-v4 export produced, with no scope
+        # columns beyond scope_kind/scope_limit on the reviews rows.
+        payload = db.dump_to_dict(self.conn)
+        payload["format_version"] = 1
+        payload["schema_version"] = 3
+        for review in payload["reviews"]:
+            for column in (
+                "scope_person_id",
+                "scope_person_handle",
+                "scope_tag",
+                "scope_since",
+                "scope_until",
+            ):
+                del review[column]
+        restored = self._fresh_connection()
+
+        with self.assertWarns(RuntimeWarning):
+            db.load_from_dict(restored, payload)
+
+        rows = restored.execute(
+            "SELECT scope_kind, scope_limit, scope_person_id,"
+            " scope_person_handle, scope_tag, scope_since, scope_until"
+            " FROM reviews ORDER BY id"
+        ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            dict(rows[0]),
+            {
+                "scope_kind": "latest",
+                "scope_limit": 3,
+                "scope_person_id": None,
+                "scope_person_handle": None,
+                "scope_tag": None,
+                "scope_since": None,
+                "scope_until": None,
+            },
+        )
+
+    def test_missing_required_column_is_still_rejected(self) -> None:
+        payload = db.dump_to_dict(self.conn)
+        del payload["reviews"][0]["scope_kind"]
+
+        with self.assertRaisesRegex(db.DumpFormatError, "missing column 'scope_kind'"):
             db.validate_dump(payload)
 
     def test_unknown_keys_and_columns_are_ignored(self) -> None:

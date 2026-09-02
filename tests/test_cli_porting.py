@@ -33,6 +33,7 @@ class PortingCLITests(unittest.TestCase):
                 people=(person.handle,),
             )
             db.create_feedback(conn, entry.id, "useful")
+            db.create_review(conn, "weekly", [entry.id], scope_limit=1)
 
     def _run(self, db_path: Path, *args: str) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
@@ -45,10 +46,28 @@ class PortingCLITests(unittest.TestCase):
         self.assertEqual(rc, 0)
         return json.loads(out)
 
+    def _v1_archive(self) -> Path:
+        """Write an archive in the pre-scope format version 1 shape."""
+        payload = self._export_payload()
+        payload["format_version"] = 1
+        payload["schema_version"] = 3
+        for review in payload["reviews"]:
+            for column in (
+                "scope_person_id",
+                "scope_person_handle",
+                "scope_tag",
+                "scope_since",
+                "scope_until",
+            ):
+                del review[column]
+        archive = self.tmpdir / "v1-archive.json"
+        archive.write_text(json.dumps(payload), encoding="utf-8")
+        return archive
+
     def test_json_export_to_stdout_is_complete(self) -> None:
         payload = self._export_payload()
 
-        self.assertEqual(payload["format_version"], 1)
+        self.assertEqual(payload["format_version"], 2)
         self.assertEqual(payload["entries"][0]["person_ids"], [1])
         self.assertEqual(payload["entries"][0]["tag_ids"], [1])
 
@@ -68,7 +87,7 @@ class PortingCLITests(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertIn(str(out_path), stderr)
         self.assertEqual(stat.S_IMODE(out_path.stat().st_mode), 0o600)
-        self.assertEqual(json.loads(out_path.read_text())["format_version"], 1)
+        self.assertEqual(json.loads(out_path.read_text())["format_version"], 2)
 
     def test_import_from_path_round_trips(self) -> None:
         archive = self.tmpdir / "archive.json"
@@ -112,6 +131,43 @@ class PortingCLITests(unittest.TestCase):
         self.assertIn("no data written", stdout)
         with closing(db.connect(self.target_path)) as conn:
             self.assertEqual(db.dump_to_dict(conn)["entries"], [])
+
+    def test_dry_run_accepts_a_format_version_one_archive(self) -> None:
+        archive = self._v1_archive()
+
+        # A v3 dump restored into a v4 database is the normal migration path;
+        # the schema-version mismatch is reported, not refused.
+        with self.assertWarns(RuntimeWarning):
+            rc, stdout, _ = self._run(
+                self.target_path, "import", str(archive), "--dry-run"
+            )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("no data written", stdout)
+
+    def test_format_version_one_archive_imports_with_null_scope_columns(self) -> None:
+        archive = self._v1_archive()
+
+        with self.assertWarns(RuntimeWarning):
+            rc, _, _ = self._run(self.target_path, "import", str(archive))
+
+        self.assertEqual(rc, 0)
+        with closing(db.connect(self.target_path)) as conn:
+            row = conn.execute(
+                "SELECT scope_kind, scope_limit, scope_person_handle, scope_tag,"
+                " scope_since, scope_until FROM reviews"
+            ).fetchone()
+        self.assertEqual(
+            dict(row),
+            {
+                "scope_kind": "latest",
+                "scope_limit": 1,
+                "scope_person_handle": None,
+                "scope_tag": None,
+                "scope_since": None,
+                "scope_until": None,
+            },
+        )
 
     def test_json_mode_reports_dry_run(self) -> None:
         archive = self.tmpdir / "archive.json"

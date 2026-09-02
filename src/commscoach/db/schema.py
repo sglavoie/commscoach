@@ -1,4 +1,4 @@
-"""SQLite connection, schema v3 DDL, and idempotent init.
+"""SQLite connection, schema v4 DDL, and idempotent init.
 
 Schema invariants enforced at the DB level:
 
@@ -9,7 +9,14 @@ Schema invariants enforced at the DB level:
   attached feedback, and review-entry links. Removing a review removes its
   review-entry links and clears goal references. Removing a person removes
   their entry links and note while clearing goal references.
-* Stored review scopes currently support only ``scope_kind = 'latest'``.
+* Stored review scopes are single-axis: ``scope_kind`` is one of ``latest``,
+  ``person``, ``tag``, or ``range``, and CHECK constraints keep exactly the
+  columns of that one axis populated. ``person`` requires
+  ``scope_person_handle`` (the denormalized record of who the review was
+  about, so ``person rm`` can null the ``scope_person_id`` link without
+  breaking the row), ``tag`` requires ``scope_tag``, and ``range`` requires at
+  least one of ``scope_since`` / ``scope_until`` — an unbounded range is just
+  ``latest``.
 """
 
 from __future__ import annotations
@@ -22,7 +29,7 @@ from .. import paths
 from ..timeparse import TimeParseError, parse_when
 from .errors import DBError
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 EXPECTED_TABLES = frozenset(
     {
@@ -106,19 +113,53 @@ CREATE INDEX IF NOT EXISTS idx_feedback_entry_id ON feedback (entry_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedback (created_at);
 """
 
-SCHEMA_V2_SQL = """
-CREATE TABLE IF NOT EXISTS reviews (
+# Templated on the table name so the v4 rebuild builds ``reviews_new`` from the
+# exact DDL a fresh database gets. Duplicating it would let the two drift.
+_REVIEWS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS {table} (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     body TEXT NOT NULL,
-    scope_kind TEXT NOT NULL CHECK (scope_kind IN ('latest')),
+    scope_kind TEXT NOT NULL
+        CHECK (scope_kind IN ('latest', 'person', 'tag', 'range')),
     scope_limit INTEGER CHECK (scope_limit IS NULL OR scope_limit >= 0),
+    scope_person_id INTEGER REFERENCES people (id) ON DELETE SET NULL,
+    scope_person_handle TEXT,
+    scope_tag TEXT,
+    scope_since TEXT,
+    scope_until TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    CHECK ((scope_kind = 'person') = (scope_person_handle IS NOT NULL)),
+    CHECK ((scope_kind = 'tag') = (scope_tag IS NOT NULL)),
+    CHECK (scope_person_id IS NULL OR scope_kind = 'person'),
+    CHECK (scope_kind = 'range'
+           OR (scope_since IS NULL AND scope_until IS NULL)),
+    CHECK (scope_kind <> 'range'
+           OR scope_since IS NOT NULL OR scope_until IS NOT NULL)
 );
+"""
 
-CREATE INDEX IF NOT EXISTS idx_reviews_created_at
-    ON reviews (created_at, id);
+# A table rebuild drops the table's indexes with it, so the rebuild replays
+# these one by one; the cumulative DDL below runs the same list as a script.
+_REVIEWS_INDEX_STATEMENTS = (
+    (
+        "CREATE INDEX IF NOT EXISTS idx_reviews_created_at"
+        " ON reviews (created_at, id)"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_reviews_scope"
+        " ON reviews (scope_kind, created_at)"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_reviews_scope_person_id"
+        " ON reviews (scope_person_id)"
+    ),
+)
 
+SCHEMA_V2_SQL = (
+    _REVIEWS_TABLE_SQL.format(table="reviews")
+    + "".join(f"\n{statement};\n" for statement in _REVIEWS_INDEX_STATEMENTS)
+    + """
 CREATE TABLE IF NOT EXISTS review_entries (
     review_id INTEGER NOT NULL REFERENCES reviews (id) ON DELETE CASCADE,
     entry_id INTEGER NOT NULL REFERENCES entries (id) ON DELETE CASCADE,
@@ -136,6 +177,7 @@ CREATE INDEX IF NOT EXISTS idx_review_entries_review_position
 CREATE INDEX IF NOT EXISTS idx_entries_effective_at
     ON entries (COALESCE(occurred_at, created_at) DESC);
 """
+)
 
 SCHEMA_V3_SQL = """
 CREATE TABLE IF NOT EXISTS goals (
@@ -224,7 +266,7 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
 
 
 def init_db(db_path: Path | str | None = None) -> Path:
-    """Create the data dir, apply schema v3, and chmod the DB file.
+    """Create the data dir, apply schema v4, and chmod the DB file.
 
     Idempotent: re-running ``init_db`` on an existing DB leaves data intact and
     reaffirms the DB parent directory at ``0o700`` and the DB file at ``0o600``.
@@ -301,6 +343,88 @@ def _normalize_occurred_at_once(conn: sqlite3.Connection) -> None:
     )
 
 
+def _reviews_need_scope_columns(conn: sqlite3.Connection) -> bool:
+    """Report whether ``reviews`` exists in a pre-v4 shape and must be rebuilt.
+
+    ``PRAGMA table_info`` returns no rows for a table that does not exist, so a
+    fresh database answers ``False`` and lets the cumulative v2 DDL create the
+    v4 shape outright.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(reviews)")}
+    return bool(columns) and "scope_tag" not in columns
+
+
+def _rebuild_reviews_table(conn: sqlite3.Connection) -> None:
+    """Copy the pre-v4 ``reviews`` rows into a v4-shaped table and swap it in.
+
+    Every pre-existing row is ``scope_kind = 'latest'``, so the five new scope
+    columns stay NULL and every new CHECK holds.
+    """
+    conn.execute("DROP TABLE IF EXISTS reviews_new")
+    conn.execute(_REVIEWS_TABLE_SQL.format(table="reviews_new"))
+    conn.execute(
+        "INSERT INTO reviews_new"
+        " (id, body, scope_kind, scope_limit, created_at, updated_at)"
+        " SELECT id, body, scope_kind, scope_limit, created_at, updated_at"
+        " FROM reviews"
+    )
+    conn.execute("DROP TABLE reviews")
+    conn.execute("ALTER TABLE reviews_new RENAME TO reviews")
+    for statement in _REVIEWS_INDEX_STATEMENTS:
+        conn.execute(statement)
+
+
+def _verify_reviews_rebuild(conn: sqlite3.Connection) -> None:
+    """Raise ``DBError`` unless the swapped-in table left the DB consistent."""
+    violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+    if violations:
+        raise DBError(
+            "schema v4 migration would leave foreign-key violations"
+            f" ({len(violations)} rows); no changes were applied"
+        )
+    integrity = [row[0] for row in conn.execute("PRAGMA integrity_check")]
+    if integrity != ["ok"]:
+        raise DBError(
+            f"schema v4 migration failed the integrity check: {integrity[0]};"
+            " no changes were applied"
+        )
+
+
+def _migrate_reviews_scope_v4(conn: sqlite3.Connection) -> None:
+    """Rebuild a pre-v4 ``reviews`` table so it carries the scope columns.
+
+    ``ALTER TABLE`` cannot widen a CHECK constraint, so this is the table
+    rebuild the SQLite documentation prescribes. It is a no-op on a fresh
+    database and on an already-migrated one, so ``init_db`` stays idempotent.
+
+    Foreign keys must be off across the swap: with them on, ``DROP TABLE
+    reviews`` cascade-deletes every ``review_entries`` row and nulls every
+    ``goals.review_id``, silently destroying the coaching loop. ``PRAGMA
+    foreign_keys`` is a silent no-op inside a transaction, so any implicit one
+    is committed first; the previous setting is restored in a ``finally`` and
+    the whole rebuild rolls back as one on any error.
+    """
+    if not _reviews_need_scope_columns(conn):
+        return
+
+    conn.commit()
+    (foreign_keys,) = conn.execute("PRAGMA foreign_keys").fetchone()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN")
+        try:
+            _rebuild_reviews_table(conn)
+            _verify_reviews_rebuild(conn)
+        except BaseException:
+            conn.rollback()
+            raise
+        conn.execute("COMMIT")
+    finally:
+        conn.execute(
+            "PRAGMA foreign_keys = ON" if foreign_keys else "PRAGMA foreign_keys = OFF"
+        )
+
+
 def _probe_fts5(conn: sqlite3.Connection) -> bool:
     """Create the FTS table when the active SQLite library supports FTS5."""
     try:
@@ -337,13 +461,17 @@ def _configure_fts5(conn: sqlite3.Connection) -> None:
 
 
 def _apply_schema(conn: sqlite3.Connection) -> None:
-    """Apply schema v3 idempotently, migrating v1/v2 databases in place."""
+    """Apply schema v4 idempotently, migrating v1/v2/v3 databases in place."""
     conn.executescript(SCHEMA_V1_SQL)
     version = get_schema_version(conn)
     if version is not None and not 1 <= version <= SCHEMA_VERSION:
         raise DBError(f"unsupported schema version {version}")
     conn.execute("DROP INDEX IF EXISTS idx_entries_occurred_at")
     _normalize_occurred_at_once(conn)
+    # Must precede SCHEMA_V2_SQL: that script now creates
+    # idx_reviews_scope_person_id, which cannot be built against a pre-v4
+    # reviews table.
+    _migrate_reviews_scope_v4(conn)
     conn.executescript(SCHEMA_V2_SQL)
     conn.executescript(SCHEMA_V3_SQL)
     _configure_fts5(conn)

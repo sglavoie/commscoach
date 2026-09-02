@@ -2,7 +2,9 @@
 
 The archive format is deliberately independent of the CLI display serializers.
 Unknown top-level keys and unknown row columns are ignored so readers remain
-forward compatible. Missing known tables are treated as empty. A dump with a
+forward compatible. Columns added by a later format version are optional on
+read, so an archive written before they existed still restores with those
+values NULL. Missing known tables are treated as empty. A dump with a
 newer ``format_version`` is rejected because its representation may no longer
 be safe to interpret, while a ``schema_version`` mismatch emits a warning: a
 dump from one schema version restored into another is the normal migration
@@ -20,7 +22,7 @@ from .errors import DBError
 from .schema import get_schema_version
 
 FORMAT = "commscoach-dump"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 
 class DumpFormatError(DBError):
@@ -48,6 +50,11 @@ _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "body",
         "scope_kind",
         "scope_limit",
+        "scope_person_id",
+        "scope_person_handle",
+        "scope_tag",
+        "scope_since",
+        "scope_until",
         "created_at",
         "updated_at",
     ),
@@ -64,6 +71,21 @@ _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "updated_at",
     ),
     "person_notes": ("person_id", "body", "created_at", "updated_at"),
+}
+
+# Columns added after a table was already exported by a released format
+# version. Archives written before then simply lack the key, so restore treats
+# it as NULL rather than rejecting the row for a missing column.
+_OPTIONAL_TABLE_COLUMNS: dict[str, frozenset[str]] = {
+    "reviews": frozenset(
+        {
+            "scope_person_id",
+            "scope_person_handle",
+            "scope_tag",
+            "scope_since",
+            "scope_until",
+        }
+    ),
 }
 
 _AUTOINCREMENT_TABLES = ("people", "entries", "tags", "feedback", "reviews", "goals")
@@ -141,7 +163,12 @@ def _validate_row(table: str, index: int, row: Any) -> None:
     location = f"{table}[{index}]"
     if not isinstance(row, Mapping):
         raise DumpFormatError(f"{location} must be an object")
-    missing = [column for column in _TABLE_COLUMNS[table] if column not in row]
+    optional = _OPTIONAL_TABLE_COLUMNS.get(table, frozenset())
+    missing = [
+        column
+        for column in _TABLE_COLUMNS[table]
+        if column not in row and column not in optional
+    ]
     if missing:
         raise DumpFormatError(f"{location} is missing column {missing[0]!r}")
 
@@ -210,10 +237,14 @@ def _insert_row(
     row: Mapping[str, Any],
 ) -> None:
     columns = _TABLE_COLUMNS[table]
+    optional = _OPTIONAL_TABLE_COLUMNS.get(table, frozenset())
     placeholders = ", ".join("?" for _ in columns)
     conn.execute(
         f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
-        tuple(row[column] for column in columns),
+        tuple(
+            row.get(column) if column in optional else row[column]
+            for column in columns
+        ),
     )
 
 

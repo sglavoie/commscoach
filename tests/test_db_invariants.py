@@ -161,20 +161,133 @@ class SchemaInvariantTests(unittest.TestCase):
                     (entry_id, 9999),
                 )
 
-    def test_reviews_scope_kind_only_allows_latest(self) -> None:
+    def _insert_scoped_review(
+        self, conn: sqlite3.Connection, **scope: object
+    ) -> sqlite3.Cursor:
+        """Insert a review with every scope column stated explicitly."""
+        columns = (
+            "scope_kind",
+            "scope_limit",
+            "scope_person_id",
+            "scope_person_handle",
+            "scope_tag",
+            "scope_since",
+            "scope_until",
+        )
+        unknown = set(scope) - set(columns)
+        assert not unknown, f"unknown scope columns {sorted(unknown)}"
+        values = tuple(scope.get(column) for column in columns)
+        return conn.execute(
+            "INSERT INTO reviews"
+            f" (body, {', '.join(columns)}, created_at, updated_at)"
+            f" VALUES (?, {', '.join('?' for _ in columns)}, ?, ?)",
+            ("scoped", *values, NOW, NOW),
+        )
+
+    def test_reviews_scope_kind_accepts_the_four_kinds(self) -> None:
         with closing(db.connect(self.db_path)) as conn:
-            conn.execute(
-                "INSERT INTO reviews (body, scope_kind, scope_limit, created_at, updated_at)"
-                " VALUES (?, 'latest', NULL, ?, ?)",
-                ("ok", NOW, NOW),
+            person_id = self._insert_person(conn, "alice")
+            accepted = (
+                {"scope_kind": "latest", "scope_limit": 20},
+                {
+                    "scope_kind": "person",
+                    "scope_person_id": person_id,
+                    "scope_person_handle": "alice",
+                },
+                {"scope_kind": "tag", "scope_tag": "conflict"},
+                {"scope_kind": "range", "scope_since": "2026-06-01"},
+                {"scope_kind": "range", "scope_until": "2026-06-30"},
+                {
+                    "scope_kind": "range",
+                    "scope_since": "2026-06-01",
+                    "scope_until": "2026-06-30",
+                },
             )
-            with self.assertRaises(sqlite3.IntegrityError):
-                conn.execute(
-                    "INSERT INTO reviews"
-                    " (body, scope_kind, scope_limit, created_at, updated_at)"
-                    " VALUES (?, 'all', NULL, ?, ?)",
-                    ("bad scope", NOW, NOW),
-                )
+            for scope in accepted:
+                with self.subTest(scope=scope):
+                    self._insert_scoped_review(conn, **scope)
+            (count,) = conn.execute("SELECT COUNT(*) FROM reviews").fetchone()
+            self.assertEqual(count, len(accepted))
+
+    def test_reviews_scope_kind_rejects_unknown_kind(self) -> None:
+        with closing(db.connect(self.db_path)) as conn, self.assertRaises(
+            sqlite3.IntegrityError
+        ):
+            self._insert_scoped_review(conn, scope_kind="all")
+
+    def test_reviews_scope_check_matrix_rejects_mismatched_axes(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            person_id = self._insert_person(conn, "alice")
+            rejected = (
+                # 'person' demands the denormalized handle.
+                {"scope_kind": "person"},
+                {"scope_kind": "person", "scope_person_id": person_id},
+                # ... and no other kind may carry one.
+                {"scope_kind": "latest", "scope_person_handle": "alice"},
+                # 'tag' demands scope_tag, and only 'tag' may set it.
+                {"scope_kind": "tag"},
+                {"scope_kind": "latest", "scope_tag": "conflict"},
+                {
+                    "scope_kind": "person",
+                    "scope_person_handle": "alice",
+                    "scope_tag": "conflict",
+                },
+                # The live person link only makes sense for a person scope.
+                {"scope_kind": "latest", "scope_person_id": person_id},
+                {
+                    "scope_kind": "tag",
+                    "scope_tag": "conflict",
+                    "scope_person_id": person_id,
+                },
+                # Date bounds belong to 'range' alone...
+                {"scope_kind": "latest", "scope_since": "2026-06-01"},
+                {"scope_kind": "latest", "scope_until": "2026-06-30"},
+                {
+                    "scope_kind": "tag",
+                    "scope_tag": "conflict",
+                    "scope_since": "2026-06-01",
+                },
+                # ... and an unbounded range is indistinguishable from 'latest'.
+                {"scope_kind": "range"},
+                {"scope_kind": "range", "scope_limit": 20},
+            )
+            for scope in rejected:
+                with self.subTest(scope=scope), self.assertRaises(
+                    sqlite3.IntegrityError
+                ):
+                    self._insert_scoped_review(conn, **scope)
+
+    def test_reviews_scope_limit_rejects_negative(self) -> None:
+        with closing(db.connect(self.db_path)) as conn, self.assertRaises(
+            sqlite3.IntegrityError
+        ):
+            self._insert_scoped_review(conn, scope_kind="latest", scope_limit=-1)
+
+    def test_deleting_person_nulls_scope_link_and_keeps_the_handle(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            person_id = self._insert_person(conn, "alice")
+            self._insert_scoped_review(
+                conn,
+                scope_kind="person",
+                scope_person_id=person_id,
+                scope_person_handle="alice",
+            )
+            conn.commit()
+
+            conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
+            conn.commit()
+
+            row = conn.execute(
+                "SELECT scope_kind, scope_person_id, scope_person_handle FROM reviews"
+            ).fetchone()
+            self.assertEqual(
+                dict(row),
+                {
+                    "scope_kind": "person",
+                    "scope_person_id": None,
+                    "scope_person_handle": "alice",
+                },
+            )
 
     def test_deleting_review_cascades_to_review_entries(self) -> None:
         with closing(db.connect(self.db_path)) as conn:

@@ -1,4 +1,4 @@
-"""Tests for SQLite schema v3, idempotent init, and connection settings.
+"""Tests for SQLite schema v4, idempotent init, and connection settings.
 
 These tests use temporary DB files exclusively so the default user DB is never
 mutated.
@@ -49,6 +49,8 @@ class InitDbSchemaTests(unittest.TestCase):
             "idx_feedback_entry_id",
             "idx_feedback_created_at",
             "idx_reviews_created_at",
+            "idx_reviews_scope",
+            "idx_reviews_scope_person_id",
             "idx_review_entries_entry_id",
             "idx_review_entries_review_position",
             "idx_goals_status",
@@ -63,8 +65,12 @@ class InitDbSchemaTests(unittest.TestCase):
     def test_init_stamps_schema_version(self) -> None:
         db.init_db(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
-            self.assertEqual(db.SCHEMA_VERSION, 3)
-            self.assertEqual(db.get_schema_version(conn), 3)
+            self.assertEqual(db.SCHEMA_VERSION, 4)
+            self.assertEqual(db.get_schema_version(conn), 4)
+
+    def test_init_adds_no_tables_beyond_the_expected_set(self) -> None:
+        db.init_db(self.db_path)
+        self.assertEqual(db_schema.EXPECTED_TABLES, frozenset(EXPECTED_TABLES))
 
     def test_init_feature_detects_fts5_and_creates_sync_triggers(self) -> None:
         db.init_db(self.db_path)
@@ -252,7 +258,7 @@ class InitDbSchemaTests(unittest.TestCase):
         db.init_db(self.db_path)
 
         with closing(db.connect(self.db_path)) as conn:
-            self.assertEqual(db.get_schema_version(conn), 3)
+            self.assertEqual(db.get_schema_version(conn), db.SCHEMA_VERSION)
             self.assertTrue(EXPECTED_TABLES.issubset(table_names(conn)))
             self.assertEqual(
                 conn.execute("SELECT body FROM entries").fetchone()["body"],
