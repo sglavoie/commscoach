@@ -113,6 +113,60 @@ class ReviewCrudTests(DBTestCase):
     def test_delete_review_missing_returns_false(self) -> None:
         self.assertFalse(db.delete_review(self.conn, 9999))
 
+    def test_update_review_replaces_body(self) -> None:
+        review = db.create_review(self.conn, "first draft", [self.first.id])
+
+        updated = db.update_review(self.conn, review.id, body="tightened synthesis")
+
+        self.assertIsInstance(updated, Review)
+        self.assertEqual(updated.id, review.id)
+        self.assertEqual(updated.body, "tightened synthesis")
+        self.assertEqual(db.get_review(self.conn, review.id), updated)
+
+    def test_update_review_advances_updated_at_only(self) -> None:
+        with patch_timestamps("t0", "t1"):
+            review = db.create_review(self.conn, "first draft", [self.first.id])
+            updated = db.update_review(self.conn, review.id, body="revised")
+
+        self.assertEqual(updated.created_at, review.created_at)
+        self.assertEqual(updated.created_at, "t0")
+        self.assertEqual(updated.updated_at, "t1")
+        self.assertNotEqual(updated.updated_at, updated.created_at)
+
+    def test_update_review_preserves_scope_and_covered_entries(self) -> None:
+        review = db.create_review(
+            self.conn,
+            "first draft",
+            [self.second.id, self.first.id],
+            scope_limit=7,
+        )
+
+        updated = db.update_review(self.conn, review.id, body="revised")
+
+        self.assertEqual(updated.scope_kind, review.scope_kind)
+        self.assertEqual(updated.scope_limit, 7)
+        self.assertEqual(
+            [entry.id for entry in updated.entries],
+            [self.second.id, self.first.id],
+        )
+
+    def test_update_review_without_body_is_a_no_op(self) -> None:
+        review = db.create_review(self.conn, "unchanged", [self.first.id])
+
+        self.assertEqual(db.update_review(self.conn, review.id), review)
+
+    def test_update_review_rejects_empty_body_without_writing(self) -> None:
+        review = db.create_review(self.conn, "keep me", [self.first.id])
+
+        with self.assertRaises(db.DBError):
+            db.update_review(self.conn, review.id, body="   ")
+
+        self.assertEqual(db.get_review(self.conn, review.id), review)
+
+    def test_update_review_missing_id_raises(self) -> None:
+        with self.assertRaises(db.ReviewNotFoundError):
+            db.update_review(self.conn, 9999, body="nope")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,7 @@ import sqlite3
 from ..models import Feedback
 from . import common
 from .entries import get_entry
-from .errors import DBError, EntryNotFoundError
+from .errors import DBError, EntryNotFoundError, FeedbackNotFoundError
 from .rows import row_to_feedback
 
 
@@ -53,3 +53,39 @@ def get_feedback(conn: sqlite3.Connection, feedback_id: int) -> Feedback | None:
     if row is None:
         return None
     return row_to_feedback(row)
+
+
+def update_feedback(
+    conn: sqlite3.Connection,
+    feedback_id: int,
+    *,
+    body: str,
+) -> Feedback:
+    """Replace a feedback note's body, advancing ``updated_at``.
+
+    The note stays attached to its original entry: ``entry_id`` is part of what
+    the note *is*, not editable content.
+    """
+    if not body or not body.strip():
+        raise DBError("feedback body must be a non-empty string")
+    if get_feedback(conn, feedback_id) is None:
+        raise FeedbackNotFoundError(feedback_id)
+    now = common.utcnow_iso()
+    with conn:
+        conn.execute(
+            "UPDATE feedback SET body = ?, updated_at = ? WHERE id = ?",
+            (body, now, feedback_id),
+        )
+    feedback = get_feedback(conn, feedback_id)
+    assert feedback is not None
+    return feedback
+
+
+def delete_feedback(conn: sqlite3.Connection, feedback_id: int) -> bool:
+    """Delete a feedback note. Returns ``True`` if a row was deleted.
+
+    Nothing references ``feedback``, so there is no orphan collection to run.
+    """
+    with conn:
+        cur = conn.execute("DELETE FROM feedback WHERE id = ?", (feedback_id,))
+    return cur.rowcount > 0

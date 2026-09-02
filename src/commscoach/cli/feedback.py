@@ -7,7 +7,14 @@ import sys
 import textwrap
 
 from .. import db
-from .common import format_stamp, open_db, print_json, prose_lines, read_body_arg
+from .common import (
+    confirm,
+    format_stamp,
+    open_db,
+    print_json,
+    prose_lines,
+    read_body_arg,
+)
 from .editor import compose_in_editor
 from .serializers import feedback_to_dict
 
@@ -56,6 +63,24 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     show = feedback_sub.add_parser("show", help="Show one feedback note by id.")
     show.add_argument("feedback_id", type=int, metavar="FEEDBACK_ID")
     show.set_defaults(func=cmd_feedback_show)
+
+    edit = feedback_sub.add_parser("edit", help="Rewrite a feedback note body.")
+    edit.add_argument("feedback_id", type=int, metavar="FEEDBACK_ID")
+    edit.add_argument(
+        "--body",
+        nargs="?",
+        const="",
+        default=None,
+        help=(
+            "Replace the body (text, '-', or '@PATH'); omit the value to open"
+            " $EDITOR with the current body."
+        ),
+    )
+    edit.set_defaults(func=cmd_feedback_edit)
+
+    rm = feedback_sub.add_parser("rm", help="Delete one feedback note.")
+    rm.add_argument("feedback_id", type=int, metavar="FEEDBACK_ID")
+    rm.set_defaults(func=cmd_feedback_rm)
 
 
 def _format_feedback_human(feedback: db.Feedback) -> str:
@@ -143,4 +168,55 @@ def cmd_feedback_show(args: argparse.Namespace) -> int:
     if feedback is None:
         raise db.FeedbackNotFoundError(args.feedback_id)
     _emit_feedback(args, feedback)
+    return 0
+
+
+def cmd_feedback_edit(args: argparse.Namespace) -> int:
+    if args.body is None:
+        raise db.DBError("feedback edit requires --body")
+    body = (
+        read_body_arg(
+            args.body,
+            what="body",
+            template="",
+            preamble=FEEDBACK_PREAMBLE,
+            isatty=sys.stdin.isatty,
+            compose=compose_in_editor,
+        )
+        if args.body != ""
+        else None
+    )
+    with open_db(args) as conn:
+        if body is None:
+            current = db.get_feedback(conn, args.feedback_id)
+            if current is None:
+                raise db.FeedbackNotFoundError(args.feedback_id)
+            body = read_body_arg(
+                None,
+                what="body",
+                template=current.body,
+                preamble=FEEDBACK_PREAMBLE,
+                isatty=sys.stdin.isatty,
+                compose=compose_in_editor,
+            )
+        feedback = db.update_feedback(conn, args.feedback_id, body=body)
+    _emit_feedback(args, feedback, human_prefix="updated")
+    return 0
+
+
+def cmd_feedback_rm(args: argparse.Namespace) -> int:
+    with open_db(args) as conn:
+        if db.get_feedback(conn, args.feedback_id) is None:
+            raise db.FeedbackNotFoundError(args.feedback_id)
+        if not confirm(
+            f"Delete feedback {args.feedback_id}?", assume_yes=args.yes
+        ):
+            raise db.DBError("aborted")
+        deleted = db.delete_feedback(conn, args.feedback_id)
+    if not deleted:
+        raise db.FeedbackNotFoundError(args.feedback_id)
+    if args.json:
+        print_json({"deleted": True, "id": args.feedback_id})
+    else:
+        print(f"deleted feedback {args.feedback_id}")
     return 0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import unittest
 from contextlib import closing
@@ -213,6 +214,10 @@ class EntryEditTests(EntryTestBase):
             str(entry.id),
             "--person",
             "ghost",
+            # Empty stdin so the confirm prompt sees EOF and declines. Without
+            # it ``input()`` hits pytest's capture stub, which raises OSError
+            # rather than the EOFError ``confirm`` treats as "no".
+            stdin=io.StringIO(),
         )
         self.assertEqual(rc, 1)
         self.assertIn("ghost", err)

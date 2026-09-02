@@ -121,6 +121,20 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     show.add_argument("review_id", type=int, metavar="REVIEW_ID")
     show.set_defaults(func=cmd_review_show)
 
+    edit = review_sub.add_parser("edit", help="Rewrite a stored review body.")
+    edit.add_argument("review_id", type=int, metavar="REVIEW_ID")
+    edit.add_argument(
+        "--body",
+        nargs="?",
+        const="",
+        default=None,
+        help=(
+            "Replace the body (text, '-', or '@PATH'); omit the value to open"
+            " $EDITOR with the current body."
+        ),
+    )
+    edit.set_defaults(func=cmd_review_edit)
+
     rm = review_sub.add_parser("rm", help="Delete one review.")
     rm.add_argument("review_id", type=int, metavar="REVIEW_ID")
     rm.set_defaults(func=cmd_review_rm)
@@ -253,6 +267,39 @@ def cmd_review_show(args: argparse.Namespace) -> int:
     if review is None:
         raise db.ReviewNotFoundError(args.review_id)
     _emit_review(args, review)
+    return 0
+
+
+def cmd_review_edit(args: argparse.Namespace) -> int:
+    if args.body is None:
+        raise db.DBError("review edit requires --body")
+    body = (
+        read_body_arg(
+            args.body,
+            what="body",
+            template="",
+            preamble=REVIEW_PREAMBLE,
+            isatty=sys.stdin.isatty,
+            compose=compose_in_editor,
+        )
+        if args.body != ""
+        else None
+    )
+    with open_db(args) as conn:
+        if body is None:
+            current = db.get_review(conn, args.review_id)
+            if current is None:
+                raise db.ReviewNotFoundError(args.review_id)
+            body = read_body_arg(
+                None,
+                what="body",
+                template=current.body,
+                preamble=REVIEW_PREAMBLE,
+                isatty=sys.stdin.isatty,
+                compose=compose_in_editor,
+            )
+        review = db.update_review(conn, args.review_id, body=body)
+    _emit_review(args, review, human_prefix="updated")
     return 0
 
 

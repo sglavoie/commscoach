@@ -8,7 +8,7 @@ from typing import Any, Iterable
 from ..models import Entry, Review
 from . import common
 from .entries import get_entry
-from .errors import DBError, EntryNotFoundError
+from .errors import DBError, EntryNotFoundError, ReviewNotFoundError
 from .rows import hydrate_review
 
 
@@ -88,6 +88,38 @@ def list_reviews(
         params.append(limit)
     rows = conn.execute(sql, params).fetchall()
     return tuple(hydrate_review(conn, row) for row in rows)
+
+
+def update_review(
+    conn: sqlite3.Connection,
+    review_id: int,
+    *,
+    body: Any = common.UNSET,
+) -> Review:
+    """Update a stored review's body, advancing ``updated_at``.
+
+    Body only, deliberately. ``scope_kind``, ``scope_limit``, and the covered-entry
+    list are facts about how the synthesis was produced, not editable content --
+    letting them be rewritten would make the stored record lie about its own
+    provenance. Do not add scope or entry editing here; store a new review
+    instead.
+    """
+    current = get_review(conn, review_id)
+    if current is None:
+        raise ReviewNotFoundError(review_id)
+    if body is common.UNSET:
+        return current
+    if not body or not str(body).strip():
+        raise DBError("review body must be a non-empty string")
+    now = common.utcnow_iso()
+    with conn:
+        conn.execute(
+            "UPDATE reviews SET body = ?, updated_at = ? WHERE id = ?",
+            (body, now, review_id),
+        )
+    review = get_review(conn, review_id)
+    assert review is not None
+    return review
 
 
 def delete_review(conn: sqlite3.Connection, review_id: int) -> bool:

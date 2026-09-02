@@ -57,7 +57,13 @@ from .errors import (
     PersonNotFoundError,
     ReviewNotFoundError,
 )
-from .feedback import create_feedback, get_feedback, list_feedback
+from .feedback import (
+    create_feedback,
+    delete_feedback,
+    get_feedback,
+    list_feedback,
+    update_feedback,
+)
 from .goals import (
     close_goal,
     create_goal,
@@ -82,7 +88,13 @@ from .people import (
     set_self,
     update_person,
 )
-from .reviews import create_review, delete_review, get_review, list_reviews
+from .reviews import (
+    create_review,
+    delete_review,
+    get_review,
+    list_reviews,
+    update_review,
+)
 from .schema import (
     SCHEMA_VERSION,
     connect,
@@ -128,6 +140,7 @@ __all__ = [
     "create_person",
     "create_review",
     "delete_entry",
+    "delete_feedback",
     "delete_goal",
     "delete_person",
     "delete_review",
@@ -158,8 +171,10 @@ __all__ = [
     "set_person_note",
     "set_self",
     "update_entry",
+    "update_feedback",
     "update_goal",
     "update_person",
+    "update_review",
     "validate_dump",
     "validate_schema",
 ]

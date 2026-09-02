@@ -47,6 +47,58 @@ class FeedbackCrudTests(DBTestCase):
         self.assertEqual(found, fb)
         self.assertIsNone(db.get_feedback(self.conn, 9999))
 
+    def test_update_feedback_replaces_body(self) -> None:
+        fb = db.create_feedback(self.conn, self.entry.id, "first draft")
+
+        updated = db.update_feedback(self.conn, fb.id, body="corrected note")
+
+        self.assertIsInstance(updated, Feedback)
+        self.assertEqual(updated.id, fb.id)
+        self.assertEqual(updated.body, "corrected note")
+        self.assertEqual(updated.entry_id, self.entry.id)
+        self.assertEqual(db.get_feedback(self.conn, fb.id), updated)
+
+    def test_update_feedback_advances_updated_at_only(self) -> None:
+        with patch_timestamps("t0", "t1"):
+            fb = db.create_feedback(self.conn, self.entry.id, "first draft")
+            updated = db.update_feedback(self.conn, fb.id, body="corrected")
+
+        self.assertEqual(updated.created_at, fb.created_at)
+        self.assertEqual(updated.created_at, "t0")
+        self.assertEqual(updated.updated_at, "t1")
+        self.assertNotEqual(updated.updated_at, updated.created_at)
+
+    def test_update_feedback_rejects_empty_body_without_writing(self) -> None:
+        fb = db.create_feedback(self.conn, self.entry.id, "keep me")
+
+        with self.assertRaises(db.DBError):
+            db.update_feedback(self.conn, fb.id, body="   ")
+
+        self.assertEqual(db.get_feedback(self.conn, fb.id), fb)
+
+    def test_update_feedback_missing_id_raises(self) -> None:
+        with self.assertRaises(db.FeedbackNotFoundError):
+            db.update_feedback(self.conn, 9999, body="nope")
+
+    def test_delete_feedback_returns_true_and_removes_row(self) -> None:
+        fb = db.create_feedback(self.conn, self.entry.id, "delete me")
+
+        self.assertTrue(db.delete_feedback(self.conn, fb.id))
+        self.assertIsNone(db.get_feedback(self.conn, fb.id))
+        self.assertEqual(db.list_feedback(self.conn, self.entry.id), ())
+
+    def test_delete_feedback_leaves_the_entry_and_siblings_intact(self) -> None:
+        first = db.create_feedback(self.conn, self.entry.id, "first")
+        second = db.create_feedback(self.conn, self.entry.id, "second")
+
+        self.assertTrue(db.delete_feedback(self.conn, first.id))
+
+        self.assertEqual(db.list_feedback(self.conn, self.entry.id), (second,))
+        self.assertIsNotNone(db.get_entry(self.conn, self.entry.id))
+
+    def test_delete_feedback_missing_returns_false(self) -> None:
+        self.assertFalse(db.delete_feedback(self.conn, 9999))
+
 
 if __name__ == "__main__":
     unittest.main()

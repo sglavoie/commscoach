@@ -405,6 +405,154 @@ class ReviewShowTests(ReviewTestBase):
         self.assertEqual(ctx.exception.code, 2)
 
 
+class ReviewEditTests(ReviewTestBase):
+    def test_edit_body_literal(self) -> None:
+        entry = self._seed_entry("entry")
+        review = self._seed_review("first draft", [entry.id])
+
+        rc, out, _ = self._run(
+            "review", "edit", str(review.id), "--body", "tightened synthesis"
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertIn(f"updated review {review.id}", out)
+        self.assertIn("tightened synthesis", out)
+        with closing(db.connect(self.db_path)) as conn:
+            updated = db.get_review(conn, review.id)
+        assert updated is not None
+        self.assertEqual(updated.body, "tightened synthesis")
+        self.assertNotEqual(updated.updated_at, updated.created_at)
+
+    def test_edit_leaves_scope_and_covered_entries_untouched(self) -> None:
+        first = self._seed_entry("first")
+        second = self._seed_entry("second")
+        review = self._seed_review("first draft", [second.id, first.id])
+
+        rc, _, _ = self._run("review", "edit", str(review.id), "--body", "revised")
+
+        self.assertEqual(rc, 0)
+        with closing(db.connect(self.db_path)) as conn:
+            updated = db.get_review(conn, review.id)
+        assert updated is not None
+        self.assertEqual(updated.scope_kind, "latest")
+        self.assertEqual(updated.scope_limit, 20)
+        self.assertEqual(
+            [entry.id for entry in updated.entries], [second.id, first.id]
+        )
+
+    def test_edit_body_from_stdin(self) -> None:
+        entry = self._seed_entry("entry")
+        review = self._seed_review("first draft", [entry.id])
+
+        rc, _, _ = self._run(
+            "review",
+            "edit",
+            str(review.id),
+            "--body",
+            "-",
+            stdin=io.StringIO("piped revision\n"),
+        )
+
+        self.assertEqual(rc, 0)
+        with closing(db.connect(self.db_path)) as conn:
+            updated = db.get_review(conn, review.id)
+        assert updated is not None
+        self.assertEqual(updated.body, "piped revision\n")
+
+    def test_edit_body_from_file(self) -> None:
+        entry = self._seed_entry("entry")
+        review = self._seed_review("first draft", [entry.id])
+        body_file = self.tmpdir / "revision.txt"
+        body_file.write_text("file revision", encoding="utf-8")
+
+        rc, _, _ = self._run(
+            "review", "edit", str(review.id), "--body", f"@{body_file}"
+        )
+
+        self.assertEqual(rc, 0)
+        with closing(db.connect(self.db_path)) as conn:
+            updated = db.get_review(conn, review.id)
+        assert updated is not None
+        self.assertEqual(updated.body, "file revision")
+
+    def test_edit_bare_body_opens_editor_seeded_with_current_body(self) -> None:
+        entry = self._seed_entry("entry")
+        review = self._seed_review("first draft", [entry.id])
+
+        def compose(*, template: str, preamble: str) -> str:
+            self.assertEqual(template, "first draft")
+            self.assertIn("#>", preamble)
+            return "edited in place"
+
+        tty = mock.Mock()
+        tty.isatty.return_value = True
+        with mock.patch.object(cli_reviews.sys, "stdin", tty), mock.patch.object(
+            cli_reviews, "compose_in_editor", side_effect=compose
+        ):
+            rc, _, _ = self._run("review", "edit", str(review.id), "--body")
+
+        self.assertEqual(rc, 0)
+        with closing(db.connect(self.db_path)) as conn:
+            updated = db.get_review(conn, review.id)
+        assert updated is not None
+        self.assertEqual(updated.body, "edited in place")
+
+    def test_edit_bare_body_missing_id_exits_one_before_the_editor(self) -> None:
+        composed = mock.Mock()
+        tty = mock.Mock()
+        tty.isatty.return_value = True
+        with mock.patch.object(cli_reviews.sys, "stdin", tty), mock.patch.object(
+            cli_reviews, "compose_in_editor", composed
+        ):
+            rc, _, err = self._run("review", "edit", "9999", "--body")
+
+        self.assertEqual(rc, 1)
+        self.assertIn("review 9999 not found", err)
+        composed.assert_not_called()
+
+    def test_edit_without_body_flag_exits_one(self) -> None:
+        entry = self._seed_entry("entry")
+        review = self._seed_review("unchanged", [entry.id])
+
+        rc, _, err = self._run("review", "edit", str(review.id))
+
+        self.assertEqual(rc, 1)
+        self.assertIn("--body", err)
+        with closing(db.connect(self.db_path)) as conn:
+            unchanged = db.get_review(conn, review.id)
+        assert unchanged is not None
+        self.assertEqual(unchanged.body, "unchanged")
+
+    def test_edit_empty_body_exits_one(self) -> None:
+        entry = self._seed_entry("entry")
+        review = self._seed_review("keep me", [entry.id])
+
+        rc, _, err = self._run("review", "edit", str(review.id), "--body", "   ")
+
+        self.assertEqual(rc, 1)
+        self.assertIn("non-empty", err)
+
+    def test_edit_missing_id_exits_one(self) -> None:
+        rc, _, err = self._run("review", "edit", "9999", "--body", "nope")
+        self.assertEqual(rc, 1)
+        self.assertIn("9999", err)
+
+    def test_edit_json_output(self) -> None:
+        entry = self._seed_entry("entry")
+        review = self._seed_review("first draft", [entry.id])
+
+        rc, out, _ = self._run(
+            "--json", "review", "edit", str(review.id), "--body", "json edit"
+        )
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["id"], review.id)
+        self.assertEqual(payload["body"], "json edit")
+        self.assertEqual(payload["entry_ids"], [entry.id])
+        self.assertNotEqual(payload["updated_at"], payload["created_at"])
+
+
 class ReviewRmTests(ReviewTestBase):
     def test_rm_with_yes_deletes(self) -> None:
         entry = self._seed_entry("entry")
@@ -452,6 +600,7 @@ class ReviewHelpTests(ReviewTestBase):
         self.assertIn("add", out)
         self.assertIn("list", out)
         self.assertIn("show", out)
+        self.assertIn("edit", out)
         self.assertIn("rm", out)
 
 
