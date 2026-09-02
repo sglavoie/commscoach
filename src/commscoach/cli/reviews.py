@@ -110,6 +110,11 @@ def _resolve_scope(args: argparse.Namespace) -> _Scope:
     ``--until`` together, but neither alongside ``--person``", so the conflict
     is rejected here as a ``db.DBError`` (exit 1) naming every flag involved --
     the same way ``cmd_entry_edit`` rejects ``--clear-tags`` with ``--tag``.
+
+    A reversed closed range is rejected here rather than left to the DB layer
+    because ``cmd_review_add`` resolves the scope *before* ``read_body_arg``:
+    catching it later would mean opening ``$EDITOR``, composing a whole review,
+    and only then being told the flags were incoherent.
     """
     supplied = [
         (flag, kind)
@@ -136,6 +141,9 @@ def _resolve_scope(args: argparse.Namespace) -> _Scope:
         )
 
     since, until = parse_date_bounds(args) if derived == "range" else (None, None)
+    db.validate_range_bounds(
+        since, until, since_name="--since", until_name="--until"
+    )
     return _Scope(
         kind=derived,
         person_handle=args.scope_person,

@@ -20,7 +20,12 @@ from .feedback import list_feedback
 from .goals import list_goals
 from .notes import get_person_notes
 from .people import get_person_by_handle, get_self_person
-from .reviews import _SCOPE_AXES, SCOPE_KINDS, list_reviews
+from .reviews import (
+    _SCOPE_AXES,
+    SCOPE_KINDS,
+    list_reviews,
+    validate_range_bounds,
+)
 
 # ``get_review_context`` names its scope axes without the ``scope_`` prefix the
 # stored-review API uses, because they map one-for-one onto ``search_entries``
@@ -43,8 +48,10 @@ def _validate_context_scope(scope_kind: str, supplied: dict[str, Any]) -> None:
     """Check one scope axis against its kind, mirroring ``create_review``.
 
     Rejects an unknown kind, an axis belonging to another kind (``tag`` with
-    ``scope_kind='latest'``), and a kind whose own axis is missing. An empty
-    *result* is fine; an incoherent *request* is not.
+    ``scope_kind='latest'``), a kind whose own axis is missing, and a closed
+    range whose bounds are reversed. An empty *result* is fine; an incoherent
+    *request* is not -- and ``since`` after ``until`` is the second kind, since
+    it can never select anything and ``create_review`` rejects it outright.
     """
     if scope_kind not in SCOPE_KINDS:
         raise DBError("scope_kind must be one of: " + ", ".join(SCOPE_KINDS))
@@ -56,12 +63,15 @@ def _validate_context_scope(scope_kind: str, supplied: dict[str, Any]) -> None:
         raise DBError("scope_kind 'person' requires person_handle")
     if scope_kind == "tag" and not tags_mod.normalize_tag(supplied["tag"] or ""):
         raise DBError("scope_kind 'tag' requires a non-empty tag")
-    if (
-        scope_kind == "range"
-        and supplied["since"] is None
-        and supplied["until"] is None
-    ):
-        raise DBError("scope_kind 'range' requires since or until")
+    if scope_kind == "range":
+        if supplied["since"] is None and supplied["until"] is None:
+            raise DBError("scope_kind 'range' requires since or until")
+        validate_range_bounds(
+            supplied["since"],
+            supplied["until"],
+            since_name="since",
+            until_name="until",
+        )
 
 
 def get_review_context(
@@ -86,7 +96,10 @@ def get_review_context(
     A scope that matches nothing returns ``entries=()`` rather than raising --
     "no entries with @alice yet" is an answer, not an error. An unknown
     ``person_handle`` does raise ``PersonNotFoundError``, because that is a typo
-    rather than a finding.
+    rather than a finding. A reversed closed range (``since`` after ``until``)
+    raises for the same reason: it is the one empty result that can only be a
+    mistake, and ``create_review`` rejects it, so accepting it here would let a
+    user build a context from flags that then fail to store.
 
     Two deliberate asymmetries, both load-bearing:
 

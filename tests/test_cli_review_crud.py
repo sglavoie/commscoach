@@ -283,6 +283,45 @@ class ScopedAddTests(ReviewTestBase):
         self.assertIn("--person", err)
         composed.assert_not_called()
 
+    def test_reversed_range_exits_one_without_writing(self) -> None:
+        rc, _, err = self._run(
+            "review",
+            "add",
+            "body",
+            "--entry",
+            str(self.entry.id),
+            "--since",
+            "2026-09-01",
+            "--until",
+            "2026-08-01",
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("--since must not be after --until", err)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.list_reviews(conn), ())
+
+    def test_reversed_range_is_rejected_before_the_body_is_composed(self) -> None:
+        """The whole point of the finding: no $EDITOR session for a bad range."""
+        composed = mock.Mock()
+        tty = mock.Mock()
+        tty.isatty.return_value = True
+        with mock.patch.object(cli_reviews.sys, "stdin", tty), mock.patch.object(
+            cli_reviews, "compose_in_editor", composed
+        ):
+            rc, _, err = self._run(
+                "review",
+                "add",
+                "--entry",
+                str(self.entry.id),
+                "--since",
+                "2026-09-01",
+                "--until",
+                "2026-08-01",
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("must not be after", err)
+        composed.assert_not_called()
+
     def test_unknown_person_exits_one_without_writing(self) -> None:
         rc, _, err = self._run(
             "review",

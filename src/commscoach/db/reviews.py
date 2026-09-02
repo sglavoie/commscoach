@@ -39,6 +39,38 @@ def _validate_scope_date(value: Any, *, what: str) -> str:
         raise DBError(f"{what} must be an ISO date (YYYY-MM-DD)") from exc
 
 
+def validate_range_bounds(
+    since: str | None,
+    until: str | None,
+    *,
+    since_name: str,
+    until_name: str,
+) -> None:
+    """Reject a closed ``range`` scope whose bounds are reversed.
+
+    Every surface that accepts a range calls this -- ``create_review``,
+    ``get_review_context``, and the ``review`` CLI -- so all three agree on
+    when a range is incoherent. Without it the context path accepted
+    ``since > until`` and returned an empty scope while storing the resulting
+    review rejected the identical flags, so a user only discovered the bad
+    request after composing a body.
+
+    ``since_name``/``until_name`` are the names the calling surface gives the
+    two bounds (``--since``, ``scope_since``, ``since``), so the message points
+    at what the caller actually typed while the claim itself stays identical.
+
+    An open range is always fine: only two supplied bounds can be reversed.
+    Bounds are compared as normalized ISO dates, so a bound spelled
+    ``20260201`` orders by date rather than by text.
+    """
+    if since is None or until is None:
+        return
+    normalized_since = _validate_scope_date(since, what=since_name)
+    normalized_until = _validate_scope_date(until, what=until_name)
+    if normalized_since > normalized_until:
+        raise DBError(f"{since_name} must not be after {until_name}")
+
+
 def _resolve_review_entries(
     conn: sqlite3.Connection, entry_ids: Iterable[int] | None
 ) -> list[Entry]:
@@ -120,9 +152,12 @@ def _validate_scope(
             axes["scope_until"] = _validate_scope_date(
                 scope_until, what="review scope_until"
             )
-        since, until = axes["scope_since"], axes["scope_until"]
-        if since is not None and until is not None and since > until:
-            raise DBError("review scope_since must not be after scope_until")
+        validate_range_bounds(
+            axes["scope_since"],
+            axes["scope_until"],
+            since_name="review scope_since",
+            until_name="review scope_until",
+        )
     return axes
 
 

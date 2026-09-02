@@ -309,6 +309,53 @@ class ScopeConflictTests(ScopedContextBase):
         self.assertIn("--person", err)
 
 
+class ReversedRangeTests(ScopedContextBase):
+    """A closed range whose bounds are reversed is rejected, not emptied."""
+
+    def test_reversed_range_exits_one_naming_both_bound_flags(self) -> None:
+        rc, out, err = self._run(
+            "review", "context", "--since", "2026-09-01", "--until", "2026-08-01"
+        )
+
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, "")
+        self.assertIn("--since must not be after --until", err)
+
+    def test_reversed_range_emits_no_context_payload(self) -> None:
+        """The pre-repair behavior was an exit-0 empty scope; assert it is gone."""
+        rc, out, _ = self._run(
+            "review",
+            "context",
+            "--scope",
+            "range",
+            "--since",
+            "2026-09-01",
+            "--until",
+            "2026-08-01",
+        )
+
+        self.assertEqual(rc, 1)
+        with self.assertRaises(json.JSONDecodeError):
+            json.loads(out)
+
+    def test_reversed_relative_bounds_are_rejected_after_resolution(self) -> None:
+        """Both flags resolve through ``parse_date_bound`` before being ordered."""
+        rc, _, err = self._run(
+            "review", "context", "--since", "today", "--until", "2 weeks ago"
+        )
+
+        self.assertEqual(rc, 1)
+        self.assertIn("must not be after", err)
+
+    def test_equal_bounds_are_a_valid_single_day_range(self) -> None:
+        payload = self._scope("--since", "2026-07-05", "--until", "2026-07-05")
+
+        self.assertEqual(payload["scope"]["kind"], "range")
+        self.assertEqual(
+            [item["entry"]["id"] for item in payload["entries"]], [self.first.id]
+        )
+
+
 class ScopeKindFlagTests(ScopedContextBase):
     def test_explicit_scope_matching_the_derived_kind_is_accepted(self) -> None:
         payload = self._scope("--scope", "person", "--person", "alice")

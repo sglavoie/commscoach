@@ -98,6 +98,7 @@ from .reviews import (
     get_review,
     list_reviews,
     update_review,
+    validate_range_bounds,
 )
 from .schema import (
     SCHEMA_VERSION,
@@ -196,5 +197,6 @@ __all__ = [
     "update_review",
     "validate_backup_source",
     "validate_dump",
+    "validate_range_bounds",
     "validate_schema",
 ]

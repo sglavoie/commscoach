@@ -183,7 +183,7 @@ commscoach review add "Q3 retrospective." --since "12 weeks ago" --until today -
 commscoach review list --scope range
 ```
 
-Either bound alone is enough to select the `range` scope; an unbounded range would just be `latest`.
+Either bound alone is enough to select the `range` scope; an unbounded range would just be `latest`. Two bounds in the wrong order (`--since` after `--until`) exit 1 on both `review context` and `review add`, before any context is emitted or any editor opens — it is the one empty scope that can only be a typo.
 
 ### What the scope changes
 
@@ -191,7 +191,7 @@ Either bound alone is enough to select the `range` scope; an unbounded range wou
 - **Prior reviews** are filtered to the same scope under `person` and `tag` only, so a review of @alice is measured against previous reviews of @alice. `latest` and `range` get the unfiltered recent listing instead: a date window is a one-off slice with no natural predecessor.
 - **Goals** are never scope-filtered, only capped by `--goal-limit`. A relationship or theme review should still be measured against your general goals.
 
-A scope that matches nothing returns an empty entry list rather than failing — "no entries with @alice yet" is an answer, not an error. An unknown person handle *is* an error, because that is a typo.
+A scope that matches nothing returns an empty entry list rather than failing — "no entries with @alice yet" is an answer, not an error. An unknown person handle *is* an error, because that is a typo, and so is a reversed date range.
 
 `review context` reports the scope in its own JSON block:
 

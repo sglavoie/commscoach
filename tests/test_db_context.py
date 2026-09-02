@@ -413,6 +413,70 @@ class ScopedReviewContextTests(DBTestCase):
                 self.conn, scope_kind="person", person_handle="alice"
             )
 
+    def test_reversed_range_is_rejected_before_any_context_is_built(self) -> None:
+        db.create_entry(self.conn, "in range", occurred_at="2026-02-10T12:00:00Z")
+
+        with self.assertRaises(db.DBError) as ctx:
+            db.get_review_context(
+                self.conn,
+                scope_kind="range",
+                since="2026-09-01",
+                until="2026-08-01",
+            )
+
+        self.assertEqual(str(ctx.exception), "since must not be after until")
+
+    def test_reversed_range_matches_the_error_create_review_raises(self) -> None:
+        """Both surfaces must reject the same scope for the same stated reason."""
+        entry = db.create_entry(self.conn, "any", occurred_at="2026-02-10T12:00:00Z")
+        with self.assertRaises(db.DBError) as context_error:
+            db.get_review_context(
+                self.conn,
+                scope_kind="range",
+                since="2026-09-01",
+                until="2026-08-01",
+            )
+        with self.assertRaises(db.DBError) as create_error:
+            db.create_review(
+                self.conn,
+                "body",
+                [entry.id],
+                scope_kind="range",
+                scope_since="2026-09-01",
+                scope_until="2026-08-01",
+            )
+
+        # Each surface names its own axes, but the claim is one template, so
+        # neither can drift into rejecting a range the other accepts.
+        self.assertEqual(str(context_error.exception), "since must not be after until")
+        self.assertEqual(
+            str(create_error.exception),
+            "review scope_since must not be after review scope_until",
+        )
+
+    def test_reversed_range_is_rejected_by_date_not_by_text(self) -> None:
+        """``20260201`` is a valid ISO date and must order as one."""
+        with self.assertRaises(db.DBError) as ctx:
+            db.get_review_context(
+                self.conn, scope_kind="range", since="20260201", until="2026-01-05"
+            )
+
+        self.assertEqual(str(ctx.exception), "since must not be after until")
+
+    def test_equal_range_bounds_are_a_valid_single_day_scope(self) -> None:
+        same_day = db.create_entry(
+            self.conn, "on the day", occurred_at="2026-02-10T12:00:00Z"
+        )
+        db.create_entry(self.conn, "next day", occurred_at="2026-02-11T12:00:00Z")
+
+        context = db.get_review_context(
+            self.conn, scope_kind="range", since="2026-02-10", until="2026-02-10"
+        )
+
+        self.assertEqual(
+            [entry_ctx.entry.id for entry_ctx in context.entries], [same_day.id]
+        )
+
     def test_rejects_unknown_kind_and_axes_from_another_kind(self) -> None:
         with self.assertRaises(db.DBError):
             db.get_review_context(self.conn, scope_kind="everything")
