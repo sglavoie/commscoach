@@ -4,7 +4,7 @@ Personal communications coach: log interactions with people, attach context, gen
 
 ## Status
 
-Ready to use. The CLI, SQLite schema, stored feedback and reviews, goals, diagnostics, backups, JSON export/import, stats, skill integration, and packaging are in place. Current scope intentionally excludes encryption.
+Ready to use. The CLI, SQLite schema, stored feedback and reviews, scoped reviews, tag management, goals, diagnostics, backups, JSON export/import, stats, skill integration, and packaging are in place. Current scope intentionally excludes encryption.
 
 ## Layout
 
@@ -84,12 +84,14 @@ commscoach person add jdoe --name "John Doe"
 echo "Quarterly review with John. I rambled before getting to my ask." \
   | commscoach entry add - --occurred-at yesterday --tag 1on1,review --person jdoe --source in-person
 commscoach entry list
+commscoach tag list
 commscoach context 1                 # skill-facing JSON
 commscoach feedback add 1 "Lead with the ask next time."
 commscoach feedback list 1
 commscoach goal add "Lead with the ask" --person jdoe
 commscoach review context --limit 20 --prior-review-limit 3 # skill-facing review JSON
 commscoach review add "Review: lead with the ask across recent 1:1s." --limit 20 --entry 1
+commscoach review context --person jdoe --limit 10          # scoped to one person
 commscoach review list
 commscoach stats
 commscoach doctor
@@ -104,11 +106,139 @@ commscoach export --format json --out commscoach.json
 
 `--occurred-at`, `--since`, and `--until` accept ISO-8601 values and natural relative dates such as `today`, `yesterday`, `3 days ago`, `last monday`, and `now`. Stored timestamps are normalized to UTC. Date filters are inclusive, and entries are ordered by when they occurred, falling back to creation time.
 
+## Tags
+
+Tags live in their own table with their own normalization and orphan collection, so the vocabulary stays maintainable instead of letting one typo split a theme across your stats permanently:
+
+```sh
+commscoach tag list                           # most-used first, with entry counts
+commscoach tag list --limit 10
+commscoach --json tag list
+commscoach tag rename conflcit conflict       # keeps every entry link
+commscoach --yes tag merge conflcit conflict  # fold one tag into another, then drop it
+commscoach --yes tag rm writing               # unlink from every entry, then drop it
+```
+
+Tag names are normalized and matched case-insensitively, so `Conflict` and `conflict` are the same tag and a case-only rename returns the tag unchanged.
+
+`tag rename` onto a name that already exists is an error rather than an implicit merge; the message points at `tag merge`. `tag merge` moves every entry link onto the destination (dropping the duplicate when an entry already carried both tags), deletes the source, and prints the destination with its recomputed entry count.
+
+`tag merge` and `tag rm` are destructive and prompt for confirmation. `--yes` is a global flag, so it precedes the subcommand: `commscoach --yes tag rm writing`.
+
+`tag rename` and `tag merge` also rewrite the stored scope of any review scoped to that tag, so the review keeps naming the tag it actually covered. `tag rm` does not: a review scoped to a deleted tag keeps the old name as history.
+
+## Review scopes
+
+A review answers a question about a slice of the journal, and that slice is its **scope**. The scope is stored on the review, so a synthesis permanently records what it was about.
+
+Scope is single-axis: a review covers the latest entries, *or* one person, *or* one tag, *or* one date range — never a combination. Flags from two axes are rejected (`--person cannot be combined with --tag`).
+
+`review context` (the skill-facing JSON) and `review add` (the stored record) take the same axis flags, and the scope kind is derived from whichever flag you pass. `--scope KIND` is optional and acts as an assertion: when supplied it must agree with the axis flags, so `--scope tag --person alice` exits 1 instead of silently picking one.
+
+Axis flags narrow entries exactly the way `entry search --person`, `--tag`, `--since`, and `--until` do — handles and tag names match case-insensitively, and the date bounds are inclusive against when the entry occurred, falling back to when it was created. `--limit` caps the entries under every scope.
+
+Pass `review add` the same scope flags you passed `review context`, so the stored review matches the context it was generated from.
+
+### `latest` — no axis flag
+
+"How have I been communicating lately?"
+
+```sh
+commscoach review context --limit 20 --prior-review-limit 3
+commscoach review add "Fewer tangents than last month; still burying the ask." --limit 20 --entry 1 2 3
+commscoach review list --scope latest
+```
+
+### `person` — `--person HANDLE`
+
+"How am I doing with @alice?"
+
+```sh
+commscoach review context --person alice --limit 10
+commscoach --json review add "Alice sync summary" --person alice --limit 10 --entry 1 2
+commscoach review list --scope person --person alice
+```
+
+Entries are the ones @alice is linked to, and prior reviews are the previous person-scoped reviews of @alice.
+
+### `tag` — `--tag NAME`
+
+"How is my `conflict` tag trending?"
+
+```sh
+commscoach review context --tag conflict --limit 10
+commscoach --json review add "Conflict patterns" --tag conflict --limit 10 --entry 1 2
+commscoach review list --scope tag --tag conflict
+```
+
+The tag is normalized before matching and stored normalized, so `--tag Conflict` both scopes and stores `conflict`.
+
+### `range` — `--since` and/or `--until`
+
+"How did last quarter go?"
+
+```sh
+commscoach review context --since "12 weeks ago" --until today
+commscoach review add "Q3 retrospective." --since "12 weeks ago" --until today --entry 4 5
+commscoach review list --scope range
+```
+
+Either bound alone is enough to select the `range` scope; an unbounded range would just be `latest`.
+
+### What the scope changes
+
+- **Entries** are narrowed by the axis and capped by `--limit`.
+- **Prior reviews** are filtered to the same scope under `person` and `tag` only, so a review of @alice is measured against previous reviews of @alice. `latest` and `range` get the unfiltered recent listing instead: a date window is a one-off slice with no natural predecessor.
+- **Goals** are never scope-filtered, only capped by `--goal-limit`. A relationship or theme review should still be measured against your general goals.
+
+A scope that matches nothing returns an empty entry list rather than failing — "no entries with @alice yet" is an answer, not an error. An unknown person handle *is* an error, because that is a typo.
+
+`review context` reports the scope in its own JSON block:
+
+```json
+"scope": {
+  "kind": "person", "limit": 10, "entry_count": 2,
+  "person": {"id": 2, "handle": "alice", "name": "Alice", "is_self": false},
+  "tag": null, "since": null, "until": null
+}
+```
+
+`kind`, `limit`, and `entry_count` are always present; the four axis keys are `null` for the kinds that do not own them.
+
+### Finding stored reviews
+
+`review list` filters over stored rows, so its `--scope`, `--person`, and `--tag` combine with AND rather than deriving a single axis. Human output shows the scope inline as `scope:person:@alice`; Markdown export shows it as `- **Scope**: person @alice (context limit 10)`.
+
+A person-scoped review stores the handle alongside the foreign key, so after `commscoach --yes person rm alice` the review is still findable by `review list --person alice` and still prints `@alice`. `doctor`'s `review_scope` check reports those reviews as a warning — retained history, not corruption.
+
+## Correcting stored coaching
+
+Feedback notes and review bodies hold AI-generated text, so they are the records most likely to be wrong or badly worded. Both are now editable in place instead of forcing you to delete the whole entry:
+
+```sh
+commscoach feedback edit 1 --body "Good directness, but soften the opener."
+commscoach feedback edit 1 --body @fixed.md
+commscoach feedback edit 1 --body                 # opens $EDITOR with the current body
+commscoach --yes feedback rm 1
+
+commscoach review edit 1 --body "Corrected summary"
+commscoach review edit 1 --body                   # opens $EDITOR with the current body
+commscoach --yes review rm 1
+```
+
+`--body` follows the usual body-source convention — literal text, `-` for stdin, or `@PATH` for a UTF-8 file. Passing the flag with no value opens `$VISUAL`/`$EDITOR` pre-filled with the current text. An edit updates `updated_at` and leaves `created_at` alone.
+
+`review edit` rewrites the body only. A review's scope and covered-entry list are its provenance — the record of what it was generated from — so correcting either means deleting the review and storing a new one.
+
+`feedback rm` and `review rm` prompt for confirmation, and `--yes` precedes the subcommand.
+
 ## Skill integration
 
 The skill source lives at `~/scripts/skill_commscoach/unloaded_SKILL.md`. Install or link that file into the harness where you want to invoke it; the former documented path `~/scripts/skills/commscoach/SKILL.md` does not exist.
 
 Invoke the skill with an entry ID for entry-specific coaching, ask for a recent communications review, ask to catch up on uncoached entries, or ask "how am I doing?" Entry coaching uses `commscoach context <id>` and stores feedback via `commscoach --json feedback add <id> -`. Reviews use `commscoach review context` to gather entries, prior syntheses, and active goals; after storing the review, the skill creates its next experiments as linked goals and closes achieved or irrelevant goals only when the reviewed entries support that judgment.
+
+The skill file still documents the single-scope (`latest`) review flow and has not yet been updated for [review scopes](#review-scopes) or for `feedback edit` / `feedback rm` / `review edit`. Until it is, ask for scoped reviews through the CLI directly; the skill will otherwise store an unscoped review even when you asked about one person or one tag.
 
 ## Goals and stats
 
@@ -134,9 +264,26 @@ commscoach --json stats --since "30 days ago" --until today --weeks 8
 
 The summary includes entry, people, tag, feedback, review, and goal counts; feedback coverage; first/last activity; entries per week; current and longest weekly streaks; weekly buckets; and top tags, sources, and people.
 
+## Schema version and migration
+
+The current schema version is **4**. Version 4 rebuilds the `reviews` table to carry the scope columns described under [Review scopes](#review-scopes): `scope_person_id`, `scope_person_handle`, `scope_tag`, `scope_since`, and `scope_until`, each guarded by a CHECK constraint tying it to its `scope_kind`.
+
+An existing database migrates automatically on the next `commscoach init`. The migration copies every review into a new table, then verifies the result with `PRAGMA integrity_check` and `PRAGMA foreign_key_check` before committing, and rolls the whole thing back if anything fails. Every pre-existing review becomes `scope_kind = 'latest'`, which is what it already was.
+
+`init` is safe to run against an existing database, but take a backup first anyway — the migration rewrites a table:
+
+```sh
+commscoach backup --out ~/Backups/commscoach-pre-v4.sqlite3
+commscoach init
+commscoach --json init            # {"db_path": "...", "schema_version": 4}
+commscoach doctor
+```
+
 ## Diagnostics and backups
 
-`doctor` opens the store read-only and checks schema version, SQLite integrity, foreign keys, journal mode, permissions, unparsable timestamps, row counts, and sync artifacts. A failing check exits 1; warnings are reported without treating the whole run as failed.
+`doctor` opens the store read-only and checks schema version, SQLite integrity, foreign keys, journal mode, permissions, unparsable timestamps, row counts, sync artifacts, and review scopes. A failing check exits 1; warnings are reported without treating the whole run as failed.
+
+The `review_scope` check warns when a person-scoped review names a person who has since been deleted. That is expected history rather than corruption: the denormalized handle is kept so the review still records who it was about.
 
 ```sh
 commscoach doctor
@@ -163,6 +310,18 @@ commscoach export --format json --out commscoach.json
 ```
 
 Markdown export includes goals, stored reviews, entries, linked people, and feedback in a readable report, but it is not an archive format. Use `--format json` for backup portability: it preserves the complete schema data and relationships needed by `import`.
+
+Each exported review names its scope axis, so a synthesis stays self-describing outside the database:
+
+```markdown
+### Review 1
+
+- **Created**: 2026-09-02T01:21:06.703175+00:00
+- **Scope**: person @alice (context limit 10)
+- **Covered entry IDs**: 1, 2
+```
+
+`latest`, `tag conflict`, and `range 2026-07-01..2026-09-01` are the other three shapes. A review whose scoped person was deleted still renders `person @alice` from the stored handle, and the JSON archive round-trips that handle through `import`.
 
 Import restores a complete JSON export into an empty initialized database. It never merges with or replaces existing records. Validate the whole restore, including constraints, with `--dry-run` before writing:
 
