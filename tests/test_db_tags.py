@@ -150,6 +150,32 @@ class RenameTagTests(DBTestCase):
         with self.assertRaises(db.DBError):
             db.rename_tag(self.conn, "", "conflict")
 
+    def test_rename_rewrites_tag_scoped_reviews(self) -> None:
+        entry = db.create_entry(self.conn, "a", tags=("conflict",))
+        scoped = db.create_review(
+            self.conn, "theme", [entry.id], scope_kind="tag", scope_tag="conflict"
+        )
+        other = db.create_review(self.conn, "latest", [entry.id])
+
+        db.rename_tag(self.conn, "conflict", "pushback")
+
+        self.assertEqual(db.get_review(self.conn, scoped.id).scope_tag, "pushback")
+        self.assertIsNone(db.get_review(self.conn, other.id).scope_tag)
+        self.assertEqual(
+            [review.body for review in db.list_reviews(self.conn, tag="pushback")],
+            ["theme"],
+        )
+
+    def test_case_only_rename_leaves_tag_scoped_reviews_alone(self) -> None:
+        entry = db.create_entry(self.conn, "a", tags=("conflict",))
+        scoped = db.create_review(
+            self.conn, "theme", [entry.id], scope_kind="tag", scope_tag="conflict"
+        )
+
+        db.rename_tag(self.conn, "conflict", "Conflict")
+
+        self.assertEqual(db.get_review(self.conn, scoped.id).scope_tag, "conflict")
+
 
 class MergeTagsTests(DBTestCase):
     def test_repoints_links_and_drops_the_source(self) -> None:
@@ -198,6 +224,26 @@ class MergeTagsTests(DBTestCase):
             db.merge_tags(self.conn, "conflict", "Conflict")
         self.assertEqual([tag.name for tag in db.list_tags(self.conn)], ["conflict"])
 
+    def test_merge_rewrites_tag_scoped_reviews_onto_the_destination(self) -> None:
+        entry = db.create_entry(self.conn, "a", tags=("conflcit", "conflict"))
+        source_scoped = db.create_review(
+            self.conn, "typo theme", [entry.id], scope_kind="tag", scope_tag="conflcit"
+        )
+        dest_scoped = db.create_review(
+            self.conn, "real theme", [entry.id], scope_kind="tag", scope_tag="conflict"
+        )
+
+        db.merge_tags(self.conn, "conflcit", "conflict")
+
+        self.assertEqual(db.get_review(self.conn, source_scoped.id).scope_tag, "conflict")
+        self.assertEqual(db.get_review(self.conn, dest_scoped.id).scope_tag, "conflict")
+        self.assertEqual(
+            sorted(
+                review.body for review in db.list_reviews(self.conn, tag="conflict")
+            ),
+            ["real theme", "typo theme"],
+        )
+
 
 class DeleteTagTests(DBTestCase):
     def test_unlinks_from_every_entry_and_reports_the_count(self) -> None:
@@ -225,6 +271,19 @@ class DeleteTagTests(DBTestCase):
     def test_empty_name_is_rejected(self) -> None:
         with self.assertRaises(db.DBError):
             db.delete_tag(self.conn, "  ")
+
+    def test_delete_leaves_tag_scoped_reviews_naming_the_dropped_tag(self) -> None:
+        entry = db.create_entry(self.conn, "a", tags=("conflict",))
+        scoped = db.create_review(
+            self.conn, "theme", [entry.id], scope_kind="tag", scope_tag="conflict"
+        )
+
+        db.delete_tag(self.conn, "conflict")
+
+        # The review is a historical record of a scope that existed; clearing
+        # scope_tag would also violate the (scope_kind='tag') CHECK.
+        self.assertEqual(db.get_review(self.conn, scoped.id).scope_tag, "conflict")
+        self.assertEqual(db.list_tags(self.conn), ())
 
 
 if __name__ == "__main__":

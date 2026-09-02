@@ -172,6 +172,42 @@ class ReviewTests(unittest.TestCase):
         review = _make_review(scope_limit=None)
         self.assertIsNone(review.scope_limit)
 
+    def test_scope_axes_default_to_none(self):
+        review = _make_review()
+        self.assertIsNone(review.scope_person)
+        self.assertIsNone(review.scope_person_handle)
+        self.assertIsNone(review.scope_tag)
+        self.assertIsNone(review.scope_since)
+        self.assertIsNone(review.scope_until)
+
+    def test_holds_a_person_scope(self):
+        person = _make_person()
+        review = _make_review(
+            scope_kind="person",
+            scope_person=person,
+            scope_person_handle=person.handle,
+        )
+        self.assertEqual(review.scope_person, person)
+        self.assertEqual(review.scope_person_handle, "alex")
+
+    def test_handle_survives_without_the_person(self):
+        # What hydration produces once the scoped person has been deleted.
+        review = _make_review(
+            scope_kind="person", scope_person=None, scope_person_handle="alex"
+        )
+        self.assertIsNone(review.scope_person)
+        self.assertEqual(review.scope_person_handle, "alex")
+
+    def test_holds_tag_and_range_scopes(self):
+        tagged = _make_review(scope_kind="tag", scope_tag="conflict")
+        self.assertEqual(tagged.scope_tag, "conflict")
+
+        ranged = _make_review(
+            scope_kind="range", scope_since="2026-01-01", scope_until="2026-01-31"
+        )
+        self.assertEqual((ranged.scope_since, ranged.scope_until),
+                         ("2026-01-01", "2026-01-31"))
+
     def test_is_frozen(self):
         review = _make_review()
         with self.assertRaises(dataclasses.FrozenInstanceError):
@@ -302,6 +338,28 @@ class ReviewContextTests(unittest.TestCase):
         self.assertEqual(context.entries, ())
         self.assertEqual(context.prior_reviews, ())
         self.assertEqual(context.goals, ())
+
+    def test_scope_axes_default_to_none(self):
+        context = ReviewContext(
+            self_person=_make_person(handle="me", is_self=True),
+            scope_kind="latest",
+            scope_limit=20,
+        )
+        self.assertIsNone(context.scope_person)
+        self.assertIsNone(context.scope_tag)
+        self.assertIsNone(context.scope_since)
+        self.assertIsNone(context.scope_until)
+
+    def test_holds_a_scoped_axis(self):
+        person = _make_person()
+        context = ReviewContext(
+            self_person=_make_person(handle="me", is_self=True),
+            scope_kind="person",
+            scope_limit=None,
+            scope_person=person,
+        )
+        self.assertEqual(context.scope_person, person)
+        self.assertIsNone(context.scope_tag)
 
     def test_holds_review_payload(self):
         self_person = _make_person(handle="me", is_self=True)

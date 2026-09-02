@@ -111,6 +111,10 @@ def rename_tag(conn: sqlite3.Connection, old: str, new: str) -> Tag:
 
     Renaming onto a name that already exists is an error pointing at
     ``tag merge``: merging is destructive and is never done implicitly.
+
+    ``reviews.scope_tag`` is denormalized text, not a foreign key, so the rename
+    is carried into it in the same transaction; otherwise a rename would orphan
+    the tag-scoped review history it is named after.
     """
     old_name = _require_name(old)
     new_name = _require_name(new, what="new tag name")
@@ -128,6 +132,10 @@ def rename_tag(conn: sqlite3.Connection, old: str, new: str) -> Tag:
         return _get_tag(conn, tag_id)
     with conn:
         conn.execute("UPDATE tags SET name = ? WHERE id = ?", (new_name, tag_id))
+        conn.execute(
+            "UPDATE reviews SET scope_tag = ? WHERE scope_tag = ?",
+            (new_name, old_name),
+        )
     return _get_tag(conn, tag_id)
 
 
@@ -137,6 +145,9 @@ def merge_tags(conn: sqlite3.Connection, source: str, dest: str) -> Tag:
     Both tags must already exist: a missing destination means the caller wanted
     ``tag rename``, and keeping the two commands non-overlapping is what makes
     "merges are never implicit" enforceable.
+
+    Tag-scoped reviews follow the merge in the same transaction, for the same
+    reason ``rename_tag`` carries the rename into ``reviews.scope_tag``.
     """
     source_name = _require_name(source, what="source tag name")
     dest_name = _require_name(dest, what="destination tag name")
@@ -161,13 +172,26 @@ def merge_tags(conn: sqlite3.Connection, source: str, dest: str) -> Tag:
         # Clears the links the UPDATE skipped, which are exactly the duplicates.
         conn.execute("DELETE FROM entry_tags WHERE tag_id = ?", (source_id,))
         conn.execute("DELETE FROM tags WHERE id = ?", (source_id,))
+        conn.execute(
+            "UPDATE reviews SET scope_tag = ? WHERE scope_tag = ?",
+            (dest_name, source_name),
+        )
     # No gc_orphan_tags here: the source row is deleted explicitly, and a blanket
     # sweep would also drop unrelated zero-entry tags, including the destination.
     return _get_tag(conn, dest_id)
 
 
 def delete_tag(conn: sqlite3.Connection, name: str) -> int:
-    """Unlink a tag from every entry and drop it. Returns the unlink count."""
+    """Unlink a tag from every entry and drop it. Returns the unlink count.
+
+    ``reviews.scope_tag`` is deliberately left alone. A tag-scoped review is a
+    historical record of a scope that existed when it was written, and clearing
+    the name would both lose that and violate the
+    ``(scope_kind = 'tag') = (scope_tag IS NOT NULL)`` CHECK. Deleting a tag
+    therefore leaves reviews naming a tag the vocabulary no longer contains,
+    which is the intended outcome -- unlike ``rename_tag`` and ``merge_tags``,
+    where the tag itself survives under a different name.
+    """
     tag_name = _require_name(name)
     tag_id = _find_tag_id(conn, tag_name)
     if tag_id is None:

@@ -75,6 +75,18 @@ def load_review_entries(conn: sqlite3.Connection, review_id: int) -> tuple[Entry
 
 
 def hydrate_review(conn: sqlite3.Connection, row: sqlite3.Row) -> Review:
+    """Build a ``Review``, resolving ``scope_person`` lazily like ``hydrate_goal``.
+
+    ``scope_person`` is ``None`` both when the scope is not person-kind and when
+    the person has since been deleted (``ON DELETE SET NULL`` clears the FK).
+    ``scope_person_handle`` is read straight from the row and needs no lookup --
+    the denormalized column is what survives that deletion.
+    """
+    person_row = None
+    if row["scope_person_id"] is not None:
+        person_row = conn.execute(
+            "SELECT * FROM people WHERE id = ?", (row["scope_person_id"],)
+        ).fetchone()
     return Review(
         id=row["id"],
         body=row["body"],
@@ -82,6 +94,11 @@ def hydrate_review(conn: sqlite3.Connection, row: sqlite3.Row) -> Review:
         scope_limit=row["scope_limit"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        scope_person=row_to_person(person_row) if person_row is not None else None,
+        scope_person_handle=row["scope_person_handle"],
+        scope_tag=row["scope_tag"],
+        scope_since=row["scope_since"],
+        scope_until=row["scope_until"],
         entries=load_review_entries(conn, row["id"]),
     )
 

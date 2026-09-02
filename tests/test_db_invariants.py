@@ -14,6 +14,7 @@ from pathlib import Path
 
 from commscoach import db
 
+from tests.db_case import DBTestCase
 from tests.db_schema_case import NOW
 
 
@@ -328,6 +329,41 @@ class SchemaInvariantTests(unittest.TestCase):
                 (entry_id,),
             ).fetchone()
             self.assertEqual(count, 0)
+
+
+class PersonScopedReviewSurvivalTests(DBTestCase):
+    """What a person-scoped review looks like through the API after ``person rm``.
+
+    The DB-level half of this is
+    ``test_deleting_person_nulls_scope_link_and_keeps_the_handle``; this is the
+    same invariant seen from hydration and listing, which is what the CLI and
+    the Markdown export actually read.
+    """
+
+    def test_deleted_person_leaves_the_handle_reachable(self) -> None:
+        person = db.create_person(self.conn, "alice")
+        entry = db.create_entry(self.conn, "standup", people=["alice"])
+        review = db.create_review(
+            self.conn,
+            "how it went with alice",
+            [entry.id],
+            scope_kind="person",
+            scope_person_handle="alice",
+        )
+        self.assertIsNotNone(review.scope_person)
+
+        db.delete_person(self.conn, person.id)
+
+        orphaned = db.get_review(self.conn, review.id)
+        self.assertIsNotNone(orphaned)
+        assert orphaned is not None
+        self.assertEqual(orphaned.scope_kind, "person")
+        self.assertIsNone(orphaned.scope_person)
+        self.assertEqual(orphaned.scope_person_handle, "alice")
+        self.assertEqual(
+            [found.id for found in db.list_reviews(self.conn, person_handle="alice")],
+            [review.id],
+        )
 
 
 if __name__ == "__main__":

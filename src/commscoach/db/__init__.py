@@ -92,6 +92,7 @@ from .people import (
     update_person,
 )
 from .reviews import (
+    SCOPE_KINDS,
     create_review,
     delete_review,
     get_review,
@@ -115,6 +116,7 @@ from .tags import (
 
 __all__ = [
     "SCHEMA_VERSION",
+    "SCOPE_KINDS",
     "DBError",
     "DatabaseNotEmptyError",
     "DuplicateHandleError",

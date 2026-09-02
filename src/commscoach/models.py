@@ -68,7 +68,19 @@ class Feedback:
 
 @dataclass(frozen=True, slots=True)
 class Review:
-    """A stored synthesis covering one or more communication entries."""
+    """A stored synthesis covering one or more communication entries.
+
+    The ``scope_*`` fields describe the single axis the synthesis covered, keyed
+    by ``scope_kind`` (``latest`` | ``person`` | ``tag`` | ``range``); the axes
+    belonging to other kinds are ``None``. ``scope_person`` is a live lookup and
+    becomes ``None`` once that person is deleted, while ``scope_person_handle``
+    is the denormalized handle recorded at creation and survives the deletion --
+    a review is a historical record of the scope that existed at the time.
+
+    The scope fields sit after ``updated_at`` rather than beside ``scope_limit``
+    because ``scope_limit`` has no default and a defaulted field cannot precede
+    a non-defaulted one.
+    """
 
     id: int
     body: str
@@ -76,6 +88,11 @@ class Review:
     scope_limit: int | None
     created_at: str
     updated_at: str
+    scope_person: Person | None = None
+    scope_person_handle: str | None = None
+    scope_tag: str | None = None
+    scope_since: str | None = None
+    scope_until: str | None = None
     entries: tuple[Entry, ...] = field(default_factory=tuple)
 
 
@@ -169,11 +186,21 @@ class ReviewEntryContext:
 
 @dataclass(frozen=True, slots=True)
 class ReviewContext:
-    """Payload for generating a stored review across recent entries."""
+    """Payload for generating a stored review across a single scope axis.
+
+    Mirrors the ``scope_*`` axes of :class:`Review` so a synthesis knows what it
+    was asked to cover. There is no ``scope_person_handle`` here: a context is
+    built against a person who must currently exist, so ``scope_person`` is
+    never a dangling handle the way a stored review's can be.
+    """
 
     self_person: Person
     scope_kind: str
     scope_limit: int | None
+    scope_person: Person | None = None
+    scope_tag: str | None = None
+    scope_since: str | None = None
+    scope_until: str | None = None
     entries: tuple[ReviewEntryContext, ...] = field(default_factory=tuple)
     prior_reviews: tuple[Review, ...] = field(default_factory=tuple)
     goals: tuple[Goal, ...] = field(default_factory=tuple)
