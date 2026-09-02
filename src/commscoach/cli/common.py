@@ -6,6 +6,8 @@
 - ``open_db`` is a context manager that closes the connection cleanly.
 - ``prose_lines``/``first_prose_line``/``truncate``/``format_stamp`` build the
   human-readable previews shared by the ``list`` subcommands.
+- ``add_date_bounds``/``parse_date_bounds`` declare and resolve the shared
+  ``--since``/``--until`` pair used by the ``entry`` and ``review`` groups.
 """
 
 from __future__ import annotations
@@ -152,6 +154,42 @@ def parse_date_bound(
         return parse_when(value, now=now)[:10]
     except TimeParseError as exc:
         raise db.DBError(f"{flag}: {exc}") from exc
+
+
+def add_date_bounds(parser: argparse.ArgumentParser, *, noun: str = "entries") -> None:
+    """Declare the shared ``--since`` / ``--until`` flags on ``parser``.
+
+    Lives here rather than in one command module because ``entry list``,
+    ``entry search``, and the ``review`` scope surface must all accept the same
+    grammar; ``noun`` only varies the help text.
+    """
+    parser.add_argument(
+        "--since",
+        default=None,
+        metavar="DATE",
+        help=f"Include {noun} on or after DATE (ISO-8601 or relative).",
+    )
+    parser.add_argument(
+        "--until",
+        default=None,
+        metavar="DATE",
+        help=f"Include {noun} through DATE (ISO-8601 or relative).",
+    )
+
+
+def parse_date_bounds(args: argparse.Namespace) -> tuple[str | None, str | None]:
+    """Resolve the flags ``add_date_bounds`` declared into ISO date bounds."""
+    since = (
+        parse_date_bound(args.since, flag="--since")
+        if args.since is not None
+        else None
+    )
+    until = (
+        parse_date_bound(args.until, flag="--until")
+        if args.until is not None
+        else None
+    )
+    return since, until
 
 
 def confirm(

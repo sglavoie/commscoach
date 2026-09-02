@@ -178,6 +178,68 @@ class ContextSuccessTests(ContextTestBase):
         self.assertEqual(payload["people"][0]["history"], [])
         self.assertEqual(payload["prior_reviews"], [])
 
+    def test_entry_context_payload_is_untouched_by_the_review_scope_work(
+        self,
+    ) -> None:
+        """The review scope surface must not leak into ``commscoach context``.
+
+        Session 6 widened ``review_to_dict``, which ``prior_reviews`` shares, so
+        this pins both halves of the contract: every top-level key and every
+        non-review sub-shape is byte-for-byte what it was, and ``prior_reviews``
+        grew *only* additively -- each pre-existing key keeps its exact value.
+        """
+        self._seed_self("me")
+        self._seed_person("alice", name="Alice A.")
+        entry = self._seed_entry("hello", people=("alice",), tags=("review",))
+        feedback = self._seed_feedback(entry.id, "note")
+        with closing(db.connect(self.db_path)) as conn:
+            prior_entry = db.create_entry(conn, "prior", people=["alice"])
+            review = db.create_review(conn, "weekly synthesis", [prior_entry.id])
+            goal = db.create_goal(conn, "Ask one question")
+
+        rc, out, _ = self._run("context", str(entry.id))
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(
+            sorted(payload.keys()),
+            ["entry", "goals", "people", "prior_feedback", "prior_reviews", "self"],
+        )
+        self.assertEqual(
+            sorted(payload["entry"].keys()),
+            [
+                "body",
+                "created_at",
+                "id",
+                "occurred_at",
+                "people",
+                "source",
+                "tags",
+                "updated_at",
+            ],
+        )
+        self.assertEqual(
+            sorted(payload["self"].keys()), ["handle", "id", "is_self", "name"]
+        )
+        self.assertEqual(
+            sorted(payload["people"][0].keys()),
+            ["handle", "history", "id", "is_self", "name", "notes"],
+        )
+        self.assertEqual([f["id"] for f in payload["prior_feedback"]], [feedback.id])
+        self.assertEqual([g["id"] for g in payload["goals"]], [goal.id])
+        prior = payload["prior_reviews"][0]
+        for key, expected in (
+            ("id", review.id),
+            ("body", "weekly synthesis"),
+            ("scope_kind", "latest"),
+            ("scope_limit", None),
+            ("created_at", review.created_at),
+            ("updated_at", review.updated_at),
+            ("entry_ids", [prior_entry.id]),
+        ):
+            self.assertEqual(prior[key], expected, key)
+        self.assertEqual([e["id"] for e in prior["entries"]], [prior_entry.id])
+
     def test_context_output_validates_as_json(self) -> None:
         self._seed_self()
         self._seed_person("alice")

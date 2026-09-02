@@ -48,11 +48,25 @@ def feedback_to_dict(feedback: db.Feedback) -> dict[str, Any]:
 
 
 def review_to_dict(review: db.Review) -> dict[str, Any]:
+    """Serialize a stored review, including the single scope axis it covered.
+
+    The scope axis keys were added on top of the original shape rather than
+    replacing anything: ``scope_kind`` and ``scope_limit`` keep their existing
+    keys and meaning, and the axes not owned by ``scope_kind`` are ``null``.
+    """
     return {
         "id": review.id,
         "body": review.body,
         "scope_kind": review.scope_kind,
         "scope_limit": review.scope_limit,
+        "scope_person": (
+            person_to_dict(review.scope_person)
+            if review.scope_person is not None
+            else None
+        ),
+        "scope_tag": review.scope_tag,
+        "scope_since": review.scope_since,
+        "scope_until": review.scope_until,
         "created_at": review.created_at,
         "updated_at": review.updated_at,
         "entry_ids": [entry.id for entry in review.entries],

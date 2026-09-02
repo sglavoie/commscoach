@@ -8,11 +8,12 @@ from typing import Any
 
 from .. import db
 from .common import (
+    add_date_bounds,
     confirm,
     first_prose_line,
     non_negative_int,
     open_db,
-    parse_date_bound,
+    parse_date_bounds,
     parse_when_or_raise,
     print_json,
     read_body_arg,
@@ -147,7 +148,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="N",
         help="Cap the number of entries returned.",
     )
-    _add_date_bounds(lst)
+    add_date_bounds(lst)
     lst.set_defaults(func=cmd_entry_list)
 
     srch = entry_sub.add_parser(
@@ -173,7 +174,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="HANDLE",
         help="Filter by linked person handle (case-insensitive).",
     )
-    _add_date_bounds(srch)
+    add_date_bounds(srch)
     srch.add_argument(
         "--no-feedback",
         action="store_true",
@@ -187,35 +188,6 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     rm.add_argument("entry_id", type=int, metavar="ENTRY_ID")
     rm.set_defaults(func=cmd_entry_rm)
-
-
-def _add_date_bounds(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--since",
-        default=None,
-        metavar="DATE",
-        help="Include entries on or after DATE (ISO-8601 or relative).",
-    )
-    parser.add_argument(
-        "--until",
-        default=None,
-        metavar="DATE",
-        help="Include entries through DATE (ISO-8601 or relative).",
-    )
-
-
-def _parse_date_bounds(args: argparse.Namespace) -> tuple[str | None, str | None]:
-    since = (
-        parse_date_bound(args.since, flag="--since")
-        if args.since is not None
-        else None
-    )
-    until = (
-        parse_date_bound(args.until, flag="--until")
-        if args.until is not None
-        else None
-    )
-    return since, until
 
 
 def _format_entry_human(entry: db.Entry) -> str:
@@ -365,7 +337,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
 
 
 def cmd_entry_list(args: argparse.Namespace) -> int:
-    since, until = _parse_date_bounds(args)
+    since, until = parse_date_bounds(args)
     with open_db(args) as conn:
         entries = db.list_entries(
             conn,
@@ -378,7 +350,7 @@ def cmd_entry_list(args: argparse.Namespace) -> int:
 
 
 def cmd_entry_search(args: argparse.Namespace) -> int:
-    since, until = _parse_date_bounds(args)
+    since, until = parse_date_bounds(args)
     with open_db(args) as conn:
         entries = db.search_entries(
             conn,
