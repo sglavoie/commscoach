@@ -26,6 +26,7 @@ from ..models import (
     ReviewContext,
     ReviewEntryContext,
     Stats,
+    Tag,
 )
 from .backup import backup_database, prune_backups
 from .context import get_entry_context, get_review_context
@@ -50,12 +51,14 @@ from .errors import (
     DBError,
     DuplicateHandleError,
     DuplicateSelfError,
+    DuplicateTagError,
     EntryNotFoundError,
     FeedbackNotFoundError,
     GoalNotFoundError,
     MissingSelfError,
     PersonNotFoundError,
     ReviewNotFoundError,
+    TagNotFoundError,
 )
 from .feedback import (
     create_feedback,
@@ -103,6 +106,12 @@ from .schema import (
     validate_schema,
 )
 from .stats import get_stats
+from .tags import (
+    delete_tag,
+    list_tags,
+    merge_tags,
+    rename_tag,
+)
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -110,6 +119,7 @@ __all__ = [
     "DatabaseNotEmptyError",
     "DuplicateHandleError",
     "DuplicateSelfError",
+    "DuplicateTagError",
     "DumpFormatError",
     "Entry",
     "EntryContext",
@@ -130,6 +140,8 @@ __all__ = [
     "ReviewEntryContext",
     "ReviewNotFoundError",
     "Stats",
+    "Tag",
+    "TagNotFoundError",
     "backup_database",
     "connect",
     "close_goal",
@@ -144,6 +156,7 @@ __all__ = [
     "delete_goal",
     "delete_person",
     "delete_review",
+    "delete_tag",
     "dump_to_dict",
     "get_entry",
     "get_entry_context",
@@ -165,8 +178,11 @@ __all__ = [
     "list_goals",
     "list_people",
     "list_reviews",
+    "list_tags",
     "load_from_dict",
+    "merge_tags",
     "prune_backups",
+    "rename_tag",
     "search_entries",
     "set_person_note",
     "set_self",

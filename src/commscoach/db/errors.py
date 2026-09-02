@@ -31,6 +31,24 @@ class ReviewNotFoundError(DBError):
         self.review_id = review_id
 
 
+class TagNotFoundError(DBError):
+    def __init__(self, name: str, *, hint: str | None = None) -> None:
+        message = f"tag {name!r} not found"
+        if hint is not None:
+            message = f"{message}; {hint}"
+        super().__init__(message)
+        self.name = name
+
+
+class DuplicateTagError(DBError):
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"tag {name!r} already exists;"
+            " use 'commscoach tag merge' to combine the two"
+        )
+        self.name = name
+
+
 class GoalNotFoundError(DBError):
     def __init__(self, goal_id: int) -> None:
         super().__init__(f"goal {goal_id} not found")

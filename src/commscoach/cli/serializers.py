@@ -29,6 +29,14 @@ def entry_to_dict(entry: db.Entry) -> dict[str, Any]:
     }
 
 
+def tag_to_dict(tag: db.Tag) -> dict[str, Any]:
+    return {
+        "id": tag.id,
+        "name": tag.name,
+        "entry_count": tag.entry_count,
+    }
+
+
 def feedback_to_dict(feedback: db.Feedback) -> dict[str, Any]:
     return {
         "id": feedback.id,

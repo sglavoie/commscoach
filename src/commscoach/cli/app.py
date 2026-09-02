@@ -26,6 +26,7 @@ from . import (
     porting,
     reviews,
     stats,
+    tags,
 )
 from .common import print_err, print_json, resolve_db_path
 
@@ -66,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.register(subparsers)
     backup.register(subparsers)
     entries.register(subparsers)
+    tags.register(subparsers)
     people.register(subparsers)
     feedback.register(subparsers)
     goals.register(subparsers)

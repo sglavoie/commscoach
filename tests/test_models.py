@@ -18,6 +18,7 @@ from commscoach.models import (
     ReviewContext,
     ReviewEntryContext,
     Stats,
+    Tag,
 )
 
 
@@ -131,6 +132,22 @@ class EntryTests(unittest.TestCase):
         self.assertIsInstance(entry.people, tuple)
         self.assertEqual(entry.tags, ("ops", "1-on-1"))
         self.assertEqual(entry.people[0].handle, "alex")
+
+
+class TagTests(unittest.TestCase):
+    def test_is_frozen(self):
+        tag = Tag(id=1, name="conflict", entry_count=2)
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            tag.name = "pushback"  # type: ignore[misc]
+
+    def test_rejects_undeclared_attributes(self):
+        tag = Tag(id=1, name="conflict", entry_count=2)
+        with self.assertRaises(AttributeError):
+            object.__setattr__(tag, "colour", "red")
+
+    def test_holds_the_count_alongside_the_name(self):
+        tag = Tag(id=3, name="ops", entry_count=0)
+        self.assertEqual((tag.id, tag.name, tag.entry_count), (3, "ops", 0))
 
 
 class FeedbackTests(unittest.TestCase):

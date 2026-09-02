@@ -47,6 +47,15 @@ class Entry:
 
 
 @dataclass(frozen=True, slots=True)
+class Tag:
+    """A normalized tag name plus how many entries currently carry it."""
+
+    id: int
+    name: str
+    entry_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class Feedback:
     """A coaching note attached to an entry."""
 
