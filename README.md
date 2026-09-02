@@ -242,7 +242,9 @@ The skill source lives at `~/scripts/skill_commscoach/unloaded_SKILL.md`. Instal
 
 Invoke the skill with an entry ID for entry-specific coaching, ask for a recent communications review, ask to catch up on uncoached entries, or ask "how am I doing?" Entry coaching uses `commscoach context <id>` and stores feedback via `commscoach --json feedback add <id> -`. Reviews use `commscoach review context` to gather entries, prior syntheses, and active goals; after storing the review, the skill creates its next experiments as linked goals and closes achieved or irrelevant goals only when the reviewed entries support that judgment.
 
-The skill file still documents the single-scope (`latest`) review flow and has not yet been updated for [review scopes](#review-scopes) or for `feedback edit` / `feedback rm` / `review edit`. Until it is, ask for scoped reviews through the CLI directly; the skill will otherwise store an unscoped review even when you asked about one person or one tag.
+The skill is [scope](#review-scopes)-aware. It derives the scope from how you ask — "how am I doing with @alice?" becomes `--person alice`, "how is my conflict tag trending?" becomes `--tag conflict`, "how did last quarter go?" becomes a `--since`/`--until` range — and passes the same axis flags to `review add` that it passed to `review context`, so the stored review records the slice it was generated from. It reports the stored scope back to you. A scope that matches nothing is reported as an answer rather than stored as an empty review.
+
+The skill also runs [`feedback edit` / `feedback rm` / `review edit` / `review rm`](#correcting-stored-coaching), but only when you explicitly ask it to change or remove a named record — never as cleanup inside another flow. Because it runs non-interactively it has to pass `--yes`, so it asks for confirmation in the conversation before either `rm`.
 
 ## Goals and stats
 
