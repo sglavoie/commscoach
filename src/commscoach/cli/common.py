@@ -8,6 +8,8 @@
   human-readable previews shared by the ``list`` subcommands.
 - ``add_date_bounds``/``parse_date_bounds`` declare and resolve the shared
   ``--since``/``--until`` pair used by the ``entry`` and ``review`` groups.
+- ``format_scope`` renders a stored review's scope axis for every surface that
+  shows one: the ``review`` listings and the Markdown export.
 """
 
 from __future__ import annotations
@@ -90,6 +92,36 @@ def format_stamp(iso: str) -> str:
     except ValueError:
         return iso
     return parsed.astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def format_scope(review: db.Review, *, separator: str = ":") -> str:
+    """Render a review's scope kind with its axis: ``person:@alice``, ``tag:conflict``.
+
+    A ``range`` renders both bounds around ``..`` with an open side left empty
+    (``range:2026-07-01..``). ``latest`` has no axis and renders as the bare
+    kind. ``separator`` is the only thing that varies between surfaces: the
+    ``review`` listings use the default ``:`` while the Markdown export passes
+    a space, so ``person @alice`` reads as prose next to its
+    ``(context limit N)`` suffix. Keeping one renderer means the human, short,
+    and export forms cannot drift apart.
+
+    ``person`` reads the denormalized ``scope_person_handle`` rather than
+    ``scope_person``, so a review of a since-deleted person still names them.
+    """
+    kind = review.scope_kind
+    if kind == "person":
+        handle = review.scope_person_handle or (
+            review.scope_person.handle if review.scope_person is not None else None
+        )
+        return f"{kind}{separator}@{handle}" if handle else kind
+    if kind == "tag" and review.scope_tag:
+        return f"{kind}{separator}{review.scope_tag}"
+    if kind == "range" and (review.scope_since or review.scope_until):
+        return (
+            f"{kind}{separator}"
+            f"{review.scope_since or ''}..{review.scope_until or ''}"
+        )
+    return kind
 
 
 def read_body(value: str, *, stdin: TextIO | None = None) -> str:

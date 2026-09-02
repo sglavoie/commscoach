@@ -12,6 +12,7 @@ from .common import (
     add_date_bounds,
     confirm,
     first_prose_line,
+    format_scope,
     non_negative_int,
     open_db,
     parse_date_bounds,
@@ -306,33 +307,11 @@ def _review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
     }
 
 
-def _format_scope(review: db.Review) -> str:
-    """Render a review's scope kind with its axis: ``person:@alice``, ``tag:conflict``.
-
-    A ``range`` renders both bounds around ``..`` with an open side left empty
-    (``..2026-09-01``). Both formatters call this, with only the ``scope ``
-    versus ``scope:`` prefix differing, so the two renderings cannot drift.
-    ``person`` reads the denormalized ``scope_person_handle`` rather than
-    ``scope_person``, so a review of a since-deleted person still names them.
-    """
-    kind = review.scope_kind
-    if kind == "person":
-        handle = review.scope_person_handle or (
-            review.scope_person.handle if review.scope_person is not None else None
-        )
-        return f"{kind}:@{handle}" if handle else kind
-    if kind == "tag" and review.scope_tag:
-        return f"{kind}:{review.scope_tag}"
-    if kind == "range" and (review.scope_since or review.scope_until):
-        return f"{kind}:{review.scope_since or ''}..{review.scope_until or ''}"
-    return kind
-
-
 def _format_review_human(review: db.Review) -> str:
     header_parts = [
         f"[{review.id}]",
         f"created {review.created_at}",
-        f"scope {_format_scope(review)}",
+        f"scope {format_scope(review)}",
     ]
     if review.scope_limit is not None:
         header_parts.append(f"context limit {review.scope_limit}")
@@ -352,7 +331,7 @@ def _format_review_short(review: db.Review) -> str:
     parts = [
         f"[{review.id}]",
         review.created_at,
-        f"scope:{_format_scope(review)}",
+        f"scope:{format_scope(review)}",
     ]
     if review.scope_limit is not None:
         parts.append(f"context-limit:{review.scope_limit}")

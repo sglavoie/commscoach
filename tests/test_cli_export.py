@@ -68,11 +68,24 @@ class ExportTestBase(unittest.TestCase):
         body: str,
         entry_ids: list[int],
         *,
+        scope_kind: str = "latest",
         scope_limit: int | None = 20,
+        scope_person_handle: str | None = None,
+        scope_tag: str | None = None,
+        scope_since: str | None = None,
+        scope_until: str | None = None,
     ) -> db.Review:
         with closing(db.connect(self.db_path)) as conn:
             return db.create_review(
-                conn, body, entry_ids, scope_limit=scope_limit
+                conn,
+                body,
+                entry_ids,
+                scope_kind=scope_kind,
+                scope_limit=scope_limit,
+                scope_person_handle=scope_person_handle,
+                scope_tag=scope_tag,
+                scope_since=scope_since,
+                scope_until=scope_until,
             )
 
     def _seed_goal(
@@ -249,6 +262,110 @@ class ExportStdoutTests(ExportTestBase):
         self.assertEqual(rc, 0)
         after = set(self.tmpdir.iterdir())
         self.assertEqual(before, after)
+
+
+class ExportReviewScopeTests(ExportTestBase):
+    """The Markdown scope line names its axis, one case per ``scope_kind``."""
+
+    def _scope_line(self, out: str) -> str:
+        for line in out.splitlines():
+            if line.startswith("- **Scope**: "):
+                return line
+        self.fail(f"no scope line in export:\n{out}")
+
+    def test_latest_scope_keeps_the_bare_kind_and_limit_suffix(self) -> None:
+        entry = self._seed_entry("note")
+        self._seed_review("body", [entry.id], scope_limit=20)
+        _, out, _ = self._run("export")
+        self.assertEqual(self._scope_line(out), "- **Scope**: latest (context limit 20)")
+
+    def test_latest_scope_without_a_limit_omits_the_suffix(self) -> None:
+        entry = self._seed_entry("note")
+        self._seed_review("body", [entry.id], scope_limit=None)
+        _, out, _ = self._run("export")
+        self.assertEqual(self._scope_line(out), "- **Scope**: latest")
+
+    def test_person_scope_names_the_handle_and_keeps_the_limit_suffix(self) -> None:
+        self._seed_person("alice")
+        entry = self._seed_entry("note", people=("alice",))
+        self._seed_review(
+            "body",
+            [entry.id],
+            scope_kind="person",
+            scope_limit=20,
+            scope_person_handle="alice",
+        )
+        _, out, _ = self._run("export")
+        self.assertEqual(
+            self._scope_line(out), "- **Scope**: person @alice (context limit 20)"
+        )
+
+    def test_person_scope_renders_the_stored_handle_casing(self) -> None:
+        self._seed_person("Alice")
+        entry = self._seed_entry("note", people=("Alice",))
+        self._seed_review(
+            "body",
+            [entry.id],
+            scope_kind="person",
+            scope_limit=None,
+            scope_person_handle="ALICE",
+        )
+        _, out, _ = self._run("export")
+        self.assertEqual(self._scope_line(out), "- **Scope**: person @Alice")
+
+    def test_person_scope_survives_the_person_being_deleted(self) -> None:
+        person = self._seed_person("alice")
+        entry = self._seed_entry("note", people=("alice",))
+        self._seed_review(
+            "body",
+            [entry.id],
+            scope_kind="person",
+            scope_limit=None,
+            scope_person_handle="alice",
+        )
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertTrue(db.delete_person(conn, person.id))
+        _, out, _ = self._run("export")
+        self.assertEqual(self._scope_line(out), "- **Scope**: person @alice")
+
+    def test_tag_scope_names_the_normalized_tag(self) -> None:
+        entry = self._seed_entry("note", tags=("conflict",))
+        self._seed_review(
+            "body",
+            [entry.id],
+            scope_kind="tag",
+            scope_limit=None,
+            scope_tag="Conflict",
+        )
+        _, out, _ = self._run("export")
+        self.assertEqual(self._scope_line(out), "- **Scope**: tag conflict")
+
+    def test_range_scope_names_both_bounds(self) -> None:
+        entry = self._seed_entry("note")
+        self._seed_review(
+            "body",
+            [entry.id],
+            scope_kind="range",
+            scope_limit=None,
+            scope_since="2026-07-01",
+            scope_until="2026-09-01",
+        )
+        _, out, _ = self._run("export")
+        self.assertEqual(
+            self._scope_line(out), "- **Scope**: range 2026-07-01..2026-09-01"
+        )
+
+    def test_range_scope_leaves_an_open_bound_empty(self) -> None:
+        entry = self._seed_entry("note")
+        self._seed_review(
+            "body",
+            [entry.id],
+            scope_kind="range",
+            scope_limit=None,
+            scope_since="2026-07-01",
+        )
+        _, out, _ = self._run("export")
+        self.assertEqual(self._scope_line(out), "- **Scope**: range 2026-07-01..")
 
 
 class ExportFileTests(ExportTestBase):

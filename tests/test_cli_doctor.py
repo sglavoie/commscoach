@@ -16,6 +16,23 @@ from commscoach.db import schema
 
 _NOW = "2026-08-25T12:00:00+00:00"
 
+# The order every path must emit, healthy or not. ``run_checks`` splices
+# ``sync_artifacts`` in at a hard-coded index on the missing/not-downloaded
+# paths, so a check appended anywhere but the end of ``_DB_CHECKS`` silently
+# reorders these two lists apart.
+_EXPECTED_CHECK_ORDER = [
+    "db_present",
+    "permissions",
+    "schema_version",
+    "integrity_check",
+    "foreign_key_check",
+    "journal_mode",
+    "sync_artifacts",
+    "unparsable_occurred_at",
+    "row_counts",
+    "review_scope",
+]
+
 
 class DoctorCommandTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -32,6 +49,24 @@ class DoctorCommandTests(unittest.TestCase):
     @staticmethod
     def checks_by_name(payload: dict[str, object]) -> dict[str, dict[str, object]]:
         return {item["name"]: item for item in payload["checks"]}  # type: ignore[index]
+
+    @staticmethod
+    def check_names(payload: dict[str, object]) -> list[str]:
+        return [item["name"] for item in payload["checks"]]  # type: ignore[index]
+
+    def seed_person_scoped_review(self, handle: str) -> tuple[int, int]:
+        """Create ``@handle`` and a review scoped to them; return (person, review)."""
+        with closing(db.connect(self.db_path)) as conn:
+            person = db.create_person(conn, handle)
+            entry = db.create_entry(conn, "seed body", people=(handle,))
+            review = db.create_review(
+                conn,
+                "scoped body",
+                [entry.id],
+                scope_kind="person",
+                scope_person_handle=handle,
+            )
+        return person.id, review.id
 
     def test_healthy_database_has_all_ok_checks(self) -> None:
         db.init_db(self.db_path)
@@ -51,6 +86,7 @@ class DoctorCommandTests(unittest.TestCase):
                 "sync_artifacts",
                 "unparsable_occurred_at",
                 "row_counts",
+                "review_scope",
             },
         )
         self.assertTrue(all(item["status"] == "ok" for item in checks.values()))
@@ -141,6 +177,81 @@ class DoctorCommandTests(unittest.TestCase):
         self.assertEqual(
             self.checks_by_name(payload)["sync_artifacts"]["status"], "warn"
         )
+
+    def test_healthy_database_emits_checks_in_the_expected_order(self) -> None:
+        db.init_db(self.db_path)
+        _, payload = self.run_doctor()
+        self.assertEqual(self.check_names(payload), _EXPECTED_CHECK_ORDER)
+
+    def test_missing_database_emits_every_check_in_order(self) -> None:
+        _, payload = self.run_doctor()
+        self.assertEqual(self.check_names(payload), _EXPECTED_CHECK_ORDER)
+        self.assertEqual(self.checks_by_name(payload)["db_present"]["status"], "fail")
+        self.assertIn(
+            "not run", self.checks_by_name(payload)["review_scope"]["message"]
+        )
+
+    def test_not_downloaded_database_emits_every_check_in_order(self) -> None:
+        self.db_path.parent.mkdir(parents=True)
+        paths.icloud_placeholder_for(self.db_path).touch()
+        _, payload = self.run_doctor()
+        self.assertEqual(self.check_names(payload), _EXPECTED_CHECK_ORDER)
+
+    def test_review_scope_ok_without_person_scoped_reviews(self) -> None:
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            entry = db.create_entry(conn, "seed body")
+            db.create_review(conn, "latest body", [entry.id], scope_limit=20)
+        rc, payload = self.run_doctor()
+        self.assertEqual(rc, 0)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(self.checks_by_name(payload)["review_scope"]["status"], "ok")
+
+    def test_review_scope_ok_while_the_scoped_person_exists(self) -> None:
+        db.init_db(self.db_path)
+        self.seed_person_scoped_review("alice")
+        rc, payload = self.run_doctor()
+        self.assertEqual(rc, 0)
+        check = self.checks_by_name(payload)["review_scope"]
+        self.assertEqual(check["status"], "ok")
+        self.assertNotIn("details", check)
+
+    def test_review_scope_warns_after_the_scoped_person_is_deleted(self) -> None:
+        db.init_db(self.db_path)
+        person_id, review_id = self.seed_person_scoped_review("Alice")
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertTrue(db.delete_person(conn, person_id))
+        rc, payload = self.run_doctor()
+        self.assertEqual(rc, 0)
+        self.assertEqual(payload["status"], "warn")
+        check = self.checks_by_name(payload)["review_scope"]
+        self.assertEqual(check["status"], "warn")
+        self.assertIn("not corruption", check["message"])
+        self.assertEqual(
+            check["details"],
+            [{"review_id": review_id, "scope_person_handle": "Alice"}],
+        )
+
+    def test_review_scope_fails_when_the_scope_column_is_missing(self) -> None:
+        db.init_db(self.db_path)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute("DROP TABLE reviews")
+            conn.execute(
+                "CREATE TABLE reviews ("
+                " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " body TEXT NOT NULL,"
+                " scope_kind TEXT NOT NULL,"
+                " scope_limit INTEGER,"
+                " created_at TEXT NOT NULL,"
+                " updated_at TEXT NOT NULL)"
+            )
+            conn.commit()
+        rc, payload = self.run_doctor()
+        self.assertEqual(rc, 1)
+        check = self.checks_by_name(payload)["review_scope"]
+        self.assertEqual(check["status"], "fail")
+        self.assertIn("cannot inspect review scopes", check["message"])
+        self.assertIn("no such column", check["message"])
 
     def test_placeholder_warns_and_open_db_blocks_init_guidance(self) -> None:
         self.db_path.parent.mkdir(parents=True)

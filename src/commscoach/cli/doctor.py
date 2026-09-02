@@ -22,7 +22,13 @@ _DB_CHECKS = (
     "journal_mode",
     "unparsable_occurred_at",
     "row_counts",
+    "review_scope",
 )
+# ``review_scope`` is appended LAST on purpose. ``run_checks`` splices
+# ``sync_artifacts`` in at a hard-coded index 6 on the missing/not-downloaded
+# paths, which is exactly past the fourth DB check; inserting a new name
+# anywhere earlier in this tuple would silently reorder the emitted results
+# away from the healthy path's order.
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -198,6 +204,42 @@ def _unparsable_occurred_at_check(conn: sqlite3.Connection) -> dict[str, Any]:
     )
 
 
+def _review_scope_check(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Report person-scoped reviews whose person row is gone.
+
+    Never a ``fail``: ``person rm`` nulls ``scope_person_id`` by design and the
+    denormalized ``scope_person_handle`` survives, so a dangling link is
+    expected history rather than corruption. The one failure mode worth
+    reporting is a database that never reached schema v4 -- the column is
+    missing, sqlite3 raises, and that becomes a ``fail`` like every other check
+    here.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT id, scope_person_handle FROM reviews "
+            "WHERE scope_kind = 'person' AND scope_person_id IS NULL "
+            "ORDER BY id"
+        ).fetchall()
+    except sqlite3.Error as exc:
+        return _result("review_scope", "fail", f"cannot inspect review scopes: {exc}")
+    if not rows:
+        return _result(
+            "review_scope", "ok", "every person-scoped review still resolves to a person"
+        )
+    dangling = [
+        {"review_id": row["id"], "scope_person_handle": row["scope_person_handle"]}
+        for row in rows
+    ]
+    return _result(
+        "review_scope",
+        "warn",
+        f"{len(dangling)} person-scoped review(s) name a deleted person; this is "
+        "retained history, not corruption -- the handle is kept so the review "
+        "still says who it was about",
+        details=dangling,
+    )
+
+
 def _row_counts_check(conn: sqlite3.Connection) -> dict[str, Any]:
     counts: dict[str, int] = {}
     try:
@@ -254,6 +296,7 @@ def run_checks(db_path: Path, *, quick: bool = False) -> list[dict[str, Any]]:
         checks.append(_sync_artifacts_check(db_path))
         checks.append(_unparsable_occurred_at_check(conn))
         checks.append(_row_counts_check(conn))
+        checks.append(_review_scope_check(conn))
     return checks
 
 

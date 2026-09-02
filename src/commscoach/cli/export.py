@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from .. import db, paths
-from .common import open_db, print_err
+from .common import format_scope, open_db, print_err
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -76,9 +76,18 @@ def _format_markdown_entry(
 
 
 def _format_markdown_review(review: db.Review) -> str:
+    """Render one review as a Markdown section, naming its scope axis.
+
+    The scope line reads ``person @alice`` / ``tag conflict`` /
+    ``range 2026-07-01..2026-09-01`` and keeps the existing
+    ``(context limit N)`` suffix. ``format_scope`` is shared with the ``review``
+    listings, so a person whose row was later deleted is still named from the
+    denormalized ``scope_person_handle`` -- the Markdown export is lossy, but
+    it does not have to be amnesiac.
+    """
     lines: list[str] = [f"### Review {review.id}", ""]
     lines.append(f"- **Created**: {review.created_at}")
-    scope = review.scope_kind
+    scope = format_scope(review, separator=" ")
     if review.scope_limit is not None:
         scope += f" (context limit {review.scope_limit})"
     lines.append(f"- **Scope**: {scope}")
