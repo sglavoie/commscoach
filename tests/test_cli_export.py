@@ -328,6 +328,21 @@ class ExportReviewScopeTests(ExportTestBase):
         _, out, _ = self._run("export")
         self.assertEqual(self._scope_line(out), "- **Scope**: person @alice")
 
+    def test_person_handle_rename_names_the_current_handle(self) -> None:
+        person = self._seed_person("alice")
+        entry = self._seed_entry("note", people=("alice",))
+        self._seed_review(
+            "body",
+            [entry.id],
+            scope_kind="person",
+            scope_limit=None,
+            scope_person_handle="alice",
+        )
+        with closing(db.connect(self.db_path)) as conn:
+            db.update_person(conn, person.id, handle="ally")
+        _, out, _ = self._run("export")
+        self.assertEqual(self._scope_line(out), "- **Scope**: person @ally")
+
     def test_tag_scope_names_the_normalized_tag(self) -> None:
         entry = self._seed_entry("note", tags=("conflict",))
         self._seed_review(

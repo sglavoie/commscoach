@@ -496,6 +496,87 @@ class ScopeRenderingTests(ReviewTestBase):
 
         self.assertIn("scope person:@alice", long_out)
 
+    def test_person_handle_rename_renders_the_current_handle(self) -> None:
+        review = self._seed_review(
+            "body",
+            [self.entry.id],
+            scope_kind="person",
+            scope_person_handle="alice",
+        )
+
+        rc, _, err = self._run("person", "edit", "alice", "--handle", "ally")
+        self.assertEqual(rc, 0, err)
+
+        long_out, short_out = self._lines(review)
+
+        self.assertIn("scope person:@ally", long_out)
+        self.assertIn("scope:person:@ally", short_out)
+        self.assertNotIn("@alice", long_out)
+        self.assertNotIn("@alice", short_out)
+
+    def test_person_handle_rename_renders_the_live_person_over_a_stale_handle(
+        self,
+    ) -> None:
+        """A row whose denormalized handle drifted still renders the truth.
+
+        ``update_person`` keeps the two in sync, but an archive written before
+        that fix and restored by ``import`` carries the pre-rename handle beside
+        a live ``scope_person_id``; rendering follows the live person.
+        """
+        review = self._seed_review(
+            "body",
+            [self.entry.id],
+            scope_kind="person",
+            scope_person_handle="alice",
+        )
+        with closing(db.connect(self.db_path)) as conn, conn:
+            conn.execute("UPDATE people SET handle = 'ally' WHERE handle = 'alice'")
+
+        long_out, short_out = self._lines(review)
+
+        self.assertIn("scope person:@ally", long_out)
+        self.assertIn("scope:person:@ally", short_out)
+
+    def test_person_handle_rename_keeps_the_review_listable_by_the_new_handle(
+        self,
+    ) -> None:
+        review = self._seed_review(
+            "body",
+            [self.entry.id],
+            scope_kind="person",
+            scope_person_handle="alice",
+        )
+
+        rc, _, err = self._run("person", "edit", "alice", "--handle", "ally")
+        self.assertEqual(rc, 0, err)
+
+        rc, found, err = self._run("review", "list", "--person", "ally")
+        self.assertEqual(rc, 0, err)
+        self.assertIn(f"[{review.id}]", found)
+
+        rc, missing, err = self._run("review", "list", "--person", "alice")
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn(f"[{review.id}]", missing)
+
+    def test_person_handle_rename_then_delete_renders_the_last_known_handle(
+        self,
+    ) -> None:
+        review = self._seed_review(
+            "body",
+            [self.entry.id],
+            scope_kind="person",
+            scope_person_handle="alice",
+        )
+
+        rc, _, err = self._run("person", "edit", "alice", "--handle", "ally")
+        self.assertEqual(rc, 0, err)
+        rc, _, err = self._run("--yes", "person", "rm", "ally")
+        self.assertEqual(rc, 0, err)
+
+        long_out, _ = self._lines(review)
+
+        self.assertIn("scope person:@ally", long_out)
+
     def test_tag_scope_renders_the_tag(self) -> None:
         review = self._seed_review(
             "body", [self.entry.id], scope_kind="tag", scope_tag="conflict"

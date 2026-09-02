@@ -127,5 +127,117 @@ class PeopleCrudTests(DBTestCase):
             db.set_self(self.conn, 9999)
 
 
+class PersonHandleRenameScopeTests(DBTestCase):
+    """A rename must carry into the denormalized ``reviews.scope_person_handle``.
+
+    Person-scoped lookup matches that column rather than the ``scope_person_id``
+    FK (so a deleted person's reviews stay findable), which is exactly why a
+    rename that touched only ``people.handle`` stranded the history behind it.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.alice = db.create_person(self.conn, "alice")
+        self.entry = db.create_entry(self.conn, "with alice", people=["alice"])
+        self.review = db.create_review(
+            self.conn,
+            "about alice",
+            [self.entry.id],
+            scope_kind="person",
+            scope_person_handle="alice",
+        )
+
+    def _handle_of(self, review_id: int) -> str | None:
+        review = db.get_review(self.conn, review_id)
+        assert review is not None
+        return review.scope_person_handle
+
+    def test_person_handle_rename_moves_scoped_reviews_to_the_new_handle(self) -> None:
+        db.update_person(self.conn, self.alice.id, handle="ally")
+
+        self.assertEqual(self._handle_of(self.review.id), "ally")
+        self.assertEqual(
+            [r.id for r in db.list_reviews(self.conn, person_handle="ally")],
+            [self.review.id],
+        )
+        self.assertEqual(db.list_reviews(self.conn, person_handle="alice"), ())
+
+    def test_person_handle_rename_keeps_the_live_link_intact(self) -> None:
+        db.update_person(self.conn, self.alice.id, handle="ally")
+
+        review = db.get_review(self.conn, self.review.id)
+        assert review is not None
+        assert review.scope_person is not None
+        self.assertEqual(review.scope_person.id, self.alice.id)
+        self.assertEqual(review.scope_person.handle, "ally")
+
+    def test_person_handle_rename_propagates_a_case_only_change(self) -> None:
+        db.update_person(self.conn, self.alice.id, handle="Alice")
+
+        self.assertEqual(self._handle_of(self.review.id), "Alice")
+        self.assertEqual(
+            [r.id for r in db.list_reviews(self.conn, person_handle="alice")],
+            [self.review.id],
+        )
+
+    def test_person_handle_rename_then_delete_keeps_the_last_known_handle(
+        self,
+    ) -> None:
+        db.update_person(self.conn, self.alice.id, handle="ally")
+        self.assertTrue(db.delete_person(self.conn, self.alice.id))
+
+        review = db.get_review(self.conn, self.review.id)
+        assert review is not None
+        self.assertIsNone(review.scope_person)
+        self.assertEqual(review.scope_person_handle, "ally")
+        self.assertEqual(
+            [r.id for r in db.list_reviews(self.conn, person_handle="ally")],
+            [review.id],
+        )
+
+    def test_person_handle_rename_leaves_another_persons_reviews_alone(self) -> None:
+        db.create_person(self.conn, "bob")
+        bob_entry = db.create_entry(self.conn, "with bob", people=["bob"])
+        bob_review = db.create_review(
+            self.conn,
+            "about bob",
+            [bob_entry.id],
+            scope_kind="person",
+            scope_person_handle="bob",
+        )
+
+        db.update_person(self.conn, self.alice.id, handle="ally")
+
+        self.assertEqual(self._handle_of(bob_review.id), "bob")
+
+    def test_person_handle_rename_does_not_rewrite_a_deleted_persons_history(
+        self,
+    ) -> None:
+        self.assertTrue(db.delete_person(self.conn, self.alice.id))
+        bob = db.create_person(self.conn, "bob")
+
+        db.update_person(self.conn, bob.id, handle="bobby")
+
+        # The FK was cleared by the deletion, so nothing links this review to
+        # any live person and its handle stays historical identity.
+        self.assertEqual(self._handle_of(self.review.id), "alice")
+
+    def test_person_handle_rename_is_atomic_when_the_new_handle_collides(self) -> None:
+        db.create_person(self.conn, "bob")
+
+        with self.assertRaises(db.DuplicateHandleError):
+            db.update_person(self.conn, self.alice.id, handle="Bob")
+
+        person = db.get_person(self.conn, self.alice.id)
+        assert person is not None
+        self.assertEqual(person.handle, "alice")
+        self.assertEqual(self._handle_of(self.review.id), "alice")
+
+    def test_person_name_only_update_leaves_the_scoped_handle_untouched(self) -> None:
+        db.update_person(self.conn, self.alice.id, name="Alice A.")
+
+        self.assertEqual(self._handle_of(self.review.id), "alice")
+
+
 if __name__ == "__main__":
     unittest.main()

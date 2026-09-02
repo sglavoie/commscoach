@@ -73,6 +73,18 @@ def update_person(
 
     Raises ``PersonNotFoundError`` if the row is missing and
     ``DuplicateHandleError`` if ``handle`` collides with another row.
+
+    ``reviews.scope_person_handle`` is denormalized text beside the
+    ``scope_person_id`` foreign key, so a handle change is carried into every
+    review still linked to this person, inside the same transaction. Without it
+    a rename would strand that person's scoped review history under the old
+    handle: ``list_reviews(person_handle=...)`` and the person-scoped context
+    both match the denormalized column, not the FK. This mirrors ``rename_tag``,
+    which carries a tag rename into ``reviews.scope_tag`` for the same reason.
+
+    Reviews whose ``scope_person_id`` is already NULL -- the person was deleted
+    -- are deliberately untouched: their handle is historical identity, not a
+    live reference.
     """
     person = get_person(conn, person_id)
     if person is None:
@@ -100,6 +112,12 @@ def update_person(
                 f"UPDATE people SET {', '.join(fields)} WHERE id = ?",
                 params,
             )
+            if handle is not common.UNSET:
+                conn.execute(
+                    "UPDATE reviews SET scope_person_handle = ?"
+                    " WHERE scope_person_id = ?",
+                    (handle, person_id),
+                )
     except sqlite3.IntegrityError as exc:
         _wrap_people_integrity_error(
             exc, handle if handle is not common.UNSET else None

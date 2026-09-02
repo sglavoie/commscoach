@@ -211,6 +211,8 @@ A scope that matches nothing returns an empty entry list rather than failing —
 
 A person-scoped review stores the handle alongside the foreign key, so after `commscoach --yes person rm alice` the review is still findable by `review list --person alice` and still prints `@alice`. `doctor`'s `review_scope` check reports those reviews as a warning — retained history, not corruption.
 
+`commscoach person edit alice --handle ally` carries the rename into that stored handle, the same way `tag rename` carries a tag rename into tag-scoped reviews. The person's review history follows them: `review list --person ally` finds it, a `review context --person ally` counts it among the prior reviews, and every surface prints `@ally`. Delete them afterwards and `@ally` — the handle they last had — is what remains as history.
+
 ## Correcting stored coaching
 
 Feedback notes and review bodies hold AI-generated text, so they are the records most likely to be wrong or badly worded. Both are now editable in place instead of forcing you to delete the whole entry:

@@ -106,13 +106,20 @@ def format_scope(review: db.Review, *, separator: str = ":") -> str:
     ``(context limit N)`` suffix. Keeping one renderer means the human, short,
     and export forms cannot drift apart.
 
-    ``person`` reads the denormalized ``scope_person_handle`` rather than
-    ``scope_person``, so a review of a since-deleted person still names them.
+    ``person`` prefers the live ``scope_person``, so a renamed person is named
+    by their current handle, and falls back to the denormalized
+    ``scope_person_handle``, so a review of a since-deleted person still names
+    them by the handle they last had. ``update_person`` keeps the two in sync on
+    rename; preferring the live row means a row that somehow drifted -- an
+    archive written before that fix and restored by ``import``, say -- still
+    renders the truth rather than the stale copy.
     """
     kind = review.scope_kind
     if kind == "person":
-        handle = review.scope_person_handle or (
-            review.scope_person.handle if review.scope_person is not None else None
+        handle = (
+            review.scope_person.handle
+            if review.scope_person is not None
+            else review.scope_person_handle
         )
         return f"{kind}{separator}@{handle}" if handle else kind
     if kind == "tag" and review.scope_tag:

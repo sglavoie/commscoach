@@ -379,6 +379,40 @@ class ScopedReviewContextTests(DBTestCase):
                     [goal.id for goal in context.goals], [newest.id]
                 )
 
+    def test_person_handle_rename_keeps_prior_reviews_in_the_scoped_context(
+        self,
+    ) -> None:
+        entry = db.create_entry(self.conn, "with alice", people=["alice"])
+        about_alice = db.create_review(
+            self.conn,
+            "about alice",
+            [entry.id],
+            scope_kind="person",
+            scope_person_handle="alice",
+        )
+
+        db.update_person(self.conn, self.alice.id, handle="ally")
+
+        context = db.get_review_context(
+            self.conn, scope_kind="person", person_handle="ally"
+        )
+
+        self.assertEqual(context.scope_person.id, self.alice.id)
+        self.assertEqual(context.scope_person.handle, "ally")
+        self.assertEqual([ctx.entry.id for ctx in context.entries], [entry.id])
+        self.assertEqual(
+            [review.id for review in context.prior_reviews], [about_alice.id]
+        )
+
+    def test_person_handle_rename_leaves_the_old_handle_unresolvable(self) -> None:
+        db.create_entry(self.conn, "with alice", people=["alice"])
+        db.update_person(self.conn, self.alice.id, handle="ally")
+
+        with self.assertRaises(db.PersonNotFoundError):
+            db.get_review_context(
+                self.conn, scope_kind="person", person_handle="alice"
+            )
+
     def test_rejects_unknown_kind_and_axes_from_another_kind(self) -> None:
         with self.assertRaises(db.DBError):
             db.get_review_context(self.conn, scope_kind="everything")
