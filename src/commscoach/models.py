@@ -161,7 +161,8 @@ class PersonContext:
 class EntryContext:
     """Payload returned by ``commscoach context <entry-id>``.
 
-    ``self_person`` is the global self. ``people`` enrich the entry's linked
+    ``self_person`` is the global self; ``self_notes`` holds coaching preferences.
+    ``people`` enrich the entry's linked
     non-self counterparties with notes and history. ``prior_feedback`` is
     feedback already attached to this entry, ordered oldest-first by the DB
     layer. With the default limits this payload is roughly 6--10x larger than
@@ -174,6 +175,7 @@ class EntryContext:
     prior_feedback: tuple[Feedback, ...]
     goals: tuple[Goal, ...] = field(default_factory=tuple)
     prior_reviews: tuple[Review, ...] = field(default_factory=tuple)
+    self_notes: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,3 +206,4 @@ class ReviewContext:
     entries: tuple[ReviewEntryContext, ...] = field(default_factory=tuple)
     prior_reviews: tuple[Review, ...] = field(default_factory=tuple)
     goals: tuple[Goal, ...] = field(default_factory=tuple)
+    self_notes: str | None = None

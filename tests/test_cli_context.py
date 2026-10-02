@@ -57,6 +57,24 @@ class ContextTestBase(unittest.TestCase):
 
 
 class ContextSuccessTests(ContextTestBase):
+    def test_self_notes_are_in_both_contexts_and_follow_edits_and_clearing(self):
+        self._seed_self("me")
+        entry = self._seed_entry("A conversation")
+        commands = (("context", str(entry.id)), ("review", "context"))
+        for expected in (None, "Be direct without sounding abrupt.", "Prefer short examples.", None):
+            if expected is None:
+                rc, _, err = self._run("person", "edit", "me", "--clear-notes")
+            else:
+                rc, _, err = self._run("person", "edit", "me", "--notes", expected)
+            self.assertEqual(rc, 0, err)
+            for command in commands:
+                with self.subTest(command=command, notes=expected):
+                    rc, out, err = self._run(*command)
+                    self.assertEqual(rc, 0, err)
+                    payload = json.loads(out)
+                    self.assertEqual(payload["self"]["notes"], expected)
+                    self.assertEqual(payload["self"]["handle"], "me")
+
     def test_context_emits_skill_shape(self) -> None:
         self._seed_self("me")
         self._seed_person("alice", name="Alice A.")
@@ -178,16 +196,10 @@ class ContextSuccessTests(ContextTestBase):
         self.assertEqual(payload["people"][0]["history"], [])
         self.assertEqual(payload["prior_reviews"], [])
 
-    def test_entry_context_payload_is_untouched_by_the_review_scope_work(
+    def test_entry_context_payload_contract(
         self,
     ) -> None:
-        """The review scope surface must not leak into ``commscoach context``.
-
-        Session 6 widened ``review_to_dict``, which ``prior_reviews`` shares, so
-        this pins both halves of the contract: every top-level key and every
-        non-review sub-shape is byte-for-byte what it was, and ``prior_reviews``
-        grew *only* additively -- each pre-existing key keeps its exact value.
-        """
+        """Pin the context shape, including self notes and scoped prior reviews."""
         self._seed_self("me")
         self._seed_person("alice", name="Alice A.")
         entry = self._seed_entry("hello", people=("alice",), tags=("review",))
@@ -219,7 +231,7 @@ class ContextSuccessTests(ContextTestBase):
             ],
         )
         self.assertEqual(
-            sorted(payload["self"].keys()), ["handle", "id", "is_self", "name"]
+            sorted(payload["self"].keys()), ["handle", "id", "is_self", "name", "notes"]
         )
         self.assertEqual(
             sorted(payload["people"][0].keys()),

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, time, timedelta, timezone, tzinfo
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 
 
 class TimeParseError(ValueError):
@@ -47,16 +47,13 @@ def _error(text: str) -> TimeParseError:
 
 
 def _reference_now(now: datetime | None) -> datetime:
-    reference = now if now is not None else datetime.now().astimezone()
-    if reference.tzinfo is None:
-        reference = reference.astimezone()
-    return reference
+    # Keep system-local values naive until conversion: astimezone() on ``now``
+    # supplies a fixed offset, which is wrong for dates across a DST change.
+    return now if now is not None else datetime.now()
 
 
-def _local_timezone(reference: datetime) -> tzinfo:
-    zone = reference.tzinfo
-    assert zone is not None
-    return zone
+def _local_timezone(reference: datetime) -> tzinfo | None:
+    return reference.tzinfo
 
 
 def _parse_clock(text: str, original: str) -> time:
@@ -138,3 +135,30 @@ def parse_when(text: str, *, now: datetime | None = None) -> str:
         return _canonical(reference - delta, reference)
 
     raise _error(text)
+
+
+def parse_bound(text: str, *, upper: bool = False, now: datetime | None = None) -> str:
+    """Resolve a local calendar day or an exact instant to an inclusive UTC bound.
+
+    Bare dates, day keywords, and weekdays cover whole local days. Explicit
+    clocks, ``now``, and elapsed-time expressions retain their exact time.
+    """
+    reference = _reference_now(now)
+    value = text.strip()
+    parsed = datetime.fromisoformat(parse_when(value, now=reference))
+    try:
+        date.fromisoformat(value)
+        day_only = True
+    except ValueError:
+        day_only = value.lower() in {"today", "yesterday", "tomorrow"}
+        weekday = _WEEKDAY_RE.fullmatch(value)
+        day_only = day_only or bool(weekday and weekday.group(2) is None)
+    if day_only:
+        local_day = parsed.astimezone(reference.tzinfo).date()
+        if upper:
+            local_day += timedelta(days=1)
+        boundary = datetime.combine(local_day, time(), tzinfo=reference.tzinfo)
+        parsed = boundary.astimezone(timezone.utc)
+        if upper:
+            parsed -= timedelta(microseconds=1)
+    return parsed.isoformat()

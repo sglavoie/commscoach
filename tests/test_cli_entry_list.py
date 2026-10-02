@@ -9,11 +9,35 @@ from contextlib import closing, redirect_stderr
 from datetime import datetime, timedelta, timezone
 
 from commscoach import cli, db
+from commscoach.cli.common import format_stamp
 
 from .cli_entry_case import EntryTestBase
 
 
 class EntryListTests(EntryTestBase):
+    def test_list_and_search_show_date_source_and_live_feedback_status(self):
+        entry = self._seed_entry("## Situation\nA useful conversation", source="in-person",
+                                 occurred_at="2026-06-01T18:30:00+00:00")
+        fallback = self._seed_entry("No occurrence time")
+        with closing(db.connect(self.db_path)) as conn:
+            feedback = db.create_feedback(conn, entry.id, "Useful coaching")
+        for command in ("list", "search"):
+            rc, out, err = self._run("entry", command)
+            self.assertEqual(rc, 0, err)
+            rows = out.splitlines()
+            line = next(row for row in rows if row.startswith(f"[{entry.id}]"))
+            self.assertIn(format_stamp(entry.occurred_at), line)
+            self.assertIn("in-person · has feedback · A useful conversation", line)
+            line = next(row for row in rows if row.startswith(f"[{fallback.id}]"))
+            self.assertIn(format_stamp(fallback.created_at), line)
+            self.assertIn("needs feedback", line)
+        with closing(db.connect(self.db_path)) as conn:
+            db.delete_feedback(conn, feedback.id)
+        rc, out, err = self._run("entry", "search", "--query", "useful")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("needs feedback", out)
+        self.assertNotIn("has feedback", out)
+
     def test_list_empty(self) -> None:
         rc, out, _ = self._run("entry", "list")
         self.assertEqual(rc, 0)
@@ -71,10 +95,10 @@ class EntryListTests(EntryTestBase):
 
     def test_list_filters_by_inclusive_date_bounds(self) -> None:
         included = self._seed_entry(
-            "included", occurred_at="2026-06-02T23:59:59+00:00"
+            "included", occurred_at="2026-06-02T23:59:59"
         )
-        self._seed_entry("too early", occurred_at="2026-05-31T23:59:59+00:00")
-        self._seed_entry("too late", occurred_at="2026-06-03T00:00:00+00:00")
+        self._seed_entry("too early", occurred_at="2026-05-31T23:59:59")
+        self._seed_entry("too late", occurred_at="2026-06-03T00:00:00")
 
         rc, out, _ = self._run(
             "entry", "list", "--since", "2026-06-01", "--until", "2026-06-02"
@@ -210,13 +234,13 @@ class EntrySearchTests(EntryTestBase):
         self._create_person("alice")
         match = self._seed_entry(
             "match",
-            occurred_at="2026-06-10T12:00:00+00:00",
+            occurred_at="2026-06-10T12:00:00",
             tags=("work",),
             people=("alice",),
         )
         self._seed_entry(
             "wrong date",
-            occurred_at="2026-06-09T23:59:59+00:00",
+            occurred_at="2026-06-09T23:59:59",
             tags=("work",),
             people=("alice",),
         )

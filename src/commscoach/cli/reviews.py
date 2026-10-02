@@ -280,7 +280,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 def _review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
     return {
-        "self": person_to_dict(context.self_person),
+        "self": {**person_to_dict(context.self_person), "notes": context.self_notes},
         # The scope block grew additively in session 6: ``kind``/``limit``/
         # ``entry_count`` keep their original meaning so no existing skill
         # parse breaks, and the axis keys are ``null`` for the kinds that do

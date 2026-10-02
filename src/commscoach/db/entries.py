@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, timedelta
 from typing import Any, Iterable, Literal
 
 from ..models import Entry
@@ -218,7 +217,7 @@ def search_entries(
     Malformed automatic FTS queries silently retry with LIKE. ``tag`` matches
     the normalized tag name; ``person_handle`` matches case-insensitively.
     ``since`` and ``until`` are
-    inclusive ISO dates applied to ``COALESCE(occurred_at, created_at)``;
+    inclusive UTC dates or timezone-aware timestamps applied to ``COALESCE(occurred_at, created_at)``;
     ``without_feedback`` selects the coaching backlog. Results are newest-first.
     """
     if limit is not None and limit < 0:
@@ -262,21 +261,11 @@ def search_entries(
         )
         params.append(person_handle)
     if since is not None:
-        try:
-            since = date.fromisoformat(since).isoformat()
-        except (TypeError, ValueError) as exc:
-            raise DBError("since must be an ISO date (YYYY-MM-DD)") from exc
         where.append("COALESCE(e.occurred_at, e.created_at) >= ?")
-        params.append(since)
+        params.append(common.date_bound_timestamp(since, name="since"))
     if until is not None:
-        try:
-            until_exclusive = (
-                date.fromisoformat(until) + timedelta(days=1)
-            ).isoformat()
-        except (OverflowError, TypeError, ValueError) as exc:
-            raise DBError("until must be an ISO date (YYYY-MM-DD)") from exc
-        where.append("COALESCE(e.occurred_at, e.created_at) < ?")
-        params.append(until_exclusive)
+        where.append("COALESCE(e.occurred_at, e.created_at) <= ?")
+        params.append(common.date_bound_timestamp(until, name="until", upper=True))
     if without_feedback:
         where.append(
             "NOT EXISTS ("

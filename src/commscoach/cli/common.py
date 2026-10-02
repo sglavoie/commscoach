@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, TextIO
 
 from .. import db, paths
-from ..timeparse import TimeParseError, parse_when
+from ..timeparse import TimeParseError, parse_bound, parse_when
 
 
 def print_err(message: str, *, stream: TextIO | None = None) -> None:
@@ -191,8 +191,8 @@ def parse_date_bound(
 ) -> str:
     """Parse a CLI date bound and name ``flag`` in any semantic error."""
     try:
-        return parse_when(value, now=now)[:10]
-    except TimeParseError as exc:
+        return parse_bound(value, upper=flag == "--until", now=now)
+    except (OverflowError, ValueError) as exc:
         raise db.DBError(f"{flag}: {exc}") from exc
 
 
@@ -207,25 +207,26 @@ def add_date_bounds(parser: argparse.ArgumentParser, *, noun: str = "entries") -
         "--since",
         default=None,
         metavar="DATE",
-        help=f"Include {noun} on or after DATE (ISO-8601 or relative).",
+        help=f"Include {noun} from DATE (local day or exact ISO-8601/relative time).",
     )
     parser.add_argument(
         "--until",
         default=None,
         metavar="DATE",
-        help=f"Include {noun} through DATE (ISO-8601 or relative).",
+        help=f"Include {noun} through DATE (whole local day, or exact time).",
     )
 
 
 def parse_date_bounds(args: argparse.Namespace) -> tuple[str | None, str | None]:
     """Resolve and validate shared CLI date bounds."""
+    now = datetime.now()
     since = (
-        parse_date_bound(args.since, flag="--since")
+        parse_date_bound(args.since, flag="--since", now=now)
         if args.since is not None
         else None
     )
     until = (
-        parse_date_bound(args.until, flag="--until")
+        parse_date_bound(args.until, flag="--until", now=now)
         if args.until is not None
         else None
     )

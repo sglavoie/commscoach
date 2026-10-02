@@ -11,6 +11,7 @@ from .common import (
     add_date_bounds,
     confirm,
     first_prose_line,
+    format_stamp,
     non_negative_int,
     open_db,
     parse_date_bounds,
@@ -206,13 +207,17 @@ def _format_entry_human(entry: db.Entry) -> str:
     return "\n".join(lines)
 
 
-def _format_entry_short(entry: db.Entry) -> str:
-    parts = [f"[{entry.id}]", truncate(first_prose_line(entry.body))]
+def _format_entry_short(entry: db.Entry, *, has_feedback: bool = False) -> str:
+    parts = [f"[{entry.id}]", format_stamp(entry.occurred_at or entry.created_at)]
+    if entry.source:
+        parts.append(" ".join(entry.source.split()))
+    parts.append("has feedback" if has_feedback else "needs feedback")
+    parts.append(truncate(first_prose_line(entry.body)))
     if entry.tags:
         parts.append("#" + ",".join(entry.tags))
     if entry.people:
         parts.append("@" + ",".join(p.handle for p in entry.people))
-    return " ".join(parts)
+    return " · ".join(parts)
 
 
 def _emit_entry(
@@ -229,7 +234,9 @@ def _emit_entry(
     print(_format_entry_human(entry))
 
 
-def _emit_entries(args: argparse.Namespace, entries: tuple[db.Entry, ...]) -> None:
+def _emit_entries(
+    args: argparse.Namespace, entries: tuple[db.Entry, ...], coached: set[int]
+) -> None:
     if args.json:
         print_json([entry_to_dict(e) for e in entries])
         return
@@ -237,7 +244,7 @@ def _emit_entries(args: argparse.Namespace, entries: tuple[db.Entry, ...]) -> No
         print("(no entries)")
         return
     for entry in entries:
-        print(_format_entry_short(entry))
+        print(_format_entry_short(entry, has_feedback=entry.id in coached))
 
 
 def cmd_entry_add(args: argparse.Namespace) -> int:
@@ -345,7 +352,11 @@ def cmd_entry_list(args: argparse.Namespace) -> int:
             until=until,
             limit=args.limit,
         )
-    _emit_entries(args, entries)
+        coached = (
+            db.feedback_entry_ids(conn, (e.id for e in entries))
+            if not args.json else set()
+        )
+    _emit_entries(args, entries, coached)
     return 0
 
 
@@ -363,7 +374,11 @@ def cmd_entry_search(args: argparse.Namespace) -> int:
             limit=args.limit,
             mode="like" if args.exact else "auto",
         )
-    _emit_entries(args, entries)
+        coached = (
+            db.feedback_entry_ids(conn, (e.id for e in entries))
+            if not args.json else set()
+        )
+    _emit_entries(args, entries, coached)
     return 0
 
 

@@ -64,6 +64,7 @@ from .feedback import (
     create_feedback,
     delete_feedback,
     get_feedback,
+    feedback_entry_ids,
     list_feedback,
     update_feedback,
 )
@@ -165,6 +166,7 @@ __all__ = [
     "get_entry",
     "get_entry_context",
     "get_feedback",
+    "feedback_entry_ids",
     "get_goal",
     "get_person",
     "get_person_by_handle",

@@ -18,7 +18,7 @@ from .entries import get_entry, list_entries_with_person, search_entries
 from .errors import DBError, EntryNotFoundError, MissingSelfError, PersonNotFoundError
 from .feedback import list_feedback
 from .goals import list_goals
-from .notes import get_person_notes
+from .notes import get_person_note, get_person_notes
 from .people import get_person_by_handle, get_self_person
 from .reviews import (
     _SCOPE_AXES,
@@ -91,7 +91,7 @@ def get_review_context(
     ``scope_kind`` selects which axis narrows the entries and only that axis may
     be supplied, mirroring ``create_review``. Entries come from
     ``search_entries``, so ``tag`` is matched normalized and ``since``/``until``
-    are inclusive ISO dates on ``COALESCE(occurred_at, created_at)``. ``limit``
+    are inclusive UTC dates or timestamps on ``COALESCE(occurred_at, created_at)``. ``limit``
     caps the entries under every scope and is reported back as ``scope_limit``.
     A scope that matches nothing returns ``entries=()`` rather than raising --
     "no entries with @alice yet" is an answer, not an error. An unknown
@@ -170,8 +170,10 @@ def get_review_context(
         )
     else:
         latest_reviews = list_reviews(conn, limit=prior_review_limit)
+    self_note = get_person_note(conn, self_person.id)
     return ReviewContext(
         self_person=self_person,
+        self_notes=self_note.body if self_note is not None else None,
         scope_kind=scope_kind,
         scope_limit=limit,
         scope_person=scope_person,
@@ -237,9 +239,11 @@ def get_entry_context(
         )
     prior_feedback = list_feedback(conn, entry_id)
     latest_reviews = list_reviews(conn, limit=prior_review_limit)
+    self_note = get_person_note(conn, self_person.id)
     return EntryContext(
         entry=entry,
         self_person=self_person,
+        self_notes=self_note.body if self_note is not None else None,
         people=tuple(people),
         prior_feedback=prior_feedback,
         goals=list_goals(conn),

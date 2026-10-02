@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
 from typing import Any, Iterable
 
 from ..models import Entry, Person, Review
@@ -33,11 +32,8 @@ _SCOPE_AXES = {
 
 
 def _validate_scope_date(value: Any, *, what: str) -> str:
-    """Normalize an ISO date bound, rejecting anything else."""
-    try:
-        return date.fromisoformat(value).isoformat()
-    except (TypeError, ValueError) as exc:
-        raise DBError(f"{what} must be an ISO date (YYYY-MM-DD)") from exc
+    """Keep legacy date scopes readable and normalize new timestamp bounds."""
+    return common.normalize_date_bound(value, name=what)
 
 
 def _resolve_review_entries(

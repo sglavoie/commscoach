@@ -8,43 +8,23 @@ from datetime import date, timedelta
 from typing import Any
 
 from ..models import Stats
-from .common import validate_range_bounds
+from .common import date_bound_timestamp, validate_range_bounds
 from .errors import DBError
-
-
-def _date_window(
-    since: str | None,
-    until: str | None,
-) -> tuple[str | None, str | None]:
-    if since is not None:
-        try:
-            since = date.fromisoformat(since).isoformat()
-        except (TypeError, ValueError) as exc:
-            raise DBError("since must be an ISO date (YYYY-MM-DD)") from exc
-    until_exclusive: str | None = None
-    if until is not None:
-        try:
-            until_exclusive = (
-                date.fromisoformat(until) + timedelta(days=1)
-            ).isoformat()
-        except (OverflowError, TypeError, ValueError) as exc:
-            raise DBError("until must be an ISO date (YYYY-MM-DD)") from exc
-    return since, until_exclusive
 
 
 def _where_window(
     expression: str,
     since: str | None,
-    until_exclusive: str | None,
+    until: str | None,
 ) -> tuple[str, list[str]]:
     clauses: list[str] = []
     params: list[str] = []
     if since is not None:
         clauses.append(f"{expression} >= ?")
         params.append(since)
-    if until_exclusive is not None:
-        clauses.append(f"{expression} < ?")
-        params.append(until_exclusive)
+    if until is not None:
+        clauses.append(f"{expression} <= ?")
+        params.append(until)
     return (" AND ".join(clauses) if clauses else "1 = 1"), params
 
 
@@ -122,18 +102,22 @@ def get_stats(
     if top < 0:
         raise DBError("top must be non-negative")
     validate_range_bounds(since, until, since_name="since", until_name="until")
-    since, until_exclusive = _date_window(since, until)
+    since = date_bound_timestamp(since, name="since") if since is not None else None
+    until = (
+        date_bound_timestamp(until, name="until", upper=True)
+        if until is not None else None
+    )
     entry_where, entry_params = _where_window(
-        "COALESCE(e.occurred_at, e.created_at)", since, until_exclusive
+        "COALESCE(e.occurred_at, e.created_at)", since, until
     )
     review_where, review_params = _where_window(
-        "r.created_at", since, until_exclusive
+        "r.created_at", since, until
     )
     open_goal_where, open_goal_params = _where_window(
-        "g.created_at", since, until_exclusive
+        "g.created_at", since, until
     )
     closed_goal_where, closed_goal_params = _where_window(
-        "g.closed_at", since, until_exclusive
+        "g.closed_at", since, until
     )
 
     entry_rows = conn.execute(

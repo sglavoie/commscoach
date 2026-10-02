@@ -3,12 +3,29 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterable
 
 from ..models import Feedback
 from . import common
 from .entries import get_entry
 from .errors import DBError, EntryNotFoundError, FeedbackNotFoundError
 from .rows import row_to_feedback
+
+
+def feedback_entry_ids(conn: sqlite3.Connection, entry_ids: Iterable[int]) -> set[int]:
+    """Find coached entries in batches without loading their feedback bodies."""
+    ids = tuple(dict.fromkeys(entry_ids))
+    coached: set[int] = set()
+    for offset in range(0, len(ids), 500):
+        batch = ids[offset:offset + 500]
+        placeholders = ",".join("?" for _ in batch)
+        coached.update(
+            row[0] for row in conn.execute(
+                f"SELECT DISTINCT entry_id FROM feedback WHERE entry_id IN ({placeholders})",
+                batch,
+            )
+        )
+    return coached
 
 
 def create_feedback(

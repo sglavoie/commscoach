@@ -11,6 +11,7 @@ import io
 import json
 import unittest
 from contextlib import closing, redirect_stderr, redirect_stdout
+from datetime import datetime
 from unittest import mock
 
 from commscoach import cli, db
@@ -199,25 +200,37 @@ class ScopedAddTests(ReviewTestBase):
     def test_date_bounds_store_range_scope(self) -> None:
         review = self._add("--since", "2026-07-01", "--until", "2026-09-01")
         self.assertEqual(review.scope_kind, "range")
-        self.assertEqual(review.scope_since, "2026-07-01")
-        self.assertEqual(review.scope_until, "2026-09-01")
+        self.assertEqual(
+            datetime.fromisoformat(review.scope_since).astimezone().replace(tzinfo=None),
+            datetime.fromisoformat("2026-07-01T00:00:00"),
+        )
+        self.assertEqual(
+            datetime.fromisoformat(review.scope_until).astimezone().replace(tzinfo=None),
+            datetime.fromisoformat("2026-09-01T23:59:59.999999"),
+        )
 
     def test_since_alone_stores_an_open_ended_range(self) -> None:
         review = self._add("--since", "2026-07-01")
         self.assertEqual(review.scope_kind, "range")
-        self.assertEqual(review.scope_since, "2026-07-01")
+        self.assertEqual(
+            datetime.fromisoformat(review.scope_since).astimezone().replace(tzinfo=None),
+            datetime.fromisoformat("2026-07-01T00:00:00"),
+        )
         self.assertIsNone(review.scope_until)
 
     def test_until_alone_stores_an_open_started_range(self) -> None:
         review = self._add("--until", "2026-09-01")
         self.assertEqual(review.scope_kind, "range")
         self.assertIsNone(review.scope_since)
-        self.assertEqual(review.scope_until, "2026-09-01")
+        self.assertEqual(
+            datetime.fromisoformat(review.scope_until).astimezone().replace(tzinfo=None),
+            datetime.fromisoformat("2026-09-01T23:59:59.999999"),
+        )
 
     def test_relative_date_grammar_is_accepted(self) -> None:
         review = self._add("--since", "8 weeks ago")
         self.assertEqual(review.scope_kind, "range")
-        self.assertRegex(review.scope_since or "", r"^\d{4}-\d{2}-\d{2}$")
+        self.assertRegex(review.scope_since or "", r"^\d{4}-\d{2}-\d{2}T.+\+00:00$")
 
     def test_explicit_scope_matching_the_axis_flag_is_accepted(self) -> None:
         review = self._add("--scope", "person", "--person", "alice")

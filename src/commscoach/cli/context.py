@@ -42,7 +42,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 def _context_to_dict(context: db.EntryContext) -> dict[str, Any]:
     return {
         "entry": entry_to_dict(context.entry),
-        "self": person_to_dict(context.self_person),
+        "self": {**person_to_dict(context.self_person), "notes": context.self_notes},
         "people": [
             {
                 **person_to_dict(person_context.person),

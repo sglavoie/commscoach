@@ -10,6 +10,7 @@ import io
 import json
 import unittest
 from contextlib import closing, redirect_stderr
+from datetime import datetime
 
 from commscoach import cli, db
 
@@ -198,7 +199,10 @@ class ScopeDerivationTests(ScopedContextBase):
     def test_since_alone_derives_range_with_open_until(self) -> None:
         payload = self._scope("--since", "2026-07-01")
         self.assertEqual(payload["scope"]["kind"], "range")
-        self.assertEqual(payload["scope"]["since"], "2026-07-01")
+        self.assertEqual(
+            datetime.fromisoformat(payload["scope"]["since"]).astimezone().replace(tzinfo=None),
+            datetime.fromisoformat("2026-07-01T00:00:00"),
+        )
         self.assertIsNone(payload["scope"]["until"])
         self.assertEqual(payload["scope"]["entry_count"], 2)
 
@@ -206,7 +210,10 @@ class ScopeDerivationTests(ScopedContextBase):
         payload = self._scope("--until", "2026-07-01")
         self.assertEqual(payload["scope"]["kind"], "range")
         self.assertIsNone(payload["scope"]["since"])
-        self.assertEqual(payload["scope"]["until"], "2026-07-01")
+        self.assertEqual(
+            datetime.fromisoformat(payload["scope"]["until"]).astimezone().replace(tzinfo=None),
+            datetime.fromisoformat("2026-07-01T23:59:59.999999"),
+        )
         self.assertEqual(
             [item["entry"]["id"] for item in payload["entries"]],
             [self.unrelated.id],
@@ -215,8 +222,14 @@ class ScopeDerivationTests(ScopedContextBase):
     def test_since_and_until_together_derive_one_range(self) -> None:
         payload = self._scope("--since", "2026-07-01", "--until", "2026-08-01")
         self.assertEqual(payload["scope"]["kind"], "range")
-        self.assertEqual(payload["scope"]["since"], "2026-07-01")
-        self.assertEqual(payload["scope"]["until"], "2026-08-01")
+        self.assertEqual(
+            datetime.fromisoformat(payload["scope"]["since"]).astimezone().replace(tzinfo=None),
+            datetime.fromisoformat("2026-07-01T00:00:00"),
+        )
+        self.assertEqual(
+            datetime.fromisoformat(payload["scope"]["until"]).astimezone().replace(tzinfo=None),
+            datetime.fromisoformat("2026-08-01T23:59:59.999999"),
+        )
         self.assertEqual(
             [item["entry"]["id"] for item in payload["entries"]],
             [self.first.id],
@@ -225,11 +238,11 @@ class ScopeDerivationTests(ScopedContextBase):
     def test_relative_date_grammar_resolves_to_iso(self) -> None:
         payload = self._scope("--since", "2 weeks ago")
         self.assertEqual(payload["scope"]["kind"], "range")
-        self.assertRegex(payload["scope"]["since"], r"^\d{4}-\d{2}-\d{2}$")
+        self.assertRegex(payload["scope"]["since"], r"^\d{4}-\d{2}-\d{2}T.+\+00:00$")
 
     def test_relative_date_keyword_is_accepted(self) -> None:
         payload = self._scope("--until", "last monday")
-        self.assertRegex(payload["scope"]["until"], r"^\d{4}-\d{2}-\d{2}$")
+        self.assertRegex(payload["scope"]["until"], r"^\d{4}-\d{2}-\d{2}T.+\+00:00$")
 
     def test_unparseable_date_exits_one_naming_the_flag(self) -> None:
         rc, _, err = self._run("review", "context", "--since", "not a date")

@@ -105,7 +105,22 @@ commscoach export --format json --out commscoach.json
 
 `entry add` body sources are a literal string, `-` for stdin, or `@PATH` for a UTF-8 file. On an interactive terminal, omitting the body opens `$VISUAL` or `$EDITOR` (falling back to `vi`). The same body-source convention applies to `entry edit --body`, `feedback add`, and `review add`; their omitted-body forms also use the editor where supported.
 
-`--occurred-at`, `--since`, and `--until` accept ISO-8601 values and natural relative dates such as `today`, `yesterday`, `3 days ago`, `last monday`, and `now`. Stored timestamps are normalized to UTC. Date filters are inclusive; a `--since` date after `--until` is rejected. Entries are ordered by when they occurred, falling back to creation time.
+`--occurred-at`, `--since`, and `--until` accept ISO-8601 values and natural relative dates such as `today`, `yesterday`, `3 days ago`, `last monday`, and `now`. Stored timestamps are normalized to UTC. Entries are ordered by when they occurred, falling back to creation time.
+
+Date filters use your system's local timezone. A bare date, `today`, `yesterday`, or `last monday` covers the whole local day, including daylight-saving transitions. Explicit times and elapsed-time expressions such as `today 9am`, `now`, or `3 days ago` retain their time; timestamps with an offset use that offset. Both bounds are inclusive, and a `--since` instant after `--until` is rejected. These rules apply to entry listings, searches, stats, and review scopes:
+
+```sh
+commscoach entry list --since today --until today
+commscoach entry search --since "yesterday 9am" --until "yesterday 5pm"
+```
+
+Human-readable `entry list` and `entry search` rows show the local occurrence date/time (or creation time), source when present, feedback status, text preview, tags, and people:
+
+```text
+[42] · 2026-10-02 14:30 · in-person · needs feedback · Quarterly review with John. · @jdoe
+```
+
+The status becomes `has feedback` when an entry has at least one stored feedback note. Use `entry search --no-feedback` to see only the coaching backlog. Entry JSON output keeps its existing shape.
 
 ## Tags
 
@@ -139,6 +154,8 @@ Scope is single-axis: a review covers the latest entries, *or* one person, *or* 
 Axis flags narrow entries exactly the way `entry search --person`, `--tag`, `--since`, and `--until` do — handles and tag names match case-insensitively, and the date bounds are inclusive against when the entry occurred, falling back to when it was created. `--limit` caps the entries under every scope.
 
 Pass `review add` the same scope flags you passed `review context`, so the stored review matches the context it was generated from.
+
+New range scopes record the resolved UTC timestamps in `since`/`until` (and stored `scope_since`/`scope_until`). When using moving relative times such as `now` or `2 weeks ago`, pass the resolved bounds from the context to `review add` to preserve the exact window. Existing reviews with date-only bounds retain their original UTC calendar-day meaning; no schema migration is needed.
 
 ### `latest` — no axis flag
 
@@ -242,6 +259,15 @@ commscoach --yes review rm 1
 The skill source lives at `~/scripts/skill_commscoach/unloaded_SKILL.md`. Install or link that file into the harness where you want to invoke it; the former documented path `~/scripts/skills/commscoach/SKILL.md` does not exist.
 
 Invoke the skill with an entry ID for entry-specific coaching, ask for a recent communications review, ask to catch up on uncoached entries, or ask "how am I doing?" Entry coaching uses `commscoach context <id>` and stores feedback via `commscoach --json feedback add <id> -`. Reviews use `commscoach review context` to gather entries, prior syntheses, and active goals; after storing the review, the skill creates its next experiments as linked goals and closes achieved or irrelevant goals only when the reviewed entries support that judgment.
+
+Both context commands include your self profile's private notes as `self.notes` (`null` when unset). Use them for durable coaching preferences, and edit or clear them with the existing person commands:
+
+```sh
+commscoach person edit me --notes "Help me be direct without sounding abrupt. Prefer short examples."
+commscoach person edit me --clear-notes
+```
+
+Replace `me` with your self profile's handle. These notes are included even when the self profile is not linked to the entry.
 
 The skill is [scope](#review-scopes)-aware. It derives the scope from how you ask — "how am I doing with @alice?" becomes `--person alice`, "how is my conflict tag trending?" becomes `--tag conflict`, "how did last quarter go?" becomes a `--since`/`--until` range — and passes the same axis flags to `review add` that it passed to `review context`, so the stored review records the slice it was generated from. It reports the stored scope back to you. A scope that matches nothing is reported as an answer rather than stored as an empty review.
 

@@ -41,6 +41,16 @@ class FeedbackCrudTests(DBTestCase):
     def test_list_feedback_unknown_entry_returns_empty(self) -> None:
         self.assertEqual(db.list_feedback(self.conn, 9999), ())
 
+    def test_feedback_status_lookup_handles_large_lists_and_multiple_notes(self):
+        self.assertEqual(db.feedback_entry_ids(self.conn, ()), set())
+        db.create_feedback(self.conn, self.entry.id, "First")
+        db.create_feedback(self.conn, self.entry.id, "Second")
+        other = db.create_entry(self.conn, "Other")
+        db.create_feedback(self.conn, other.id, "Other note")
+        # Keep the real ID beyond the first batch, with absent IDs and duplicates.
+        requested = [*range(1000, 1600), self.entry.id, self.entry.id]
+        self.assertEqual(db.feedback_entry_ids(self.conn, requested), {self.entry.id})
+
     def test_get_feedback_returns_row_or_none(self) -> None:
         fb = db.create_feedback(self.conn, self.entry.id, "x")
         found = db.get_feedback(self.conn, fb.id)
