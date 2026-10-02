@@ -10,7 +10,7 @@ Ready to use. The CLI, SQLite schema, stored feedback and reviews, scoped review
 
 ```
 src/commscoach/   # Python package
-tests/            # unittest suite (`uv run python -m unittest discover -s tests`)
+tests/            # Test suite (`uv run pytest -q`)
 ```
 
 ## Development
@@ -19,7 +19,7 @@ tests/            # unittest suite (`uv run python -m unittest discover -s tests
 uv venv
 uv sync
 uv run commscoach --help
-uv run python -m unittest discover -s tests
+uv run pytest -q
 ```
 
 ## Install globally
@@ -33,13 +33,14 @@ commscoach --help
 
 The `--editable` install resolves the package directly from this source tree, so subsequent edits take effect without re-installing.
 
-## Global flag ordering
+## Global flags
 
-The global flags `--db`, `--json`, and `--yes` are declared on the top-level parser and **must precede the subcommand**:
+The global flags `--db`, `--json`, and `--yes` can appear before or after a command, including a nested command:
 
 ```sh
-commscoach --json context 42         # correct
-commscoach context 42 --json         # exit 2: unrecognized arguments: --json
+commscoach --json context 42
+commscoach context 42 --json
+commscoach entry list --db ~/journal.sqlite3 --json
 ```
 
 Use `commscoach --help` for top-level help and `commscoach <command> --help`
@@ -104,7 +105,7 @@ commscoach export --format json --out commscoach.json
 
 `entry add` body sources are a literal string, `-` for stdin, or `@PATH` for a UTF-8 file. On an interactive terminal, omitting the body opens `$VISUAL` or `$EDITOR` (falling back to `vi`). The same body-source convention applies to `entry edit --body`, `feedback add`, and `review add`; their omitted-body forms also use the editor where supported.
 
-`--occurred-at`, `--since`, and `--until` accept ISO-8601 values and natural relative dates such as `today`, `yesterday`, `3 days ago`, `last monday`, and `now`. Stored timestamps are normalized to UTC. Date filters are inclusive, and entries are ordered by when they occurred, falling back to creation time.
+`--occurred-at`, `--since`, and `--until` accept ISO-8601 values and natural relative dates such as `today`, `yesterday`, `3 days ago`, `last monday`, and `now`. Stored timestamps are normalized to UTC. Date filters are inclusive; a `--since` date after `--until` is rejected. Entries are ordered by when they occurred, falling back to creation time.
 
 ## Tags
 
@@ -123,7 +124,7 @@ Tag names are normalized and matched case-insensitively, so `Conflict` and `conf
 
 `tag rename` onto a name that already exists is an error rather than an implicit merge; the message points at `tag merge`. `tag merge` moves every entry link onto the destination (dropping the duplicate when an entry already carried both tags), deletes the source, and prints the destination with its recomputed entry count.
 
-`tag merge` and `tag rm` are destructive and prompt for confirmation. `--yes` is a global flag, so it precedes the subcommand: `commscoach --yes tag rm writing`.
+`tag merge` and `tag rm` are destructive and prompt for confirmation. `--yes` works before or after the command: `commscoach tag rm writing --yes`.
 
 `tag rename` and `tag merge` also rewrite the stored scope of any review scoped to that tag, so the review keeps naming the tag it actually covered. `tag rm` does not: a review scoped to a deleted tag keeps the old name as history.
 
@@ -234,7 +235,7 @@ commscoach --yes review rm 1
 
 `review edit` rewrites the body only. A review's scope and covered-entry list are its provenance — the record of what it was generated from — so correcting either means deleting the review and storing a new one.
 
-`feedback rm` and `review rm` prompt for confirmation, and `--yes` precedes the subcommand.
+`feedback rm` and `review rm` prompt for confirmation; `--yes` works before or after the command.
 
 ## Skill integration
 

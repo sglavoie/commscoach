@@ -423,6 +423,15 @@ class EntryCrudTests(DBTestCase):
         with self.assertRaises(db.DBError):
             db.search_entries(self.conn, limit=-1)
 
+    def test_search_and_list_reject_reversed_date_range(self) -> None:
+        for call in (db.search_entries, db.list_entries):
+            with self.subTest(call=call.__name__):
+                with self.assertRaisesRegex(db.DBError, "since must not be after until"):
+                    call(self.conn, since="2026-06-03", until="2026-06-02")
+
+    def test_search_accepts_single_date_bound(self) -> None:
+        self.assertEqual(db.search_entries(self.conn, since="2026-06-03"), ())
+
 
 if __name__ == "__main__":
     unittest.main()

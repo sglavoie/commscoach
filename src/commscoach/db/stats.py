@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from ..models import Stats
+from .common import validate_range_bounds
 from .errors import DBError
 
 
@@ -120,6 +121,7 @@ def get_stats(
     """
     if top < 0:
         raise DBError("top must be non-negative")
+    validate_range_bounds(since, until, since_name="since", until_name="until")
     since, until_exclusive = _date_window(since, until)
     entry_where, entry_params = _where_window(
         "COALESCE(e.occurred_at, e.created_at)", since, until_exclusive

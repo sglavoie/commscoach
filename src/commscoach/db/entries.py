@@ -225,6 +225,9 @@ def search_entries(
         raise DBError("limit must be non-negative")
     if mode not in {"auto", "like", "fts"}:
         raise DBError("mode must be one of: auto, like, fts")
+    common.validate_range_bounds(
+        since, until, since_name="since", until_name="until"
+    )
     where: list[str] = []
     params: list[Any] = []
     use_fts = False

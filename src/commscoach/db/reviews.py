@@ -9,6 +9,7 @@ from typing import Any, Iterable
 from ..models import Entry, Person, Review
 from . import common
 from . import tags as tags_mod
+from .common import validate_range_bounds
 from .entries import get_entry
 from .errors import DBError, EntryNotFoundError, ReviewNotFoundError
 from .people import resolve_person_handles
@@ -37,38 +38,6 @@ def _validate_scope_date(value: Any, *, what: str) -> str:
         return date.fromisoformat(value).isoformat()
     except (TypeError, ValueError) as exc:
         raise DBError(f"{what} must be an ISO date (YYYY-MM-DD)") from exc
-
-
-def validate_range_bounds(
-    since: str | None,
-    until: str | None,
-    *,
-    since_name: str,
-    until_name: str,
-) -> None:
-    """Reject a closed ``range`` scope whose bounds are reversed.
-
-    Every surface that accepts a range calls this -- ``create_review``,
-    ``get_review_context``, and the ``review`` CLI -- so all three agree on
-    when a range is incoherent. Without it the context path accepted
-    ``since > until`` and returned an empty scope while storing the resulting
-    review rejected the identical flags, so a user only discovered the bad
-    request after composing a body.
-
-    ``since_name``/``until_name`` are the names the calling surface gives the
-    two bounds (``--since``, ``scope_since``, ``since``), so the message points
-    at what the caller actually typed while the claim itself stays identical.
-
-    An open range is always fine: only two supplied bounds can be reversed.
-    Bounds are compared as normalized ISO dates, so a bound spelled
-    ``20260201`` orders by date rather than by text.
-    """
-    if since is None or until is None:
-        return
-    normalized_since = _validate_scope_date(since, what=since_name)
-    normalized_until = _validate_scope_date(until, what=until_name)
-    if normalized_since > normalized_until:
-        raise DBError(f"{since_name} must not be after {until_name}")
 
 
 def _resolve_review_entries(

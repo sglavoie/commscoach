@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 from .. import db
-from .common import open_db, parse_date_bound, print_json
+from .common import add_date_bounds, open_db, parse_date_bounds, print_json
 from .serializers import stats_to_dict
 
 
@@ -14,18 +14,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "stats",
         help="Summarize journal activity, coaching coverage, and weekly cadence.",
     )
-    parser.add_argument(
-        "--since",
-        default=None,
-        metavar="DATE",
-        help="Include activity on or after DATE (ISO-8601 or relative).",
-    )
-    parser.add_argument(
-        "--until",
-        default=None,
-        metavar="DATE",
-        help="Include activity through DATE (ISO-8601 or relative).",
-    )
+    add_date_bounds(parser, noun="activity")
     parser.add_argument(
         "--top",
         type=int,
@@ -91,16 +80,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
         raise db.DBError("top must be non-negative")
     if args.weeks < 0:
         raise db.DBError("weeks must be non-negative")
-    since = (
-        parse_date_bound(args.since, flag="--since")
-        if args.since is not None
-        else None
-    )
-    until = (
-        parse_date_bound(args.until, flag="--until")
-        if args.until is not None
-        else None
-    )
+    since, until = parse_date_bounds(args)
     with open_db(args) as conn:
         summary = db.get_stats(conn, since=since, until=until, top=args.top)
     if args.json:

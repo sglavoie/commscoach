@@ -277,6 +277,38 @@ class ExitCodeTests(unittest.TestCase):
                 cli.main(["init"])
 
 
+class GlobalFlagPositionTests(unittest.TestCase):
+    def test_global_flags_work_at_every_command_level(self) -> None:
+        parser = cli.build_parser()
+        for prefix, suffix in (
+            (["--json", "--yes", "--db", "example.sqlite3"], ["entry", "list"]),
+            (["entry", "--json", "--yes", "--db", "example.sqlite3"], ["list"]),
+            (["entry", "list"], ["--json", "--yes", "--db", "example.sqlite3"]),
+        ):
+            with self.subTest(prefix=prefix):
+                args = parser.parse_args([*prefix, *suffix])
+                self.assertTrue(args.json)
+                self.assertTrue(args.yes)
+                self.assertEqual(args.db, "example.sqlite3")
+
+    def test_later_db_value_wins_and_earlier_flags_survive(self) -> None:
+        args = cli.build_parser().parse_args(
+            ["--db", "first.sqlite3", "--json", "entry", "list", "--db", "last.sqlite3"]
+        )
+        self.assertEqual(args.db, "last.sqlite3")
+        self.assertTrue(args.json)
+
+    def test_suffix_json_emits_json_for_nested_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "test.sqlite3"
+            db.init_db(db_path)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rc = cli.main(["entry", "list", "--db", str(db_path), "--json"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(output.getvalue()), [])
+
+
 class OpenDBTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()

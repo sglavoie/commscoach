@@ -90,8 +90,27 @@ class EntryListTests(EntryTestBase):
         self.assertEqual(rc, 1)
         self.assertIn("--since", err)
 
+    def test_list_rejects_reversed_date_range(self) -> None:
+        rc, _, err = self._run(
+            "entry", "list", "--since", "2026-06-03", "--until", "2026-06-02"
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("--since must not be after --until", err)
+
+    def test_list_accepts_single_date_bound(self) -> None:
+        rc, _, err = self._run("entry", "list", "--since", "2026-06-03")
+        self.assertEqual(rc, 0)
+        self.assertEqual(err, "")
+
 
 class EntrySearchTests(EntryTestBase):
+    def test_search_rejects_reversed_date_range(self) -> None:
+        rc, _, err = self._run(
+            "entry", "search", "--since", "2026-06-03", "--until", "2026-06-02"
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("--since must not be after --until", err)
+
     def test_search_by_query_substring_case_insensitive(self) -> None:
         match = self._seed_entry("Quarterly review meeting")
         self._seed_entry("Daily standup")

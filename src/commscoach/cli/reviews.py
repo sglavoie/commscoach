@@ -141,9 +141,6 @@ def _resolve_scope(args: argparse.Namespace) -> _Scope:
         )
 
     since, until = parse_date_bounds(args) if derived == "range" else (None, None)
-    db.validate_range_bounds(
-        since, until, since_name="--since", until_name="--until"
-    )
     return _Scope(
         kind=derived,
         person_handle=args.scope_person,

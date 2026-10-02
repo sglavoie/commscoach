@@ -44,23 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"%(prog)s {__version__}",
     )
-    parser.add_argument(
-        "--db",
-        default=None,
-        metavar="PATH",
-        help="Override the SQLite DB path (also reads $COMMSCOACH_DB).",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit machine-readable JSON output for the command.",
-    )
-    parser.add_argument(
-        "--yes",
-        "-y",
-        action="store_true",
-        help="Skip confirmation prompts.",
-    )
+    _add_global_flags(parser)
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
 
     _register_init(subparsers)
@@ -77,7 +61,43 @@ def build_parser() -> argparse.ArgumentParser:
     porting.register(subparsers)
     stats.register(subparsers)
 
+    # Argparse only recognizes a parent's options before its subcommand. Add
+    # the same flags at each level, suppressing absent child defaults so a
+    # flag parsed earlier is retained and the last explicit value wins.
+    _add_global_flags_to_children(parser)
+
     return parser
+
+
+def _add_global_flags(parser: argparse.ArgumentParser, *, child: bool = False) -> None:
+    default = argparse.SUPPRESS if child else None
+    parser.add_argument(
+        "--db",
+        default=default,
+        metavar="PATH",
+        help="Override the SQLite DB path (also reads $COMMSCOACH_DB).",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS if child else False,
+        help="Emit machine-readable JSON output for the command.",
+    )
+    parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        default=argparse.SUPPRESS if child else False,
+        help="Skip confirmation prompts.",
+    )
+
+
+def _add_global_flags_to_children(parser: argparse.ArgumentParser) -> None:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for child in action.choices.values():
+                _add_global_flags(child, child=True)
+                _add_global_flags_to_children(child)
 
 
 def _register_init(subparsers: argparse._SubParsersAction) -> None:

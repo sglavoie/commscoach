@@ -218,7 +218,7 @@ def add_date_bounds(parser: argparse.ArgumentParser, *, noun: str = "entries") -
 
 
 def parse_date_bounds(args: argparse.Namespace) -> tuple[str | None, str | None]:
-    """Resolve the flags ``add_date_bounds`` declared into ISO date bounds."""
+    """Resolve and validate shared CLI date bounds."""
     since = (
         parse_date_bound(args.since, flag="--since")
         if args.since is not None
@@ -228,6 +228,9 @@ def parse_date_bounds(args: argparse.Namespace) -> tuple[str | None, str | None]
         parse_date_bound(args.until, flag="--until")
         if args.until is not None
         else None
+    )
+    db.validate_range_bounds(
+        since, until, since_name="--since", until_name="--until"
     )
     return since, until
 

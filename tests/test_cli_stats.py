@@ -82,6 +82,18 @@ class StatsCLITests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("--since", err)
 
+    def test_reversed_date_range_is_semantic_error(self) -> None:
+        rc, _, err = self._run(
+            "stats", "--since", "2026-06-03", "--until", "2026-06-02"
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("--since must not be after --until", err)
+
+    def test_single_date_bound_is_valid(self) -> None:
+        rc, _, err = self._run("stats", "--until", "2026-06-02")
+        self.assertEqual(rc, 0)
+        self.assertEqual(err, "")
+
     def test_top_truncates_each_ranked_list(self) -> None:
         with closing(db.connect(self.db_path)) as conn:
             db.create_entry(

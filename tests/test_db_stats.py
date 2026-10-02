@@ -191,6 +191,13 @@ class StatsTests(DBTestCase):
         with self.assertRaisesRegex(db.DBError, "top must be non-negative"):
             db.get_stats(self.conn, top=-1)
 
+    def test_reversed_date_range_is_semantic_error(self) -> None:
+        with self.assertRaisesRegex(db.DBError, "since must not be after until"):
+            db.get_stats(self.conn, since="2026-06-03", until="2026-06-02")
+
+    def test_single_date_bound_is_valid(self) -> None:
+        self.assertEqual(db.get_stats(self.conn, until="2026-06-02").entry_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
