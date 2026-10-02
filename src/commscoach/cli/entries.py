@@ -7,6 +7,7 @@ import sys
 from typing import Any
 
 from .. import db
+from ..db.tags import normalize_tag_list
 from .common import (
     add_date_bounds,
     confirm,
@@ -21,8 +22,9 @@ from .common import (
     truncate,
 )
 from .editor import compose_in_editor
+from .feedback import _format_feedback_human
 from .people import ensure_people
-from .serializers import entry_to_dict
+from .serializers import entry_to_dict, feedback_to_dict
 
 
 ENTRY_PREAMBLE = "Write the entry body below. Lines beginning with #> are ignored."
@@ -85,6 +87,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     show = entry_sub.add_parser("show", help="Show one entry by id.")
     show.add_argument("entry_id", type=int, metavar="ENTRY_ID")
+    show.add_argument(
+        "--with-feedback", action="store_true",
+        help="Include full feedback notes, oldest first.",
+    )
     show.set_defaults(func=cmd_entry_show)
 
     edit = entry_sub.add_parser("edit", help="Update an existing entry.")
@@ -139,6 +145,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         dest="clear_people",
         help="Remove every linked person from this entry.",
     )
+    for noun in ("tag", "person"):
+        for action in ("add", "remove"):
+            edit.add_argument(
+                f"--{action}-{noun}", action="append", default=[],
+                metavar="TAG" if noun == "tag" else "HANDLE",
+                help=(f"{action.capitalize()} a linked {noun} without replacing "
+                      "the others (repeatable)."),
+            )
     edit.set_defaults(func=cmd_entry_edit)
 
     lst = entry_sub.add_parser("list", help="List entries newest-first.")
@@ -182,6 +196,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Show entries without feedback (the coaching backlog).",
     )
     srch.add_argument("--limit", type=non_negative_int, default=None, metavar="N")
+    srch.add_argument(
+        "--oldest-first", action="store_true",
+        help="Return the oldest matching entries first, before applying --limit.",
+    )
     srch.set_defaults(func=cmd_entry_search)
 
     rm = entry_sub.add_parser(
@@ -248,20 +266,20 @@ def _emit_entries(
 
 
 def cmd_entry_add(args: argparse.Namespace) -> int:
-    body = read_body_arg(
-        args.body,
-        what="body",
-        template="",
-        preamble=ENTRY_PREAMBLE,
-        isatty=sys.stdin.isatty,
-        compose=compose_in_editor,
-    )
     occurred_at = (
         parse_when_or_raise(args.occurred_at)
         if args.occurred_at is not None
         else None
     )
     with open_db(args) as conn:
+        body = read_body_arg(
+            args.body,
+            what="body",
+            template="",
+            preamble=ENTRY_PREAMBLE,
+            isatty=sys.stdin.isatty,
+            compose=compose_in_editor,
+        )
         ensure_people(conn, args.people, assume_yes=args.yes)
         entry = db.create_entry(
             conn,
@@ -278,9 +296,24 @@ def cmd_entry_add(args: argparse.Namespace) -> int:
 def cmd_entry_show(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         entry = db.get_entry(conn, args.entry_id)
-    if entry is None:
-        raise db.EntryNotFoundError(args.entry_id)
-    _emit_entry(args, entry)
+        if entry is None:
+            raise db.EntryNotFoundError(args.entry_id)
+        feedback = db.list_feedback(conn, entry.id) if args.with_feedback else ()
+    if args.with_feedback and args.json:
+        print_json(
+            {
+                **entry_to_dict(entry),
+                "feedback": [feedback_to_dict(item) for item in feedback],
+            }
+        )
+    else:
+        _emit_entry(args, entry)
+        if args.with_feedback:
+            print("\nFeedback:")
+            print(
+                "\n\n".join(_format_feedback_human(item) for item in feedback)
+                or "(no feedback)"
+            )
     return 0
 
 
@@ -289,6 +322,23 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
         raise db.DBError("--clear-tags cannot be combined with --tag")
     if args.clear_people and args.people is not None:
         raise db.DBError("--clear-people cannot be combined with --person")
+    if (args.add_tag or args.remove_tag) and (args.tags is not None or args.clear_tags):
+        raise db.DBError(
+            "--add-tag/--remove-tag cannot be combined with --tag/--clear-tags"
+        )
+    if (args.add_person or args.remove_person) and (
+        args.people is not None or args.clear_people
+    ):
+        raise db.DBError(
+            "--add-person/--remove-person cannot be combined with --person/--clear-people"
+        )
+    added_tags = normalize_tag_list(args.add_tag)
+    removed_tags = set(normalize_tag_list(args.remove_tag))
+    if removed_tags.intersection(added_tags):
+        raise db.DBError("cannot add and remove the same tag")
+    removed_people = {handle.lower() for handle in args.remove_person}
+    if removed_people.intersection(handle.lower() for handle in args.add_person):
+        raise db.DBError("cannot add and remove the same person")
 
     update_kwargs: dict[str, Any] = {}
     if args.body not in (None, ""):
@@ -315,17 +365,30 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
     elif args.people is not None:
         update_kwargs["people"] = tuple(args.people)
 
-    if not update_kwargs and args.body != "":
+    has_link_edits = bool(
+        args.add_tag or args.remove_tag or args.add_person or args.remove_person
+    )
+    if not update_kwargs and args.body != "" and not has_link_edits:
         raise db.DBError(
             "entry edit requires at least one of "
-            "--body/--source/--occurred-at/--tag/--clear-tags/--person/--clear-people"
+            "--body/--source/--occurred-at/--tag/--clear-tags/--person/--clear-people/"
+            "--add-tag/--remove-tag/--add-person/--remove-person"
         )
 
     with open_db(args) as conn:
+        current = db.get_entry(conn, args.entry_id)
+        if current is None:
+            raise db.EntryNotFoundError(args.entry_id)
+        if args.add_tag or args.remove_tag:
+            update_kwargs["tags"] = [
+                tag for tag in (*current.tags, *added_tags) if tag not in removed_tags
+            ]
+        if args.add_person or args.remove_person:
+            handles = [p.handle for p in current.people] + args.add_person
+            update_kwargs["people"] = [
+                handle for handle in handles if handle.lower() not in removed_people
+            ]
         if args.body == "":
-            current = db.get_entry(conn, args.entry_id)
-            if current is None:
-                raise db.EntryNotFoundError(args.entry_id)
             update_kwargs["body"] = read_body_arg(
                 None,
                 what="body",
@@ -334,10 +397,8 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
             )
-        if args.people is not None:
-            if db.get_entry(conn, args.entry_id) is None:
-                raise db.EntryNotFoundError(args.entry_id)
-            ensure_people(conn, args.people, assume_yes=args.yes)
+        if args.people is not None or args.add_person:
+            ensure_people(conn, args.people or args.add_person, assume_yes=args.yes)
         entry = db.update_entry(conn, args.entry_id, **update_kwargs)
     _emit_entry(args, entry, human_prefix="updated")
     return 0
@@ -373,6 +434,7 @@ def cmd_entry_search(args: argparse.Namespace) -> int:
             without_feedback=args.no_feedback,
             limit=args.limit,
             mode="like" if args.exact else "auto",
+            oldest_first=args.oldest_first,
         )
         coached = (
             db.feedback_entry_ids(conn, (e.id for e in entries))

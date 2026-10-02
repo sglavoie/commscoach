@@ -1,0 +1,141 @@
+"""Regression coverage for incremental edits and revisiting coaching."""
+
+import io
+import json
+from contextlib import closing
+from unittest import mock
+
+from commscoach import db
+from commscoach.cli import entries, feedback
+
+from .cli_entry_case import EntryTestBase
+
+
+class EntryConvenienceTests(EntryTestBase):
+    def test_incremental_links_preserve_other_links_and_normalize(self):
+        for handle in ("alice", "bob", "carol"):
+            self._create_person(handle)
+        entry = self._seed_entry(
+            tags=("keep", "drop"), people=("alice", "bob")
+        )
+        rc, out, err = self._run(
+            "--json", "entry", "edit", str(entry.id),
+            "--add-tag", "NEW,keep", "--add-tag", "new",
+            "--remove-tag", " DROP,absent ",
+            "--add-person", "CAROL", "--add-person", "ALICE",
+            "--remove-person", "BOB", "--remove-person", "absent",
+        )
+        self.assertEqual(rc, 0, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["tags"], ["keep", "new"])
+        self.assertEqual({p["handle"] for p in payload["people"]}, {"alice", "carol"})
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertIsNone(db.get_person_by_handle(conn, "absent"))
+            self.assertEqual({t.name for t in db.list_tags(conn)}, {"keep", "new"})
+
+    def test_link_conflicts_fail_before_editor_or_writes(self):
+        entry = self._seed_entry(tags=("keep",))
+        conflicts = (
+            ("--add-tag", "x", "--tag", "y"),
+            ("--remove-tag", "x", "--clear-tags"),
+            ("--add-tag", "X", "--remove-tag", " x "),
+            ("--add-person", "alice", "--person", "bob"),
+            ("--remove-person", "alice", "--clear-people"),
+            ("--add-person", "ALICE", "--remove-person", "alice"),
+        )
+        for flags in conflicts:
+            with self.subTest(flags=flags), mock.patch.object(entries, "read_body_arg") as read:
+                rc, _, _ = self._run("entry", "edit", str(entry.id), "--body", *flags)
+                self.assertEqual(rc, 1)
+                read.assert_not_called()
+                with closing(db.connect(self.db_path)) as conn:
+                    self.assertEqual(db.get_entry(conn, entry.id), entry)
+
+    def test_add_person_uses_existing_confirmation_flow(self):
+        entry = self._seed_entry(tags=("keep",))
+        rc, _, _ = self._run(
+            "entry", "edit", str(entry.id), "--add-person", "new",
+            "--remove-tag", "keep", stdin=io.StringIO(),
+        )
+        self.assertEqual(rc, 1)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.get_entry(conn, entry.id), entry)
+        rc, out, err = self._run(
+            "--yes", "--json", "entry", "edit", str(entry.id), "--add-person", "new"
+        )
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["people"][0]["handle"], "new")
+
+    def test_show_with_feedback_is_full_ordered_and_opt_in(self):
+        entry = self._seed_entry("The interaction")
+        with closing(db.connect(self.db_path)) as conn:
+            first = db.create_feedback(conn, entry.id, "First coaching\n" + "detail " * 100)
+            second = db.create_feedback(conn, entry.id, "Second coaching")
+        rc, out, err = self._run("entry", "show", str(entry.id), "--with-feedback")
+        self.assertEqual(rc, 0, err)
+        self.assertIn(first.body, out)
+        self.assertLess(out.index(entry.body), out.index(first.body))
+        self.assertLess(out.index(first.body), out.index(second.body))
+        rc, out, _ = self._run("--json", "entry", "show", str(entry.id), "--with-feedback")
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["id"], entry.id)
+        self.assertEqual([f["id"] for f in payload["feedback"]], [first.id, second.id])
+        rc, out, _ = self._run("--json", "entry", "show", str(entry.id))
+        self.assertNotIn("feedback", json.loads(out))
+
+    def test_show_with_no_feedback_and_missing_entry(self):
+        entry = self._seed_entry()
+        rc, out, _ = self._run("entry", "show", str(entry.id), "--with-feedback")
+        self.assertEqual(rc, 0)
+        self.assertIn("(no feedback)", out)
+        rc, out, _ = self._run("--json", "entry", "show", str(entry.id), "--with-feedback")
+        self.assertEqual(json.loads(out)["feedback"], [])
+        rc, _, err = self._run("entry", "show", "9999", "--with-feedback")
+        self.assertEqual(rc, 1)
+        self.assertIn("9999", err)
+
+    def test_oldest_backlog_applies_filters_and_limit_after_sorting(self):
+        coached = self._seed_entry("coached", occurred_at="2025-01-01", tags=("work",))
+        newest = self._seed_entry("newest", occurred_at="2026-03-01", tags=("work",))
+        oldest = self._seed_entry("oldest", occurred_at="2026-01-01", tags=("work",))
+        tied = self._seed_entry("tied", occurred_at="2026-01-01", tags=("work",))
+        self._seed_entry("other tag", occurred_at="2025-01-01")
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_feedback(conn, coached.id, "done")
+        for extra, expected in ((["--oldest-first"], [oldest.id, tied.id]),
+                                ([], [newest.id, tied.id])):
+            rc, out, err = self._run(
+                "--json", "entry", "search", "--no-feedback", "--tag", "work",
+                "--limit", "2", *extra,
+            )
+            self.assertEqual(rc, 0, err)
+            self.assertEqual([e["id"] for e in json.loads(out)], expected)
+
+    def test_exact_search_treats_percent_literally(self):
+        entry = self._seed_entry("10% improvement")
+        self._seed_entry("unrelated")
+        rc, out, err = self._run("--json", "entry", "search", "--exact", "--query", "%")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual([e["id"] for e in json.loads(out)], [entry.id])
+
+    def test_invalid_capture_input_fails_before_reading_body(self):
+        cases = (
+            (entries, ("entry", "add", "--occurred-at", "nonsense")),
+            (entries, ("entry", "add", "--db", str(self.tmpdir / "missing.sqlite3"))),
+            (feedback, ("feedback", "add", "9999")),
+        )
+        for module, args in cases:
+            with self.subTest(args=args), mock.patch.object(module, "read_body_arg") as read:
+                rc, _, _ = self._run(*args)
+                self.assertEqual(rc, 1)
+                read.assert_not_called()
+
+    def test_goal_close_cli_keeps_previous_outcome(self):
+        with closing(db.connect(self.db_path)) as conn:
+            goal = db.create_goal(conn, "Lead with the ask")
+            closed = db.close_goal(conn, goal.id, outcome="Worked three times")
+        rc, _, err = self._run("goal", "close", str(goal.id))
+        self.assertEqual(rc, 0, err)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.get_goal(conn, goal.id), closed)

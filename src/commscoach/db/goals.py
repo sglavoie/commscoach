@@ -152,16 +152,25 @@ def close_goal(
     dropped: bool = False,
     now: str | None = None,
 ) -> Goal:
-    """Close a goal as done (or dropped) with an optional outcome."""
-    if get_goal(conn, goal_id) is None:
+    """Close a goal, preserving its outcome when none is supplied.
+
+    Repeating the same closure is a no-op. Correcting only the outcome keeps
+    the original closure time; changing status records a new closure time.
+    """
+    current = get_goal(conn, goal_id)
+    if current is None:
         raise GoalNotFoundError(goal_id)
-    timestamp = now if now is not None else common.utcnow_iso()
     status = "dropped" if dropped else "done"
+    outcome = current.outcome if outcome is None else outcome
+    if current.status == status and current.outcome == outcome:
+        return current
+    timestamp = now if now is not None else common.utcnow_iso()
+    closed_at = current.closed_at if current.status == status else timestamp
     with conn:
         conn.execute(
             "UPDATE goals SET status = ?, outcome = ?, closed_at = ?, updated_at = ?"
             " WHERE id = ?",
-            (status, outcome, timestamp, timestamp, goal_id),
+            (status, outcome, closed_at, timestamp, goal_id),
         )
     goal = get_goal(conn, goal_id)
     assert goal is not None

@@ -14,6 +14,31 @@ T2 = "2026-08-25T12:00:00+00:00"
 
 
 class GoalCrudTests(DBTestCase):
+    def test_repeated_close_preserves_outcome_and_timestamps(self) -> None:
+        for dropped in (False, True):
+            with self.subTest(dropped=dropped):
+                goal = db.create_goal(self.conn, "goal", now=T0)
+                closed = db.close_goal(
+                    self.conn, goal.id, outcome="worked", dropped=dropped, now=T1
+                )
+                self.assertEqual(
+                    db.close_goal(self.conn, goal.id, dropped=dropped, now=T2), closed
+                )
+                self.assertEqual(
+                    db.close_goal(self.conn, goal.id, outcome="worked", dropped=dropped, now=T2),
+                    closed,
+                )
+
+    def test_close_can_correct_outcome_or_change_status(self) -> None:
+        goal = db.create_goal(self.conn, "goal", now=T0)
+        db.close_goal(self.conn, goal.id, outcome="original", now=T1)
+        corrected = db.close_goal(self.conn, goal.id, outcome="corrected", now=T2)
+        self.assertEqual((corrected.outcome, corrected.closed_at, corrected.updated_at),
+                         ("corrected", T1, T2))
+        dropped = db.close_goal(self.conn, goal.id, dropped=True, now=T2)
+        self.assertEqual((dropped.status, dropped.outcome, dropped.closed_at),
+                         ("dropped", "corrected", T2))
+
     def test_create_and_get_goal_hydrates_relationships(self) -> None:
         person = db.create_person(self.conn, "alex")
         entry = db.create_entry(self.conn, "entry")

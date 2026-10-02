@@ -122,6 +122,29 @@ Human-readable `entry list` and `entry search` rows show the local occurrence da
 
 The status becomes `has feedback` when an entry has at least one stored feedback note. Use `entry search --no-feedback` to see only the coaching backlog. Entry JSON output keeps its existing shape.
 
+Work through the oldest uncoached interactions first, or revisit an entry with its full coaching notes:
+
+```sh
+commscoach entry search --no-feedback --oldest-first --limit 5
+commscoach entry show 42 --with-feedback
+commscoach entry search --exact --query "10%"
+```
+
+`--oldest-first` applies to `entry search` and orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters.
+
+`entry show --with-feedback` includes full feedback notes oldest-first, or an explicit empty marker when there are none. With `--json`, it adds a `feedback` array to the entry object; without this flag the JSON shape is unchanged.
+
+Incremental edits let you change links without replacing the existing lists:
+
+```sh
+commscoach entry edit 42 --add-tag follow-up --remove-tag draft
+commscoach entry edit 42 --add-person alice --remove-person bob
+```
+
+These flags may be repeated; tags also accept comma-separated values. Tag normalization and case-insensitive person matching follow the existing commands. Adding an existing link or removing an absent link is harmless. Unknown people being added use the existing creation confirmation; removing a link never creates or deletes the person. You cannot add and remove the same normalized tag or person in one command, or mix incremental edits with replacement/clear flags for the same kind of link.
+
+Entry creation validates the date and database before opening the editor. Feedback creation checks that its entry exists before asking for a body.
+
 ## Tags
 
 Tags live in their own table with their own normalization and orphan collection, so the vocabulary stays maintainable instead of letting one typo split a theme across your stats permanently:
@@ -287,6 +310,8 @@ commscoach goal close 2 --dropped --outcome "Role changed; this scenario no long
 ```
 
 `goal close` marks a goal done; add `--dropped` when it is no longer relevant. Goal details and outcomes also accept `-` for stdin or `@PATH`.
+
+Repeating `goal close` preserves the saved outcome when `--outcome` is omitted. An unchanged repeat leaves timestamps alone; supplying a corrected outcome updates the goal while retaining its original closure time. Changing between done and dropped records a new closure time.
 
 Use `stats` for stored activity and coverage numbers rather than reconstructing them from exports:
 

@@ -13,6 +13,26 @@ from .db_case import DBTestCase, patch_timestamps
 
 
 class EntryCrudTests(DBTestCase):
+    def test_literal_search_escapes_wildcards_and_escape_character(self) -> None:
+        for query in ("%", "_", "!", "!%_", "\\"):
+            with self.subTest(query=query):
+                match = db.create_entry(self.conn, f"literal {query} here")
+                other = db.create_entry(self.conn, "plain text")
+                results = db.search_entries(self.conn, query=query, mode="like")
+                self.assertIn(match.id, [e.id for e in results])
+                self.assertNotIn(other.id, [e.id for e in results])
+                db.delete_entry(self.conn, match.id)
+                db.delete_entry(self.conn, other.id)
+
+    def test_automatic_search_fallback_preserves_literal_query_and_order(self) -> None:
+        first = db.create_entry(self.conn, "a 10% improvement", occurred_at="2026-01-01")
+        db.create_entry(self.conn, "20% improvement", occurred_at="2026-02-01")
+        db.create_entry(self.conn, "unrelated", occurred_at="2025-01-01")
+        self.assertEqual(
+            [e.id for e in db.search_entries(self.conn, query="%", oldest_first=True, limit=1)],
+            [first.id],
+        )
+
     def setUp(self) -> None:
         super().setUp()
         self.me = db.create_person(self.conn, "me", is_self=True)

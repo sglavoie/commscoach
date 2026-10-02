@@ -139,15 +139,17 @@ def _emit_feedback_list(
 
 
 def cmd_feedback_add(args: argparse.Namespace) -> int:
-    body = read_body_arg(
-        args.body,
-        what="body",
-        template="",
-        preamble=FEEDBACK_PREAMBLE,
-        isatty=sys.stdin.isatty,
-        compose=compose_in_editor,
-    )
     with open_db(args) as conn:
+        if db.get_entry(conn, args.entry_id) is None:
+            raise db.EntryNotFoundError(args.entry_id)
+        body = read_body_arg(
+            args.body,
+            what="body",
+            template="",
+            preamble=FEEDBACK_PREAMBLE,
+            isatty=sys.stdin.isatty,
+            compose=compose_in_editor,
+        )
         feedback = db.create_feedback(conn, args.entry_id, body)
     _emit_feedback(args, feedback, human_prefix="created")
     return 0

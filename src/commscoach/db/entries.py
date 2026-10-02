@@ -208,6 +208,7 @@ def search_entries(
     without_feedback: bool = False,
     limit: int | None = None,
     mode: Literal["auto", "like", "fts"] = "auto",
+    oldest_first: bool = False,
 ) -> tuple[Entry, ...]:
     """Filter entries by content, relationships, effective date, and feedback.
 
@@ -218,7 +219,8 @@ def search_entries(
     the normalized tag name; ``person_handle`` matches case-insensitively.
     ``since`` and ``until`` are
     inclusive UTC dates or timezone-aware timestamps applied to ``COALESCE(occurred_at, created_at)``;
-    ``without_feedback`` selects the coaching backlog. Results are newest-first.
+    ``without_feedback`` selects the coaching backlog. Results are newest-first
+    unless ``oldest_first`` is set; ordering is applied before the limit.
     """
     if limit is not None and limit < 0:
         raise DBError("limit must be non-negative")
@@ -242,8 +244,11 @@ def search_entries(
             where.append("entries_fts MATCH ?")
             params.append(query)
         else:
-            where.append("e.body LIKE ? COLLATE NOCASE")
-            params.append(f"%{query}%")
+            where.append("e.body LIKE ? ESCAPE '!' COLLATE NOCASE")
+            literal_query = (
+                query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+            )
+            params.append(f"%{literal_query}%")
     if tag:
         where.append(
             "EXISTS ("
@@ -276,7 +281,11 @@ def search_entries(
         sql += " JOIN entries_fts ON entries_fts.rowid = e.id"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY COALESCE(e.occurred_at, e.created_at) DESC, e.id DESC"
+    direction = "ASC" if oldest_first else "DESC"
+    sql += (
+        f" ORDER BY COALESCE(e.occurred_at, e.created_at) {direction},"
+        f" e.id {direction}"
+    )
     if limit is not None:
         sql += " LIMIT ?"
         params.append(limit)
@@ -295,5 +304,6 @@ def search_entries(
             without_feedback=without_feedback,
             limit=limit,
             mode="like",
+            oldest_first=oldest_first,
         )
     return tuple(hydrate_entry(conn, row) for row in rows)
