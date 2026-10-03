@@ -155,6 +155,8 @@ class PersonContext:
     person: Person
     notes: str | None
     history: tuple[PersonHistoryItem, ...] = field(default_factory=tuple)
+    total_history_count: int = 0
+    history_limit: int = 3
 
 
 @dataclass(frozen=True, slots=True)

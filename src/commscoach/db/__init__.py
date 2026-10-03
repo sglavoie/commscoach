@@ -66,6 +66,7 @@ from .feedback import (
     get_feedback,
     feedback_entry_ids,
     list_feedback,
+    search_feedback,
     update_feedback,
 )
 from .goals import (
@@ -190,6 +191,7 @@ __all__ = [
     "prune_backups",
     "rename_tag",
     "search_entries",
+    "search_feedback",
     "set_person_note",
     "set_self",
     "update_entry",

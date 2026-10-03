@@ -216,6 +216,56 @@ class FeedbackListTests(FeedbackTestBase):
         self.assertIn("second note", out)
 
 
+class FeedbackSearchTests(FeedbackTestBase):
+    def test_search_filters_feedback_text_and_person_before_limit(self):
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_person(conn, "alice")
+            db.create_person(conn, "bob")
+            entry = db.create_entry(conn, "meeting", people=("alice", "bob"))
+            other = db.create_entry(conn, "Lead with the ask", people=("bob",))
+            first = db.create_feedback(conn, entry.id, "Lead with the ask")
+            second = db.create_feedback(conn, entry.id, "LEAD WITH THE ASK next time")
+            db.create_feedback(conn, other.id, "Lead with the ask")
+            db.create_feedback(conn, entry.id, "Listen more")
+            with conn:
+                conn.execute("UPDATE feedback SET created_at = '2026-01-01T00:00:00+00:00'")
+        for limit, expected in ((0, []), (1, [second.id]), (20, [second.id, first.id])):
+            rc, out, err = self._run(
+                "feedback", "search", "--query", "lead with the ask", "--person", "ALICE",
+                "--limit", str(limit), "--json",
+            )
+            self.assertEqual(rc, 0, err)
+            self.assertEqual([f["id"] for f in json.loads(out)], expected)
+        rc, out, err = self._run("feedback", "search", "--query", "Listen more")
+        self.assertEqual(rc, 0, err)
+        self.assertIn(f"entry {entry.id}", out)
+        self.assertIn("Listen more", out)
+
+    def test_search_treats_wildcards_and_escape_characters_literally(self):
+        entry = self._seed_entry()
+        exact = self._seed_feedback(entry.id, "Improve 10%_! next time")
+        self._seed_feedback(entry.id, "Improve 100xx next time")
+        for query in ("%", "_", "!", "%_!"):
+            rc, out, err = self._run("feedback", "search", "--query", query, "--json")
+            self.assertEqual(rc, 0, err)
+            self.assertEqual([f["id"] for f in json.loads(out)], [exact.id])
+
+    def test_search_empty_results_and_invalid_input(self):
+        rc, out, err = self._run("feedback", "search", "--query", "missing")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(out.strip(), "(no feedback)")
+        for flags, code, message in (
+            (("--query", "  "), 1, "non-empty"),
+            (("--query", "ask", "--person", "ghost"), 1, "ghost"),
+        ):
+            rc, _, err = self._run("feedback", "search", *flags)
+            self.assertEqual(rc, code, err)
+            self.assertIn(message, err)
+        with self.assertRaises(SystemExit) as raised:
+            self._run("feedback", "search", "--query", "ask", "--limit", "-1")
+        self.assertEqual(raised.exception.code, 2)
+
+
 class FeedbackShowTests(FeedbackTestBase):
     def test_show_existing_prints_human(self) -> None:
         entry = self._seed_entry()

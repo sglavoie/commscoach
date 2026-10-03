@@ -27,7 +27,14 @@ from .people import ensure_people
 from .serializers import entry_to_dict, feedback_to_dict
 
 
-ENTRY_PREAMBLE = "Write the entry body below. Lines beginning with #> are ignored."
+ENTRY_PREAMBLE = (
+    "Write the entry body below. Lines beginning with #> are ignored.\n"
+    "Optional prompts (answer any that help):\n"
+    "What did you want?\n"
+    "What did you say?\n"
+    "How did they respond?\n"
+    "What would you like feedback on?"
+)
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -182,6 +189,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     srch.add_argument(
         "--tag", default=None, metavar="TAG", help="Filter by a single normalized tag."
+    )
+    srch.add_argument(
+        "--source", default=None, metavar="SOURCE",
+        help="Filter by channel or medium (case-insensitive exact match).",
     )
     srch.add_argument(
         "--person",
@@ -427,6 +438,7 @@ def cmd_entry_search(args: argparse.Namespace) -> int:
         entries = db.search_entries(
             conn,
             query=args.query,
+            source=args.source,
             tag=args.tag,
             person_handle=args.person,
             since=since,

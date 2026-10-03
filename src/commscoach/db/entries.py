@@ -177,8 +177,20 @@ def list_entries_with_person(
     """Return other entries newest-first, optionally strictly before an instant."""
     if limit < 0:
         raise DBError("limit must be non-negative")
+    where, params = _person_history_filter(person_id, exclude_entry_id, before)
+    sql = "SELECT e.* FROM entries e" + where
+    sql += (
+        " ORDER BY COALESCE(e.occurred_at, e.created_at) DESC, e.id DESC"
+        " LIMIT ?"
+    )
+    rows = conn.execute(sql, [*params, limit]).fetchall()
+    return tuple(hydrate_entry(conn, row) for row in rows)
+
+
+def _person_history_filter(
+    person_id: int, exclude_entry_id: int, before: str | None,
+) -> tuple[str, list[Any]]:
     sql = (
-        "SELECT e.* FROM entries e"
         " JOIN entry_people ep ON ep.entry_id = e.id"
         " WHERE ep.person_id = ? AND e.id != ?"
     )
@@ -186,12 +198,16 @@ def list_entries_with_person(
     if before is not None:
         sql += " AND COALESCE(e.occurred_at, e.created_at) < ?"
         params.append(common.date_bound_timestamp(before, name="before"))
-    sql += (
-        " ORDER BY COALESCE(e.occurred_at, e.created_at) DESC, e.id DESC"
-        " LIMIT ?"
-    )
-    rows = conn.execute(sql, [*params, limit]).fetchall()
-    return tuple(hydrate_entry(conn, row) for row in rows)
+    return sql, params
+
+
+def count_entries_with_person(
+    conn: sqlite3.Connection, person_id: int, *, exclude_entry_id: int,
+    before: str | None = None,
+) -> int:
+    """Count the same eligible history as ``list_entries_with_person``."""
+    where, params = _person_history_filter(person_id, exclude_entry_id, before)
+    return conn.execute("SELECT COUNT(*) FROM entries e" + where, params).fetchone()[0]
 
 
 def delete_entry(conn: sqlite3.Connection, entry_id: int) -> bool:
@@ -258,6 +274,7 @@ def search_entries(
     conn: sqlite3.Connection,
     *,
     query: str | None = None,
+    source: str | None = None,
     tag: str | None = None,
     person_handle: str | None = None,
     since: str | None = None,
@@ -272,7 +289,8 @@ def search_entries(
     All filters combine with AND. ``query`` uses FTS5 when ``mode`` is ``auto``
     and the initialized database advertises support, while ``like`` forces a
     case-insensitive substring match and ``fts`` explicitly requests FTS5.
-    Malformed automatic FTS queries silently retry with LIKE. ``tag`` matches
+    Malformed automatic FTS queries silently retry with LIKE. ``source`` is a
+    case-insensitive exact match on the stored channel. ``tag`` matches
     the normalized tag name; ``person_handle`` matches case-insensitively.
     ``since`` and ``until`` are
     inclusive UTC dates or timezone-aware timestamps applied to ``COALESCE(occurred_at, created_at)``;
@@ -286,6 +304,9 @@ def search_entries(
     where, params = _scope_filters(
         tag=tag, person_handle=person_handle, since=since, until=until,
     )
+    if source is not None:
+        where.append("e.source = ? COLLATE NOCASE")
+        params.append(source)
     use_fts = False
     if query:
         fts_row = conn.execute(
@@ -330,6 +351,7 @@ def search_entries(
         return search_entries(
             conn,
             query=query,
+            source=source,
             tag=tag,
             person_handle=person_handle,
             since=since,

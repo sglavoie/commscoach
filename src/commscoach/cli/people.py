@@ -7,9 +7,16 @@ import sys
 from typing import Any, Iterable
 
 from .. import db
-from .common import confirm, open_db, print_json, read_body_arg, read_body_or_raise
+from .common import (
+    confirm,
+    non_negative_int,
+    open_db,
+    print_json,
+    read_body_arg,
+    read_body_or_raise,
+)
 from .editor import compose_in_editor
-from .serializers import person_to_dict
+from .serializers import entry_to_dict, goal_to_dict, person_to_dict
 
 _EDIT_NOTES = object()
 NOTES_PREAMBLE = (
@@ -63,6 +70,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     show = person_sub.add_parser("show", help="Show one person by handle.")
     show.add_argument("handle", metavar="HANDLE")
+    show.add_argument(
+        "--recent", type=non_negative_int, default=None, metavar="N",
+        help="Also show the latest N interactions and all active goals linked to this person.",
+    )
     show.set_defaults(func=cmd_person_show)
 
     edit = person_sub.add_parser(
@@ -182,7 +193,33 @@ def cmd_person_show(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         person = _resolve_existing_person(conn, args.handle)
         note = db.get_person_note(conn, person.id)
+        if args.recent is not None:
+            entries = db.search_entries(
+                conn, person_handle=person.handle, limit=args.recent,
+            )
+            goals = db.list_goals(conn, person_handle=person.handle)
+            coached = (
+                db.feedback_entry_ids(conn, (e.id for e in entries))
+                if not args.json else set()
+            )
+    if args.recent is not None and args.json:
+        print_json({
+            **person_to_dict(person),
+            "notes": note.body if note is not None else None,
+            "recent_entries": [entry_to_dict(entry) for entry in entries],
+            "active_goals": [goal_to_dict(goal) for goal in goals],
+        })
+        return 0
     _emit_person(args, person, note=note, include_notes=True)
+    if args.recent is not None:
+        # Entry commands import ensure_people, so load their renderer at call time.
+        from .entries import _emit_entries
+        from .goals import _emit_goals
+
+        print("\nRecent interactions:")
+        _emit_entries(args, entries, coached)
+        print("\nActive goals:")
+        _emit_goals(args, goals)
     return 0
 
 

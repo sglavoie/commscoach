@@ -12,6 +12,40 @@ from .cli_entry_case import EntryTestBase
 
 
 class EntryConvenienceTests(EntryTestBase):
+    def test_source_filter_combines_with_existing_filters_and_order(self):
+        self._create_person("alice")
+        older = self._seed_entry("Ask", source="Email", people=("alice",),
+                                 tags=("work",), occurred_at="2026-01-01")
+        self._seed_entry("Ask", source="email", people=("alice",),
+                         tags=("work",), occurred_at="2026-02-01")
+        self._seed_entry("Ask", source="slack", people=("alice",),
+                         tags=("work",), occurred_at="2025-12-01")
+        self._seed_entry("Ask", source="email", tags=("work",), occurred_at="2026-01-01")
+        self._seed_entry("Ask", source="email", people=("alice",), occurred_at="2026-01-01")
+        self._seed_entry("Ask", people=("alice",), tags=("work",), occurred_at="2026-01-01")
+        coached = self._seed_entry("Ask", source="email", people=("alice",),
+                                   tags=("work",), occurred_at="2025-12-01")
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_feedback(conn, coached.id, "Already coached")
+        rc, out, err = self._run(
+            "entry", "search", "--source", "EMAIL", "--person", "ALICE",
+            "--tag", "work", "--query", "Ask", "--no-feedback",
+            "--since", "2025-12-01", "--until", "2026-02-02",
+            "--oldest-first", "--limit", "1", "--json",
+        )
+        self.assertEqual(rc, 0, err)
+        self.assertEqual([row["id"] for row in json.loads(out)], [older.id])
+
+    def test_source_filter_survives_fts_fallback_and_is_an_exact_match(self):
+        match = self._seed_entry("10% better", source="email")
+        self._seed_entry("10% better", source="email-thread")
+        for flags in ((), ("--exact",)):
+            rc, out, err = self._run(
+                "entry", "search", "--source", "EMAIL", "--query", "%", "--json", *flags,
+            )
+            self.assertEqual(rc, 0, err)
+            self.assertEqual([row["id"] for row in json.loads(out)], [match.id])
+
     def test_incremental_links_preserve_other_links_and_normalize(self):
         for handle in ("alice", "bob", "carol"):
             self._create_person(handle)

@@ -57,6 +57,35 @@ class ContextTestBase(unittest.TestCase):
 
 
 class ContextSuccessTests(ContextTestBase):
+    def test_history_summary_counts_only_eligible_interactions_before_limiting(self):
+        self._seed_self()
+        self._seed_person("alice")
+        self._seed_person("bob")
+        with closing(db.connect(self.db_path)) as conn:
+            first = db.create_entry(conn, "first", people=("alice",), occurred_at="2026-01-01")
+            second = db.create_entry(conn, "second", people=("alice",), occurred_at="2026-01-02")
+            fallback = db.create_entry(conn, "creation fallback", people=("alice",))
+            with conn:
+                conn.execute("UPDATE entries SET created_at = ? WHERE id = ?",
+                             ("2026-01-03T00:00:00+00:00", fallback.id))
+            target = db.create_entry(conn, "target", people=("alice", "bob"), occurred_at="2026-02-01")
+            db.create_entry(conn, "same instant", people=("alice",), occurred_at="2026-02-01")
+            db.create_entry(conn, "later", people=("alice",), occurred_at="2026-03-01")
+            db.create_entry(conn, "unlinked", occurred_at="2026-01-01")
+        for limit, ids in ((0, []), (1, [fallback.id]), (3, [first.id, second.id, fallback.id]),
+                           (5, [first.id, second.id, fallback.id])):
+            with self.subTest(limit=limit):
+                rc, out, err = self._run("context", str(target.id), "--history", str(limit))
+                self.assertEqual(rc, 0, err)
+                people = {p["handle"]: p for p in json.loads(out)["people"]}
+                self.assertEqual([h["entry"]["id"] for h in people["alice"]["history"]], ids)
+                self.assertEqual(people["alice"]["history_summary"], {
+                    "limit": limit, "count": len(ids), "total_count": 3, "truncated": len(ids) < 3,
+                })
+                self.assertEqual(people["bob"]["history_summary"], {
+                    "limit": limit, "count": 0, "total_count": 0, "truncated": False,
+                })
+
     def test_self_notes_are_in_both_contexts_and_follow_edits_and_clearing(self):
         self._seed_self("me")
         entry = self._seed_entry("A conversation")
@@ -238,7 +267,7 @@ class ContextSuccessTests(ContextTestBase):
         )
         self.assertEqual(
             sorted(payload["people"][0].keys()),
-            ["handle", "history", "id", "is_self", "name", "notes"],
+            ["handle", "history", "history_summary", "id", "is_self", "name", "notes"],
         )
         self.assertEqual([f["id"] for f in payload["prior_feedback"]], [feedback.id])
         self.assertEqual([g["id"] for g in payload["goals"]], [goal.id])

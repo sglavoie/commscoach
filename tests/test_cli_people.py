@@ -110,6 +110,53 @@ class PersonAddTests(PeopleTestBase):
 
 
 class PersonShowTests(PeopleTestBase):
+    def test_recent_view_limits_interactions_and_includes_only_linked_active_goals(self):
+        alice = self._seed_person("alice")
+        self._seed_person("bob")
+        with closing(db.connect(self.db_path)) as conn:
+            db.set_person_note(conn, alice.id, "Prefers short updates")
+            newest = db.create_entry(conn, "latest conversation", people=("alice",), occurred_at="2026-02-01")
+            db.create_entry(conn, "older conversation", people=("alice",), occurred_at="2026-01-01")
+            db.create_entry(conn, "unrelated", people=("bob",), occurred_at="2026-03-01")
+            db.create_feedback(conn, newest.id, "Good listening")
+            goal = db.create_goal(conn, "Ask a question", person_handle="alice")
+            closed = db.create_goal(conn, "Completed", person_handle="alice")
+            db.close_goal(conn, closed.id)
+            db.create_goal(conn, "Unrelated", person_handle="bob")
+            db.create_goal(conn, "General goal")
+        rc, out, err = self._run("person", "show", "ALICE", "--recent", "1", "--json")
+        self.assertEqual(rc, 0, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["notes"], "Prefers short updates")
+        self.assertEqual([e["id"] for e in payload["recent_entries"]], [newest.id])
+        self.assertEqual([g["id"] for g in payload["active_goals"]], [goal.id])
+        rc, out, err = self._run("person", "show", "alice", "--recent", "1")
+        self.assertEqual(rc, 0, err)
+        for text in ("Prefers short updates", "Recent interactions:", "latest conversation",
+                     "has feedback", "Active goals:", "Ask a question"):
+            self.assertIn(text, out)
+        self.assertNotIn("older conversation", out)
+        rc, out, err = self._run("person", "show", "alice", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(set(json.loads(out)), {"id", "handle", "name", "is_self", "notes"})
+        rc, out, err = self._run("person", "show", "alice", "--recent", "0", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["recent_entries"], [])
+        self.assertEqual([g["id"] for g in json.loads(out)["active_goals"]], [goal.id])
+
+    def test_recent_view_empty_missing_and_negative_limit(self):
+        self._seed_person("alice")
+        rc, out, err = self._run("person", "show", "alice", "--recent", "5")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("(no entries)", out)
+        self.assertIn("(no goals)", out)
+        rc, _, err = self._run("person", "show", "ghost", "--recent", "5")
+        self.assertEqual(rc, 1, err)
+        self.assertIn("ghost", err)
+        with self.assertRaises(SystemExit) as raised:
+            self._run("person", "show", "alice", "--recent", "-1")
+        self.assertEqual(raised.exception.code, 2)
+
     def test_show_existing_human(self) -> None:
         person = self._seed_person("alice", name="Alice Smith")
         rc, out, _ = self._run("person", "show", "alice")

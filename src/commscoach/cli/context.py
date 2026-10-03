@@ -54,6 +54,14 @@ def _context_to_dict(context: db.EntryContext) -> dict[str, Any]:
             {
                 **person_to_dict(person_context.person),
                 "notes": person_context.notes,
+                "history_summary": {
+                    "limit": person_context.history_limit,
+                    "count": len(person_context.history),
+                    "total_count": person_context.total_history_count,
+                    "truncated": (
+                        len(person_context.history) < person_context.total_history_count
+                    ),
+                },
                 "history": [
                     {
                         "entry": entry_to_dict(item.entry),

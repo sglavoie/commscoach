@@ -15,6 +15,7 @@ from ..models import (
 )
 from . import tags as tags_mod
 from .entries import (
+    count_entries_with_person,
     count_scoped_entries,
     get_entry,
     list_entries_with_person,
@@ -259,6 +260,11 @@ def get_entry_context(
                 person=person,
                 notes=note.body if note is not None else None,
                 history=history,
+                total_history_count=count_entries_with_person(
+                    conn, person.id, exclude_entry_id=entry_id,
+                    before=entry.occurred_at or entry.created_at,
+                ),
+                history_limit=history_limit,
             )
         )
     prior_feedback = list_feedback(conn, entry_id)

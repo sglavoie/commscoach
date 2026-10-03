@@ -105,6 +105,8 @@ commscoach export --format json --out commscoach.json
 
 `entry add` body sources are a literal string, `-` for stdin, or `@PATH` for a UTF-8 file. On an interactive terminal, omitting the body opens `$VISUAL` or `$EDITOR` (falling back to `vi`). The same body-source convention applies to `entry edit --body`, `feedback add`, and `review add`; their omitted-body forms also use the editor where supported.
 
+The entry editor includes optional prompts about what you wanted, what you said, how the other person responded, and what you want feedback on. These are `#>` instruction lines, so they are removed from the saved body; answer whichever help, or simply write your entry. Leaving only the prompts still counts as an empty draft.
+
 Editor drafts are kept until the command succeeds. If the editor fails, you interrupt the command, or the subsequent save fails, a nonempty draft is retained with mode `0600` and its recovery path is printed to stderr (including with `--json`). Open that file to recover your text; it preserves the editor contents, including any `#>` instruction lines. Successful commands and empty drafts are cleaned up automatically. Recovery files live in the system temporary directory, so recover them before system cleanup removes them.
 
 `person edit HANDLE --notes` also opens the editor, pre-filled with that person's private notes (or blank when unset). It uses the same draft recovery. Empty drafts are rejected; use `--clear-notes` to remove notes. Non-interactive callers must supply text, `-`, or `@PATH`.
@@ -132,7 +134,10 @@ Work through the oldest uncoached interactions first, or revisit an entry with i
 commscoach entry search --no-feedback --oldest-first --limit 5
 commscoach entry show 42 --with-feedback
 commscoach entry search --exact --query "10%"
+commscoach entry search --source email --person jdoe --since "30 days ago"
 ```
+
+`entry search --source` matches the complete stored channel or medium case-insensitively (`email` matches `Email`, but not `email-thread`). It combines with the existing query, tag, person, date, and feedback filters, and is applied before ordering and limiting results.
 
 `--oldest-first` applies to `entry search` and orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters.
 
@@ -265,6 +270,27 @@ The JSON review shape carries that stored handle as its own `scope_person_handle
 
 `commscoach person edit alice --handle ally` carries the rename into that stored handle, the same way `tag rename` carries a tag rename into tag-scoped reviews. The person's review history follows them: `review list --person ally` finds it, a `review context --person ally` counts it among the prior reviews, and every surface prints `@ally`. Delete them afterwards and `@ally` — the handle they last had — is what remains as history.
 
+## Finding past coaching and relationship context
+
+Search feedback bodies without remembering which entry they belong to:
+
+```sh
+commscoach feedback search --query "lead with the ask"
+commscoach feedback search --query "ask" --person jdoe --limit 5
+commscoach --json feedback search --query "10%"
+```
+
+Feedback search uses literal, case-insensitive substring matching, including literal `%` and `_` characters. It returns the newest feedback first (creation time, then ID), with a default limit of 20. `--person` matches people linked to the feedback's entry, case-insensitively; an unknown handle is an error. The query must contain non-whitespace text. `--limit 0` returns an empty result. Human output shows feedback and entry IDs plus a preview; JSON returns the existing feedback objects.
+
+Before a conversation, see someone's notes, recent interactions, and active goals together:
+
+```sh
+commscoach person show jdoe --recent 5
+commscoach --json person show jdoe --recent 5
+```
+
+`--recent N` adds the latest N interactions by occurrence time (falling back to creation time), plus all active goals linked to that person. General goals and goals linked to other people are excluded. `--recent 0` shows no interactions but still includes active goals. JSON adds `recent_entries` and `active_goals` arrays only when this option is supplied; plain `person show` retains its existing output.
+
 ## Correcting stored coaching
 
 Feedback notes and review bodies hold AI-generated text, so they are the records most likely to be wrong or badly worded. Both are now editable in place instead of forcing you to delete the whole entry:
@@ -303,6 +329,8 @@ commscoach person edit me --clear-notes
 Replace `me` with your self profile's handle. These notes are included even when the self profile is not linked to the entry.
 
 Entry coaching history includes only interactions strictly before the target entry's occurrence time, falling back to creation time for entries without an occurrence date. Interactions at the same instant are excluded. The newest matching interactions are selected before applying `--history`, then returned oldest-first. Notes, feedback, active goals, and prior reviews remain current coaching context, not snapshots of what was known at the time.
+
+Each person in entry context also has a `history_summary` with `limit`, `count`, `total_count`, and `truncated`. The total counts only eligible interactions strictly before the target, so the coach can distinguish "three prior interactions exist" from "three of 27 were included." `--history 0` still reports these totals, and a person with no eligible history has `total_count: 0` and `truncated: false`.
 
 Like review context, `context ENTRY_ID` accepts `--goal-limit N` (default 10). Goals remain global and newest-first; the top-level `goal_summary` reports `limit`, `count`, `total_count`, and `truncated`. `--goal-limit 0` returns no goals while still reporting how many active goals exist. Increase the limit when you need a complete goal assessment:
 

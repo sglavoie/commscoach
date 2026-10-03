@@ -10,6 +10,7 @@ from .. import db
 from .common import (
     confirm,
     format_stamp,
+    non_negative_int,
     open_db,
     print_json,
     prose_lines,
@@ -59,6 +60,15 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     lst.add_argument("entry_id", type=int, metavar="ENTRY_ID")
     lst.set_defaults(func=cmd_feedback_list)
+
+    search = feedback_sub.add_parser("search", help="Search stored coaching text.")
+    search.add_argument(
+        "--query", required=True, metavar="TEXT",
+        help="Literal case-insensitive substring to find in feedback bodies.",
+    )
+    search.add_argument("--person", default=None, metavar="HANDLE")
+    search.add_argument("--limit", type=non_negative_int, default=20, metavar="N")
+    search.set_defaults(func=cmd_feedback_search)
 
     show = feedback_sub.add_parser("show", help="Show one feedback note by id.")
     show.add_argument("feedback_id", type=int, metavar="FEEDBACK_ID")
@@ -170,6 +180,15 @@ def cmd_feedback_show(args: argparse.Namespace) -> int:
     if feedback is None:
         raise db.FeedbackNotFoundError(args.feedback_id)
     _emit_feedback(args, feedback)
+    return 0
+
+
+def cmd_feedback_search(args: argparse.Namespace) -> int:
+    with open_db(args) as conn:
+        items = db.search_feedback(
+            conn, query=args.query, person_handle=args.person, limit=args.limit,
+        )
+    _emit_feedback_list(args, items)
     return 0
 
 

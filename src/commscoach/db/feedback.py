@@ -8,7 +8,8 @@ from collections.abc import Iterable
 from ..models import Feedback
 from . import common
 from .entries import get_entry
-from .errors import DBError, EntryNotFoundError, FeedbackNotFoundError
+from .errors import DBError, EntryNotFoundError, FeedbackNotFoundError, PersonNotFoundError
+from .people import get_person_by_handle
 from .rows import row_to_feedback
 
 
@@ -70,6 +71,31 @@ def get_feedback(conn: sqlite3.Connection, feedback_id: int) -> Feedback | None:
     if row is None:
         return None
     return row_to_feedback(row)
+
+
+def search_feedback(
+    conn: sqlite3.Connection, *, query: str,
+    person_handle: str | None = None, limit: int = 20,
+) -> tuple[Feedback, ...]:
+    """Find literal body substrings, newest-first, optionally by linked person."""
+    if not query or not query.strip():
+        raise DBError("query must be a non-empty string")
+    if limit < 0:
+        raise DBError("limit must be non-negative")
+    literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    sql = "SELECT f.* FROM feedback f WHERE f.body LIKE ? ESCAPE '!' COLLATE NOCASE"
+    params: list[object] = [f"%{literal}%"]
+    if person_handle is not None:
+        person = get_person_by_handle(conn, person_handle)
+        if person is None:
+            raise PersonNotFoundError(person_handle)
+        sql += (
+            " AND EXISTS (SELECT 1 FROM entry_people ep"
+            " WHERE ep.entry_id = f.entry_id AND ep.person_id = ?)"
+        )
+        params.append(person.id)
+    sql += " ORDER BY f.created_at DESC, f.id DESC LIMIT ?"
+    return tuple(row_to_feedback(row) for row in conn.execute(sql, [*params, limit]))
 
 
 def update_feedback(
