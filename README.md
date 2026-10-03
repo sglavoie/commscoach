@@ -6,6 +6,19 @@ Personal communications coach: log interactions with people, attach context, gen
 
 Ready to use. The CLI, SQLite schema, stored feedback and reviews, scoped reviews, tag management, goals, diagnostics, backups, JSON export/import, stats, skill integration, and packaging are in place. Current scope intentionally excludes encryption.
 
+## Everyday use
+
+| When you want to… | Command |
+| --- | --- |
+| Prepare for a conversation | `commscoach person show jdoe --recent 5 --with-feedback` |
+| Find the oldest entries awaiting coaching | `commscoach entry search --no-feedback --oldest-first --limit 5` |
+| Revisit an interaction and its advice | `commscoach entry show 42 --with-feedback` |
+| Find past advice | `commscoach feedback search --query "lead with the ask"` |
+| Find a broader review | `commscoach review search --query "lead with the ask"` |
+| Review lingering goals | `commscoach goal list --oldest-first --limit 5` |
+
+Replace the example handle and entry ID with your own. For first-time setup, see [Quick start](#quick-start).
+
 ## Layout
 
 ```
@@ -142,6 +155,8 @@ commscoach entry search --source email --person jdoe --since "30 days ago"
 `--oldest-first` applies to `entry search` and orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters.
 
 `entry show --with-feedback` includes full feedback notes oldest-first, or an explicit empty marker when there are none. With `--json`, it adds a `feedback` array to the entry object; without this flag the JSON shape is unchanged.
+
+`entry rm ID` includes the counts of feedback notes to delete and review links to remove in its confirmation. The reviews themselves remain. `--yes` continues to bypass confirmation.
 
 Incremental edits let you change links without replacing the existing lists:
 
@@ -282,14 +297,29 @@ commscoach --json feedback search --query "10%"
 
 Feedback search uses literal, case-insensitive substring matching, including literal `%` and `_` characters. It returns the newest feedback first (creation time, then ID), with a default limit of 20. `--person` matches people linked to the feedback's entry, case-insensitively; an unknown handle is an error. The query must contain non-whitespace text. `--limit 0` returns an empty result. Human output shows feedback and entry IDs plus a preview; JSON returns the existing feedback objects.
 
+Search previews show an excerpt around the first matching passage, including matches in headings or late in a long note. Ellipses mark omitted text; JSON always contains the full body.
+
+Find broader advice in stored reviews with the same literal body matching:
+
+```sh
+commscoach review search --query "lead with the ask"
+commscoach review search --query "ask" --person jdoe --limit 5
+commscoach review search --query "conflict" --tag work --json
+```
+
+Review search returns newest-first results (creation time, then ID), with a default limit of 20 and matching excerpts in human output. `--scope`, `--person`, and `--tag` combine with AND and have the same meaning as `review list`: they filter the review's stored scope, not the people or tags on its covered entries. Reviews about a deleted person remain searchable by their preserved handle; an unmatched handle returns no reviews. Empty queries are rejected, `--limit 0` returns an empty result, and JSON returns complete review objects.
+
 Before a conversation, see someone's notes, recent interactions, and active goals together:
 
 ```sh
 commscoach person show jdoe --recent 5
+commscoach person show jdoe --recent 5 --with-feedback
 commscoach --json person show jdoe --recent 5
 ```
 
 `--recent N` adds the latest N interactions by occurrence time (falling back to creation time), plus all active goals linked to that person. General goals and goals linked to other people are excluded. `--recent 0` shows no interactions but still includes active goals. JSON adds `recent_entries` and `active_goals` arrays only when this option is supplied; plain `person show` retains its existing output.
+
+Add `--with-feedback` alongside `--recent N` to include full coaching notes beneath each interaction, oldest-first, or `(no feedback)` when there are none. In JSON, this adds a `feedback` array to each item in `recent_entries`. Without the flag, the existing output is unchanged.
 
 ## Correcting stored coaching
 

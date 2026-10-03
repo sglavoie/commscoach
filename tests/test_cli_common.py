@@ -8,6 +8,7 @@ from commscoach.cli.common import (
     first_prose_line,
     format_stamp,
     prose_lines,
+    search_excerpt,
     truncate,
 )
 
@@ -65,6 +66,31 @@ class FirstProseLineTests(unittest.TestCase):
 
     def test_empty_body_returns_empty_string(self) -> None:
         self.assertEqual(first_prose_line(""), "")
+
+
+class SearchExcerptTests(unittest.TestCase):
+    def test_late_match_has_context_and_ellipses(self):
+        body = "Opening paragraph. " * 30 + "Lead with the ASK. " + "Closing text. " * 30
+        excerpt = search_excerpt(body, "lead with the ask")
+        self.assertIn("Lead with the ASK.", excerpt)
+        self.assertTrue(excerpt.startswith("…"))
+        self.assertTrue(excerpt.endswith("…"))
+        self.assertLessEqual(len(excerpt), 182)
+
+    def test_matches_headings_multiline_and_literal_characters(self):
+        for query in ("10%_!", "## Advice", "ask\nfirst"):
+            with self.subTest(query=query):
+                body = "Intro. " * 100 + query + " End. " * 100
+                self.assertIn(" ".join(query.split()), search_excerpt(body, query))
+
+    def test_unicode_does_not_shift_offsets_or_match_different_case(self):
+        body = "İ" * 200 + "Ä " + "padding " * 50 + "ä target"
+        self.assertTrue(search_excerpt(body, "ä").endswith("ä target"))
+
+    def test_short_body_and_long_query_are_not_truncated(self):
+        self.assertEqual(search_excerpt("Ask first.", "ask"), "Ask first.")
+        query = "a" * 250
+        self.assertIn(query, search_excerpt("before " + query + " after", query))
 
 
 class FormatStampTests(unittest.TestCase):

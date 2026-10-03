@@ -15,6 +15,7 @@ from .common import (
     print_json,
     prose_lines,
     read_body_arg,
+    search_excerpt,
 )
 from .editor import compose_in_editor
 from .serializers import feedback_to_dict
@@ -105,15 +106,18 @@ PREVIEW_WIDTH = 76
 PREVIEW_LINES = 3
 
 
-def _format_feedback_short(feedback: db.Feedback) -> str:
+def _format_feedback_short(feedback: db.Feedback, *, query: str | None = None) -> str:
     """Render a listing block: an id/time/entry header over indented prose."""
     header = (
         f"[{feedback.id}] {format_stamp(feedback.created_at)}"
         f" · entry {feedback.entry_id}"
     )
-    preview = " · ".join(prose_lines(feedback.body))
+    preview = (
+        search_excerpt(feedback.body, query) if query is not None
+        else " · ".join(prose_lines(feedback.body))
+    )
     wrapped = textwrap.wrap(preview, PREVIEW_WIDTH)
-    if len(wrapped) > PREVIEW_LINES:
+    if query is None and len(wrapped) > PREVIEW_LINES:
         wrapped = wrapped[:PREVIEW_LINES]
         wrapped[-1] += "…"
     return "\n".join([header, *(f"    {line}" for line in wrapped)])
@@ -134,7 +138,7 @@ def _emit_feedback(
 
 
 def _emit_feedback_list(
-    args: argparse.Namespace, items: tuple[db.Feedback, ...]
+    args: argparse.Namespace, items: tuple[db.Feedback, ...], *, query: str | None = None,
 ) -> None:
     if args.json:
         print_json([feedback_to_dict(f) for f in items])
@@ -145,7 +149,7 @@ def _emit_feedback_list(
     for index, feedback in enumerate(items):
         if index:
             print()
-        print(_format_feedback_short(feedback))
+        print(_format_feedback_short(feedback, query=query))
 
 
 def cmd_feedback_add(args: argparse.Namespace) -> int:
@@ -188,7 +192,7 @@ def cmd_feedback_search(args: argparse.Namespace) -> int:
         items = db.search_feedback(
             conn, query=args.query, person_handle=args.person, limit=args.limit,
         )
-    _emit_feedback_list(args, items)
+    _emit_feedback_list(args, items, query=args.query)
     return 0
 
 

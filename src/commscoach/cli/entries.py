@@ -460,7 +460,18 @@ def cmd_entry_rm(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         if db.get_entry(conn, args.entry_id) is None:
             raise db.EntryNotFoundError(args.entry_id)
-        if not confirm(f"Delete entry {args.entry_id}?", assume_yes=args.yes):
+        feedback_count = conn.execute(
+            "SELECT COUNT(*) FROM feedback WHERE entry_id = ?", (args.entry_id,),
+        ).fetchone()[0]
+        review_count = conn.execute(
+            "SELECT COUNT(*) FROM review_entries WHERE entry_id = ?", (args.entry_id,),
+        ).fetchone()[0]
+        prompt = (
+            f"Delete entry {args.entry_id}? This will delete {feedback_count} feedback "
+            f"{'note' if feedback_count == 1 else 'notes'} and remove {review_count} "
+            f"{'review link' if review_count == 1 else 'review links'}; reviews themselves remain."
+        )
+        if not confirm(prompt, assume_yes=args.yes):
             raise db.DBError("aborted")
         deleted = db.delete_entry(conn, args.entry_id)
     if not deleted:

@@ -16,7 +16,8 @@ from .common import (
     read_body_or_raise,
 )
 from .editor import compose_in_editor
-from .serializers import entry_to_dict, goal_to_dict, person_to_dict
+from .feedback import _format_feedback_human
+from .serializers import entry_to_dict, feedback_to_dict, goal_to_dict, person_to_dict
 
 _EDIT_NOTES = object()
 NOTES_PREAMBLE = (
@@ -73,6 +74,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     show.add_argument(
         "--recent", type=non_negative_int, default=None, metavar="N",
         help="Also show the latest N interactions and all active goals linked to this person.",
+    )
+    show.add_argument(
+        "--with-feedback", action="store_true",
+        help="Include full feedback for each recent interaction; requires --recent N.",
     )
     show.set_defaults(func=cmd_person_show)
 
@@ -190,6 +195,8 @@ def cmd_person_add(args: argparse.Namespace) -> int:
 
 
 def cmd_person_show(args: argparse.Namespace) -> int:
+    if args.with_feedback and args.recent is None:
+        raise db.DBError("--with-feedback requires --recent N")
     with open_db(args) as conn:
         person = _resolve_existing_person(conn, args.handle)
         note = db.get_person_note(conn, person.id)
@@ -198,15 +205,29 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                 conn, person_handle=person.handle, limit=args.recent,
             )
             goals = db.list_goals(conn, person_handle=person.handle)
-            coached = (
-                db.feedback_entry_ids(conn, (e.id for e in entries))
-                if not args.json else set()
+            feedback = (
+                {entry.id: db.list_feedback(conn, entry.id) for entry in entries}
+                if args.with_feedback else {}
             )
+            coached = set()
+            if not args.json:
+                coached = (
+                    {entry_id for entry_id, notes in feedback.items() if notes}
+                    if args.with_feedback
+                    else db.feedback_entry_ids(conn, (e.id for e in entries))
+                )
     if args.recent is not None and args.json:
         print_json({
             **person_to_dict(person),
             "notes": note.body if note is not None else None,
-            "recent_entries": [entry_to_dict(entry) for entry in entries],
+            "recent_entries": [
+                {
+                    **entry_to_dict(entry),
+                    **({"feedback": [feedback_to_dict(note) for note in feedback[entry.id]]}
+                       if args.with_feedback else {}),
+                }
+                for entry in entries
+            ],
             "active_goals": [goal_to_dict(goal) for goal in goals],
         })
         return 0
@@ -217,7 +238,17 @@ def cmd_person_show(args: argparse.Namespace) -> int:
         from .goals import _emit_goals
 
         print("\nRecent interactions:")
-        _emit_entries(args, entries, coached)
+        if args.with_feedback and entries:
+            for entry in entries:
+                _emit_entries(args, (entry,), coached)
+                print("Feedback:")
+                print(
+                    "\n\n".join(_format_feedback_human(note) for note in feedback[entry.id])
+                    or "(no feedback)"
+                )
+                print()
+        else:
+            _emit_entries(args, entries, coached)
         print("\nActive goals:")
         _emit_goals(args, goals)
     return 0

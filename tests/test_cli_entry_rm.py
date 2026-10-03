@@ -14,6 +14,40 @@ from .cli_entry_case import EntryTestBase
 
 
 class EntryRmTests(EntryTestBase):
+    def test_confirmation_counts_feedback_and_review_links_and_decline_preserves_them(self):
+        entry = self._seed_entry("body")
+        other = self._seed_entry("other")
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_feedback(conn, entry.id, "first")
+            db.create_feedback(conn, entry.id, "second")
+            db.create_feedback(conn, other.id, "unrelated")
+            review = db.create_review(conn, "review", [entry.id, other.id])
+            db.create_review(conn, "unrelated review", [other.id])
+        with mock.patch.object(cli_entries, "confirm", return_value=False) as confirm:
+            rc, _, err = self._run("entry", "rm", str(entry.id))
+        self.assertEqual(rc, 1)
+        self.assertIn("aborted", err)
+        prompt = confirm.call_args.args[0]
+        self.assertIn("delete 2 feedback notes", prompt)
+        self.assertIn("remove 1 review link;", prompt)
+        self.assertIn("reviews themselves remain", prompt)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(len(db.list_feedback(conn, entry.id)), 2)
+            self.assertEqual(len(db.get_review(conn, review.id).entries), 2)
+        with mock.patch.object(cli_entries, "confirm", return_value=True):
+            rc, _, err = self._run("entry", "rm", str(entry.id))
+        self.assertEqual(rc, 0, err)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.list_feedback(conn, entry.id), ())
+            self.assertEqual([e.id for e in db.get_review(conn, review.id).entries], [other.id])
+
+    def test_confirmation_with_no_dependents(self):
+        entry = self._seed_entry("body")
+        with mock.patch.object(cli_entries, "confirm", return_value=False) as confirm:
+            self._run("entry", "rm", str(entry.id))
+        self.assertIn("0 feedback notes", confirm.call_args.args[0])
+        self.assertIn("0 review links", confirm.call_args.args[0])
+
     def test_rm_with_yes_skips_prompt(self) -> None:
         entry = self._seed_entry("body")
         rc, out, _ = self._run("--yes", "entry", "rm", str(entry.id))

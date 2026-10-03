@@ -19,6 +19,7 @@ from .common import (
     parse_date_bounds,
     print_json,
     read_body_arg,
+    search_excerpt,
     truncate,
 )
 from .editor import compose_in_editor
@@ -258,6 +259,23 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     lst.set_defaults(func=cmd_review_list)
 
+    search = review_sub.add_parser("search", help="Search stored review bodies.")
+    search.add_argument(
+        "--query", required=True, metavar="TEXT",
+        help="Literal case-insensitive substring to find in review bodies.",
+    )
+    search.add_argument("--limit", type=non_negative_int, default=20, metavar="N")
+    search.add_argument("--scope", choices=db.SCOPE_KINDS, default=None, dest="scope_kind")
+    search.add_argument(
+        "--person", default=None, dest="person_handle", metavar="HANDLE",
+        help="Only search reviews scoped to HANDLE, including deleted people.",
+    )
+    search.add_argument(
+        "--tag", default=None, metavar="NAME",
+        help="Only search reviews scoped to tag NAME.",
+    )
+    search.set_defaults(func=cmd_review_list)
+
     show = review_sub.add_parser("show", help="Show one review by id.")
     show.add_argument("review_id", type=int, metavar="REVIEW_ID")
     show.set_defaults(func=cmd_review_show)
@@ -345,7 +363,7 @@ def _format_review_human(review: db.Review) -> str:
     return "\n".join(lines)
 
 
-def _format_review_short(review: db.Review) -> str:
+def _format_review_short(review: db.Review, *, query: str | None = None) -> str:
     entry_ids = ",".join(str(entry.id) for entry in review.entries)
     parts = [
         f"[{review.id}]",
@@ -356,7 +374,10 @@ def _format_review_short(review: db.Review) -> str:
         parts.append(f"context-limit:{review.scope_limit}")
     if entry_ids:
         parts.append(f"entries:{entry_ids}")
-    parts.append(truncate(first_prose_line(review.body)))
+    parts.append(
+        search_excerpt(review.body, query) if query is not None
+        else truncate(first_prose_line(review.body))
+    )
     return " ".join(parts)
 
 
@@ -374,7 +395,9 @@ def _emit_review(
     print(_format_review_human(review))
 
 
-def _emit_reviews(args: argparse.Namespace, reviews: tuple[db.Review, ...]) -> None:
+def _emit_reviews(
+    args: argparse.Namespace, reviews: tuple[db.Review, ...], *, query: str | None = None,
+) -> None:
     if args.json:
         print_json([review_to_dict(review) for review in reviews])
         return
@@ -382,7 +405,7 @@ def _emit_reviews(args: argparse.Namespace, reviews: tuple[db.Review, ...]) -> N
         print("(no reviews)")
         return
     for review in reviews:
-        print(_format_review_short(review))
+        print(_format_review_short(review, query=query))
 
 
 def cmd_review_context(args: argparse.Namespace) -> int:
@@ -436,6 +459,7 @@ def cmd_review_add(args: argparse.Namespace) -> int:
 
 
 def cmd_review_list(args: argparse.Namespace) -> int:
+    query = getattr(args, "query", None)
     with open_db(args) as conn:
         reviews = db.list_reviews(
             conn,
@@ -443,8 +467,9 @@ def cmd_review_list(args: argparse.Namespace) -> int:
             scope_kind=args.scope_kind,
             person_handle=args.person_handle,
             tag=args.tag,
+            query=query,
         )
-    _emit_reviews(args, reviews)
+    _emit_reviews(args, reviews, query=query)
     return 0
 
 

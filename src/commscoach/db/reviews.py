@@ -208,6 +208,7 @@ def list_reviews(
     scope_kind: str | None = None,
     person_handle: str | None = None,
     tag: str | None = None,
+    query: str | None = None,
 ) -> tuple[Review, ...]:
     """Return stored reviews newest-first by creation time.
 
@@ -215,12 +216,19 @@ def list_reviews(
     the original unfiltered listing. ``person_handle`` matches
     ``scope_person_handle`` case-insensitively rather than the ``scope_person_id``
     FK, so reviews about a since-deleted person are still findable. ``tag``
-    matches the normalized ``scope_tag``.
+    matches the normalized ``scope_tag``. ``query`` searches literal body
+    substrings, using the same matching rules as feedback search.
     """
     if limit is not None and limit < 0:
         raise DBError("limit must be non-negative")
     where: list[str] = []
     params: list[Any] = []
+    if query is not None:
+        if not query.strip():
+            raise DBError("query must be a non-empty string")
+        literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        where.append("body LIKE ? ESCAPE '!' COLLATE NOCASE")
+        params.append(f"%{literal}%")
     if scope_kind is not None:
         if scope_kind not in SCOPE_KINDS:
             raise DBError(

@@ -82,6 +82,24 @@ def first_prose_line(body: str) -> str:
     return lines[0] if lines else ""
 
 
+def search_excerpt(body: str, query: str, *, width: int = 180) -> str:
+    """Show context around the first literal match, preserving matched headings.
+
+    Fold ASCII only, like SQLite LIKE, so Unicode characters do not shift the
+    match offsets. Long queries remain whole even when they exceed the budget.
+    """
+    fold = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+    match = body.translate(fold).find(query.translate(fold))
+    if not query or match < 0:
+        return truncate(first_prose_line(body), width=width)
+    budget = max(width, len(query))
+    start = max(0, match - (budget - len(query)) // 2)
+    end = min(len(body), start + budget)
+    start = max(0, end - budget)
+    excerpt = " ".join(body[start:end].split())
+    return ("…" if start else "") + excerpt + ("…" if end < len(body) else "")
+
+
 def format_stamp(iso: str) -> str:
     """Render a stored ISO-8601 UTC timestamp as local ``YYYY-MM-DD HH:MM``.
 

@@ -110,6 +110,49 @@ class PersonAddTests(PeopleTestBase):
 
 
 class PersonShowTests(PeopleTestBase):
+    def test_recent_feedback_is_full_oldest_first_and_only_for_selected_entries(self):
+        self._seed_person("alice")
+        self._seed_person("bob")
+        with closing(db.connect(self.db_path)) as conn:
+            older = db.create_entry(conn, "Older", people=("alice",), occurred_at="2026-01-01")
+            coached = db.create_entry(conn, "Coached", people=("alice",), occurred_at="2026-02-01")
+            bare = db.create_entry(conn, "Uncoached", people=("alice",), occurred_at="2026-03-01")
+            other = db.create_entry(conn, "Other", people=("bob",), occurred_at="2026-04-01")
+            db.create_feedback(conn, older.id, "Excluded old advice")
+            db.create_feedback(conn, other.id, "Excluded unrelated advice")
+            first = db.create_feedback(conn, coached.id, "First advice\n" + "Full coaching text. " * 30)
+            second = db.create_feedback(conn, coached.id, "Second advice")
+        flags = ("person", "show", "ALICE", "--recent", "2", "--with-feedback")
+        rc, out, err = self._run(*flags)
+        self.assertEqual(rc, 0, err)
+        self.assertIn(first.body, out)
+        self.assertLess(out.index("First advice"), out.index("Second advice"))
+        self.assertIn("(no feedback)", out)
+        self.assertNotIn("Excluded", out)
+        rc, out, err = self._run(*flags, "--json")
+        self.assertEqual(rc, 0, err)
+        entries = json.loads(out)["recent_entries"]
+        self.assertEqual([e["id"] for e in entries], [bare.id, coached.id])
+        self.assertEqual(entries[0]["feedback"], [])
+        self.assertEqual([f["id"] for f in entries[1]["feedback"]], [first.id, second.id])
+        self.assertEqual(entries[1]["feedback"][0]["body"], first.body)
+        rc, out, err = self._run("person", "show", "alice", "--recent", "2", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertTrue(all("feedback" not in e for e in json.loads(out)["recent_entries"]))
+
+    def test_feedback_option_requires_recent_and_handles_empty_selection(self):
+        self._seed_person("alice")
+        rc, _, err = self._run("person", "show", "alice", "--with-feedback")
+        self.assertEqual(rc, 1)
+        self.assertIn("requires --recent", err)
+        for limit in ("0", "5"):
+            rc, out, err = self._run("person", "show", "alice", "--recent", limit, "--with-feedback")
+            self.assertEqual(rc, 0, err)
+            self.assertIn("(no entries)", out)
+            rc, out, err = self._run("person", "show", "alice", "--recent", limit, "--with-feedback", "--json")
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(json.loads(out)["recent_entries"], [])
+
     def test_recent_view_limits_interactions_and_includes_only_linked_active_goals(self):
         alice = self._seed_person("alice")
         self._seed_person("bob")

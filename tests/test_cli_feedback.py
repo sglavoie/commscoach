@@ -266,6 +266,27 @@ class FeedbackSearchTests(FeedbackTestBase):
         self.assertEqual(raised.exception.code, 2)
 
 
+class FeedbackExcerptTests(FeedbackTestBase):
+    def test_search_shows_late_match_but_json_keeps_full_body(self):
+        entry = self._seed_entry()
+        body = "Unrelated introduction. " * 50 + "\n## Lead with the ASK\nTry this tomorrow."
+        note = self._seed_feedback(entry.id, body)
+        rc, out, err = self._run("feedback", "search", "--query", "lead with the ask")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Lead with the ASK", out)
+        self.assertIn(f"entry {entry.id}", out)
+        self.assertLess(len(out), 400)
+        rc, out, err = self._run("feedback", "search", "--query", "lead with the ask", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out), [{
+            "id": note.id, "entry_id": entry.id, "body": body,
+            "created_at": note.created_at, "updated_at": note.updated_at,
+        }])
+        rc, out, err = self._run("feedback", "list", str(entry.id))
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("Lead with the ASK", out)
+
+
 class FeedbackShowTests(FeedbackTestBase):
     def test_show_existing_prints_human(self) -> None:
         entry = self._seed_entry()
