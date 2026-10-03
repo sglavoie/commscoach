@@ -62,6 +62,7 @@ class DraftRecoveryTests(EntryTestBase):
         with closing(db.connect(self.db_path)) as conn:
             feedback = db.create_feedback(conn, entry.id, "original feedback")
             review = db.create_review(conn, "original review", [entry.id])
+            goal = db.create_goal(conn, "Practice brevity")
         cases = (
             (("entry", "add"), "create_entry"),
             (("entry", "edit", str(entry.id), "--body"), "update_entry"),
@@ -70,6 +71,8 @@ class DraftRecoveryTests(EntryTestBase):
             (("review", "add", "--entry", str(entry.id)), "create_review"),
             (("review", "edit", str(review.id), "--body"), "update_review"),
             (("person", "edit", "alice", "--notes"), "set_person_note"),
+            (("goal", "edit", str(goal.id), "--detail"), "update_goal"),
+            (("goal", "close", str(goal.id), "--outcome"), "close_goal"),
         )
         for args, mutator in cases:
             with self.subTest(command=args), mock.patch.object(
@@ -80,6 +83,32 @@ class DraftRecoveryTests(EntryTestBase):
                 self.assertEqual(out, "")
                 self.assertIn("save failed", err)
                 self._assert_recovered(err)
+
+    def test_goal_editors_clean_successful_and_empty_drafts(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            goal = db.create_goal(conn, "Practice brevity")
+        for command, field in (("edit", "detail"), ("close", "outcome")):
+            with self.subTest(command=command):
+                with mock.patch.object(editor.subprocess, "call", side_effect=self._write_draft):
+                    rc, _, err = self._run("goal", command, str(goal.id), f"--{field}")
+                self.assertEqual(rc, 0, err)
+                self.assertFalse(self.draft_path.exists())
+                with closing(db.connect(self.db_path)) as conn:
+                    before = db.get_goal(conn, goal.id)
+                self.assertEqual(getattr(before, field), "My unsaved text")
+
+                def empty_draft(command):
+                    self.draft_path = Path(command[-1])
+                    self.draft_path.write_text("#> instructions only\n", encoding="utf-8")
+                    return 0
+
+                with mock.patch.object(editor.subprocess, "call", side_effect=empty_draft):
+                    rc, _, err = self._run("goal", command, str(goal.id), f"--{field}")
+                self.assertEqual(rc, 1)
+                self.assertIn("empty body", err)
+                self.assertFalse(self.draft_path.exists())
+                with closing(db.connect(self.db_path)) as conn:
+                    self.assertEqual(db.get_goal(conn, goal.id), before)
 
     def test_notes_editor_cleans_successful_draft_and_rejects_empty_edits(self) -> None:
         person = self._create_person("alice")

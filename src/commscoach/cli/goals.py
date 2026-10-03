@@ -3,12 +3,28 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import datetime, timezone
 from typing import Any
 
 from .. import db
-from .common import confirm, non_negative_int, open_db, print_json, read_body_or_raise
+from .common import (
+    confirm,
+    non_negative_int,
+    open_db,
+    print_json,
+    read_body_arg,
+    read_body_or_raise,
+)
+from .editor import compose_in_editor
 from .serializers import goal_to_dict
+
+_EDIT_TEXT = object()
+DETAIL_PREAMBLE = (
+    "Edit goal detail below. Lines beginning with #> are ignored.\n"
+    "Use --clear-detail to remove detail; an empty draft will not be saved."
+)
+OUTCOME_PREAMBLE = "Edit goal outcome below. Lines beginning with #> are ignored."
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -55,8 +71,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     edit.add_argument("--title", default=None)
     edit.add_argument(
         "--detail",
+        nargs="?",
+        const=_EDIT_TEXT,
         default=None,
-        help="Replace detail (literal text, '-' for stdin, or '@PATH' for a file).",
+        help="Replace detail (text, '-', or '@PATH'); omit the value to open $EDITOR.",
     )
     edit.add_argument("--clear-detail", action="store_true")
     edit.add_argument("--person", default=None, metavar="HANDLE")
@@ -68,8 +86,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     close.add_argument("goal_id", type=int, metavar="GOAL_ID")
     close.add_argument(
         "--outcome",
+        nargs="?",
+        const=_EDIT_TEXT,
         default=None,
-        help="Outcome (literal text, '-' for stdin, or '@PATH' for a UTF-8 file).",
+        help="Outcome (text, '-', or '@PATH'); omit the value to open $EDITOR.",
     )
     close.add_argument("--dropped", action="store_true")
     close.set_defaults(func=cmd_goal_close)
@@ -180,12 +200,13 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
     if args.clear_person and args.person is not None:
         raise db.DBError("--clear-person cannot be combined with --person")
 
+    edit_detail = args.detail is _EDIT_TEXT
     update_kwargs: dict[str, Any] = {}
     if args.title is not None:
         update_kwargs["title"] = args.title
     if args.clear_detail:
         update_kwargs["detail"] = None
-    elif args.detail is not None:
+    elif args.detail is not None and not edit_detail:
         update_kwargs["detail"] = read_body_or_raise(args.detail)
     if args.clear_person:
         update_kwargs["person_handle"] = None
@@ -194,20 +215,48 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
     if args.status is not None:
         update_kwargs["status"] = args.status
 
-    if not update_kwargs:
+    if not update_kwargs and not edit_detail:
         raise db.DBError(
             "goal edit requires at least one of "
             "--title/--detail/--clear-detail/--person/--clear-person/--status"
         )
     with open_db(args) as conn:
+        if edit_detail:
+            current = db.get_goal(conn, args.goal_id)
+            if current is None:
+                raise db.GoalNotFoundError(args.goal_id)
+            update_kwargs["detail"] = read_body_arg(
+                None,
+                what="detail",
+                template=current.detail or "",
+                preamble=DETAIL_PREAMBLE,
+                isatty=sys.stdin.isatty,
+                compose=compose_in_editor,
+            )
         goal = db.update_goal(conn, args.goal_id, **update_kwargs)
     _emit_goal(args, goal, human_prefix="updated")
     return 0
 
 
 def cmd_goal_close(args: argparse.Namespace) -> int:
-    outcome = read_body_or_raise(args.outcome) if args.outcome is not None else None
+    edit_outcome = args.outcome is _EDIT_TEXT
+    outcome = (
+        read_body_or_raise(args.outcome)
+        if args.outcome is not None and not edit_outcome else None
+    )
     with open_db(args) as conn:
+        if edit_outcome:
+            current = db.get_goal(conn, args.goal_id)
+            if current is None:
+                raise db.GoalNotFoundError(args.goal_id)
+            outcome = read_body_arg(
+                None,
+                what="outcome",
+                template=current.outcome or "",
+                preamble=OUTCOME_PREAMBLE,
+                isatty=sys.stdin.isatty,
+                compose=compose_in_editor,
+            )
         goal = db.close_goal(
             conn,
             args.goal_id,

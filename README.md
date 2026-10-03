@@ -148,6 +148,7 @@ commscoach entry edit 42 --add-person alice --remove-person bob
 These flags may be repeated; tags also accept comma-separated values. Tag normalization and case-insensitive person matching follow the existing commands. Adding an existing link or removing an absent link is harmless. Unknown people being added use the existing creation confirmation; removing a link never creates or deletes the person. You cannot add and remove the same normalized tag or person in one command, or mix incremental edits with replacement/clear flags for the same kind of link.
 
 Entry creation validates the date and database before opening the editor. Feedback creation checks that its entry exists before asking for a body.
+Review creation also checks the database, every covered entry ID, and the scoped person (when supplied) before opening the editor.
 
 ## Tags
 
@@ -205,6 +206,7 @@ commscoach review list --scope person --person alice
 ```
 
 Entries are the ones @alice is linked to, and prior reviews are the previous person-scoped reviews of @alice.
+The context also includes Alice's current private notes in `scope.person.notes` (`null` when unset), so the review can use the relationship context you have recorded. Other scopes keep `scope.person` as `null`; stored review records are unchanged.
 
 ### `tag` — `--tag NAME`
 
@@ -244,7 +246,7 @@ A scope that matches nothing returns an empty entry list rather than failing —
 "scope": {
   "kind": "person", "limit": 10, "entry_count": 2,
   "total_entry_count": 2, "entries_truncated": false,
-  "person": {"id": 2, "handle": "alice", "name": "Alice", "is_self": false},
+  "person": {"id": 2, "handle": "alice", "name": "Alice", "is_self": false, "notes": null},
   "tag": null, "since": null, "until": null
 }
 ```
@@ -322,11 +324,15 @@ commscoach goal list
 commscoach goal list --oldest-first --limit 5
 commscoach goal show 1
 commscoach goal edit 1 --person jdoe
+commscoach goal edit 1 --detail                 # edit existing detail in $EDITOR
+commscoach goal close 1 --outcome               # compose or revise the outcome in $EDITOR
 commscoach goal close 1 --outcome "Led with the decision needed in three meetings."
 commscoach goal close 2 --dropped --outcome "Role changed; this scenario no longer applies."
 ```
 
 `goal close` marks a goal done; add `--dropped` when it is no longer relevant. Goal details and outcomes also accept `-` for stdin or `@PATH`.
+
+For `goal edit --detail` and `goal close --outcome`, passing the flag without a value opens `$VISUAL`/`$EDITOR`, pre-filled with the existing text (or blank when unset). These commands use the same draft recovery as entry editing and reject empty editor drafts. Use `goal edit --clear-detail` to remove detail. Non-interactive callers must supply text, `-`, or `@PATH`; omitting the flag entirely keeps the existing behavior.
 
 Human-readable goal listings show active goals' age in whole elapsed days since creation, making lingering experiments easier to spot. Age does not reset when a goal is reopened. `--oldest-first` orders by creation time and ID before applying `--limit`; with `--status all`, active goals still come before closed goals. The default remains newest-first, and goal JSON fields are unchanged.
 

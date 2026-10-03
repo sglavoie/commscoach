@@ -21,6 +21,55 @@ from .cli_review_case import ReviewTestBase
 
 
 class ReviewAddTests(ReviewTestBase):
+    def test_invalid_prerequisites_do_not_open_editor(self) -> None:
+        entry = self._seed_entry()
+        cases = (
+            (("--entry", str(entry.id), "9999"), "9999"),
+            (("--entry", str(entry.id), "--person", "missing"), "missing"),
+            (("--entry", str(entry.id), "--tag", "   "), "non-empty tag"),
+            (("--entry", str(entry.id), "--db", str(self.tmpdir / "missing.sqlite3")), "init"),
+        )
+        for flags, message in cases:
+            with self.subTest(flags=flags), mock.patch(
+                "sys.stdin.isatty", return_value=True,
+            ), mock.patch.object(cli_reviews, "compose_in_editor") as compose:
+                rc, out, err = self._run("review", "add", *flags)
+                self.assertEqual(rc, 1)
+                self.assertEqual(out, "")
+                self.assertIn(message, err)
+                compose.assert_not_called()
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.list_reviews(conn), ())
+
+    def test_valid_review_opens_editor_without_requiring_self(self) -> None:
+        person = self._seed_person("alice")
+        entry = self._seed_entry()
+        with mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
+            cli_reviews, "compose_in_editor", return_value="Written review",
+        ) as compose:
+            rc, out, err = self._run(
+                "review", "add", "--entry", str(entry.id), str(entry.id),
+                "--person", person.handle.upper(), "--json",
+            )
+        self.assertEqual(rc, 0, err)
+        compose.assert_called_once()
+        payload = json.loads(out)
+        self.assertEqual(payload["body"], "Written review")
+        self.assertEqual(payload["entry_ids"], [entry.id])
+        self.assertEqual(payload["scope_person_handle"], person.handle)
+
+    def test_outdated_database_does_not_open_editor(self) -> None:
+        with closing(db.connect(self.db_path)) as conn, conn:
+            conn.execute("UPDATE _meta SET value = '3' WHERE key = 'schema_version'")
+        with mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
+            cli_reviews, "compose_in_editor",
+        ) as compose:
+            rc, out, err = self._run("review", "add", "--entry", "1")
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, "")
+        self.assertIn("init", err)
+        compose.assert_not_called()
+
     def test_add_creates_review_with_default_scope(self) -> None:
         first = self._seed_entry("first")
         second = self._seed_entry("second")

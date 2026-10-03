@@ -215,3 +215,4 @@ class ReviewContext:
     total_entry_count: int = 0
     total_goal_count: int = 0
     goal_limit: int = 10
+    scope_person_notes: str | None = None

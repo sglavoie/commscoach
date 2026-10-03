@@ -53,6 +53,60 @@ class GoalCliTests(unittest.TestCase):
         with closing(db.connect(self.db_path)) as conn:
             return db.create_goal(conn, title)
 
+    def test_editor_prefills_goal_detail_and_outcome(self) -> None:
+        goal = self._seed_goal()
+        for field, command in (("detail", "edit"), ("outcome", "close")):
+            for original in (None, "Existing text"):
+                with self.subTest(field=field, original=original):
+                    with closing(db.connect(self.db_path)) as conn:
+                        if field == "detail":
+                            db.update_goal(conn, goal.id, detail=original)
+                        elif original is not None:
+                            db.close_goal(conn, goal.id, outcome=original)
+                        before = db.get_goal(conn, goal.id)
+                    with mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
+                        cli_goals, "compose_in_editor", return_value="Revised text",
+                    ) as compose:
+                        rc, out, err = self._run(
+                            "goal", command, str(goal.id), f"--{field}", "--json",
+                        )
+                    self.assertEqual(rc, 0, err)
+                    self.assertEqual(compose.call_args.kwargs["template"], original or "")
+                    payload = json.loads(out)
+                    self.assertEqual(payload[field], "Revised text")
+                    if field == "outcome":
+                        self.assertEqual(payload["status"], "done")
+                        if before.closed_at is not None:
+                            self.assertEqual(payload["closed_at"], before.closed_at)
+
+    def test_goal_editor_requires_tty_and_existing_goal(self) -> None:
+        goal = self._seed_goal()
+        for command, field in (("edit", "detail"), ("close", "outcome")):
+            for goal_id, tty, message in (
+                (goal.id, False, f"{field} required"),
+                (9999, True, "9999"),
+            ):
+                with self.subTest(command=command, goal_id=goal_id), mock.patch(
+                    "sys.stdin.isatty", return_value=tty,
+                ), mock.patch.object(cli_goals, "compose_in_editor") as compose:
+                    rc, out, err = self._run("goal", command, str(goal_id), f"--{field}")
+                    self.assertEqual(rc, 1)
+                    self.assertEqual(out, "")
+                    self.assertIn(message, err)
+                    compose.assert_not_called()
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.get_goal(conn, goal.id), goal)
+
+    def test_clear_detail_conflicts_with_editor_before_opening(self) -> None:
+        goal = self._seed_goal()
+        with mock.patch.object(cli_goals, "compose_in_editor") as compose:
+            rc, _, err = self._run(
+                "goal", "edit", str(goal.id), "--detail", "--clear-detail",
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("cannot be combined", err)
+        compose.assert_not_called()
+
     def test_add_human_with_detail_person_and_review(self) -> None:
         person = self._seed_person()
         review = self._seed_review()

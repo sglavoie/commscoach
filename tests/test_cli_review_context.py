@@ -18,6 +18,30 @@ from .cli_review_case import ReviewTestBase
 
 
 class ReviewContextTests(ReviewTestBase):
+    def test_person_review_notes_follow_edits_and_clearing(self) -> None:
+        self._seed_self()
+        person = self._seed_person("alice")
+        other = self._seed_person("bob")
+        with closing(db.connect(self.db_path)) as conn:
+            db.set_person_note(conn, other.id, "Unrelated private notes")
+        for expected in (None, "Prefers concise asks", "Updated preferences", None):
+            with self.subTest(notes=expected):
+                with closing(db.connect(self.db_path)) as conn:
+                    if expected is None:
+                        db.clear_person_note(conn, person.id)
+                    else:
+                        db.set_person_note(conn, person.id, expected)
+                    context = db.get_review_context(conn, scope_kind="person", person_handle="ALICE")
+                    self.assertEqual(context.scope_person_notes, expected)
+                rc, out, err = self._run("review", "context", "--person", "ALICE")
+                self.assertEqual(rc, 0, err)
+                self.assertEqual(json.loads(out)["scope"]["person"]["notes"], expected)
+                self.assertNotIn("Unrelated private notes", out)
+        for flags in ((), ("--tag", "conflict"), ("--since", "2026-01-01")):
+            rc, out, err = self._run("review", "context", *flags)
+            self.assertEqual(rc, 0, err)
+            self.assertIsNone(json.loads(out)["scope"]["person"])
+
     def test_context_emits_review_synthesis_shape(self) -> None:
         self._seed_self("coach")
         first = self._seed_entry("first")

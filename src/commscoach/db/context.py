@@ -176,12 +176,18 @@ def get_review_context(
     else:
         latest_reviews = list_reviews(conn, limit=prior_review_limit)
     self_note = get_person_note(conn, self_person.id)
+    scope_person_note = (
+        get_person_note(conn, scope_person.id) if scope_person is not None else None
+    )
     return ReviewContext(
         self_person=self_person,
         self_notes=self_note.body if self_note is not None else None,
         scope_kind=scope_kind,
         scope_limit=limit,
         scope_person=scope_person,
+        scope_person_notes=(
+            scope_person_note.body if scope_person_note is not None else None
+        ),
         scope_tag=scope_tag,
         scope_since=since,
         scope_until=until,

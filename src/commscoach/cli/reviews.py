@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .. import db
+from ..db.tags import normalize_tag
 from .common import (
     add_date_bounds,
     confirm,
@@ -141,6 +142,8 @@ def _resolve_scope(args: argparse.Namespace) -> _Scope:
         )
 
     since, until = parse_date_bounds(args) if derived == "range" else (None, None)
+    if derived == "tag" and not normalize_tag(args.scope_tag):
+        raise db.DBError("--tag requires a non-empty tag")
     return _Scope(
         kind=derived,
         person_handle=args.scope_person,
@@ -292,7 +295,10 @@ def _review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
             "total_entry_count": context.total_entry_count,
             "entries_truncated": len(context.entries) < context.total_entry_count,
             "person": (
-                person_to_dict(context.scope_person)
+                {
+                    **person_to_dict(context.scope_person),
+                    "notes": context.scope_person_notes,
+                }
                 if context.scope_person is not None
                 else None
             ),
@@ -399,15 +405,21 @@ def cmd_review_context(args: argparse.Namespace) -> int:
 
 def cmd_review_add(args: argparse.Namespace) -> int:
     scope = _resolve_scope(args)
-    body = read_body_arg(
-        args.body,
-        what="body",
-        template="",
-        preamble=REVIEW_PREAMBLE,
-        isatty=sys.stdin.isatty,
-        compose=compose_in_editor,
-    )
     with open_db(args) as conn:
+        if scope.person_handle is not None:
+            if db.get_person_by_handle(conn, scope.person_handle) is None:
+                raise db.PersonNotFoundError(scope.person_handle)
+        for entry_id in dict.fromkeys(args.entry_ids):
+            if db.get_entry(conn, entry_id) is None:
+                raise db.EntryNotFoundError(entry_id)
+        body = read_body_arg(
+            args.body,
+            what="body",
+            template="",
+            preamble=REVIEW_PREAMBLE,
+            isatty=sys.stdin.isatty,
+            compose=compose_in_editor,
+        )
         review = db.create_review(
             conn,
             body,
