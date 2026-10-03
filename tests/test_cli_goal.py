@@ -8,6 +8,8 @@ import sys
 import tempfile
 import unittest
 from contextlib import closing, redirect_stderr, redirect_stdout
+from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -124,6 +126,38 @@ class GoalCliTests(unittest.TestCase):
         payload = json.loads(out)
         self.assertEqual([row["id"] for row in payload], [first.id, second.id])
         self.assertEqual(payload[1]["status"], "dropped")
+
+    def test_list_oldest_first_json_keeps_existing_shape(self) -> None:
+        first = self._seed_goal("first")
+        self._seed_goal("second")
+        rc, out, err = self._run("goal", "list", "--oldest-first", "--limit", "1", "--json")
+        self.assertEqual(rc, 0, err)
+        payload = json.loads(out)
+        self.assertEqual([item["id"] for item in payload], [first.id])
+        _, shown, _ = self._run("goal", "show", str(first.id), "--json")
+        self.assertEqual(payload[0], json.loads(shown))
+
+    def test_active_goal_age_uses_elapsed_days_since_creation(self) -> None:
+        goal = self._seed_goal()
+        now = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
+        for stamp, expected in (
+            ("2026-08-25T12:00:00+00:00", "38 days"),
+            ("2026-10-01T12:00:00+00:00", "1 day"),
+            ("2026-10-01T13:00:00+00:00", "0 days"),
+            ("2026-10-01T06:00:00-06:00", "1 day"),
+            ("2026-10-03T12:00:00+00:00", "0 days"),
+        ):
+            with self.subTest(stamp=stamp):
+                rendered = cli_goals._format_goal_short(replace(goal, created_at=stamp), now=now)
+                self.assertTrue(rendered.endswith(f"age: {expected}"), rendered)
+        for variant in (replace(goal, status="done"), replace(goal, created_at="invalid")):
+            self.assertNotIn("age:", cli_goals._format_goal_short(variant, now=now))
+
+    def test_human_listing_includes_age(self) -> None:
+        self._seed_goal()
+        rc, out, err = self._run("goal", "list")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("age: 0 days", out)
 
     def test_show_human(self) -> None:
         goal = self._seed_goal("Visible goal")

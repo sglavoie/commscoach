@@ -105,6 +105,8 @@ commscoach export --format json --out commscoach.json
 
 `entry add` body sources are a literal string, `-` for stdin, or `@PATH` for a UTF-8 file. On an interactive terminal, omitting the body opens `$VISUAL` or `$EDITOR` (falling back to `vi`). The same body-source convention applies to `entry edit --body`, `feedback add`, and `review add`; their omitted-body forms also use the editor where supported.
 
+Editor drafts are kept until the command succeeds. If the editor fails, you interrupt the command, or the subsequent save fails, a nonempty draft is retained with mode `0600` and its recovery path is printed to stderr (including with `--json`). Open that file to recover your text; it preserves the editor contents, including any `#>` instruction lines. Successful commands and empty drafts are cleaned up automatically. Recovery files live in the system temporary directory, so recover them before system cleanup removes them.
+
 `--occurred-at`, `--since`, and `--until` accept ISO-8601 values and natural relative dates such as `today`, `yesterday`, `3 days ago`, `last monday`, and `now`. Stored timestamps are normalized to UTC. Entries are ordered by when they occurred, falling back to creation time.
 
 Date filters use your system's local timezone. A bare date, `today`, `yesterday`, or `last monday` covers the whole local day, including daylight-saving transitions. Explicit times and elapsed-time expressions such as `today 9am`, `now`, or `3 days ago` retain their time; timestamps with an offset use that offset. Both bounds are inclusive, and a `--since` instant after `--until` is rejected. These rules apply to entry listings, searches, stats, and review scopes:
@@ -239,12 +241,15 @@ A scope that matches nothing returns an empty entry list rather than failing —
 ```json
 "scope": {
   "kind": "person", "limit": 10, "entry_count": 2,
+  "total_entry_count": 2, "entries_truncated": false,
   "person": {"id": 2, "handle": "alice", "name": "Alice", "is_self": false},
   "tag": null, "since": null, "until": null
 }
 ```
 
-`kind`, `limit`, and `entry_count` are always present; the four axis keys are `null` for the kinds that do not own them.
+`kind`, `limit`, `entry_count`, `total_entry_count`, and `entries_truncated` are always present; the four axis keys are `null` for the kinds that do not own them. `total_entry_count` counts all entries matching the scope before `--limit`; `entries_truncated` tells the coach whether some were omitted. For example, `entry_count: 20` and `total_entry_count: 63` means the review sees the latest 20 of 63 matching interactions.
+
+The top-level `goal_summary` reports `limit`, `count`, `total_count`, and `truncated` for active goals. Its total remains global under every review scope, and excludes done or dropped goals. Zero limits return empty arrays while still reporting totals and whether records were omitted. These counts describe the context at generation time; they are not added to stored review records.
 
 ### Finding stored reviews
 
@@ -303,6 +308,7 @@ Goals make coaching experiments durable instead of leaving them in review Markdo
 ```sh
 commscoach goal add "Lead with the ask" --detail "Practice in the next three 1:1s."
 commscoach goal list
+commscoach goal list --oldest-first --limit 5
 commscoach goal show 1
 commscoach goal edit 1 --person jdoe
 commscoach goal close 1 --outcome "Led with the decision needed in three meetings."
@@ -310,6 +316,8 @@ commscoach goal close 2 --dropped --outcome "Role changed; this scenario no long
 ```
 
 `goal close` marks a goal done; add `--dropped` when it is no longer relevant. Goal details and outcomes also accept `-` for stdin or `@PATH`.
+
+Human-readable goal listings show active goals' age in whole elapsed days since creation, making lingering experiments easier to spot. Age does not reset when a goal is reopened. `--oldest-first` orders by creation time and ID before applying `--limit`; with `--status all`, active goals still come before closed goals. The default remains newest-first, and goal JSON fields are unchanged.
 
 Repeating `goal close` preserves the saved outcome when `--outcome` is omitted. An unchanged repeat leaves timestamps alone; supplying a corrected outcome updates the goal while retaining its original closure time. Changing between done and dropped records a new closure time.
 

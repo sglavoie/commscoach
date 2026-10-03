@@ -29,6 +29,7 @@ from . import (
     tags,
 )
 from .common import print_err, print_json, resolve_db_path
+from .editor import recover_editor_drafts
 
 PROG = "commscoach"
 
@@ -132,7 +133,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     try:
-        return int(func(args) or 0)
+        with recover_editor_drafts():
+            return int(func(args) or 0)
     except db.DBError as exc:
         print_err(str(exc))
         return 1

@@ -14,6 +14,28 @@ T2 = "2026-08-25T12:00:00+00:00"
 
 
 class GoalCrudTests(DBTestCase):
+    def test_oldest_first_sorts_before_limit_with_id_tiebreaker(self) -> None:
+        alice = db.create_person(self.conn, "alice")
+        db.create_goal(self.conn, "unrelated", now=T0)
+        first = db.create_goal(self.conn, "first", person_handle=alice.handle, now=T1)
+        second = db.create_goal(self.conn, "second", person_handle=alice.handle, now=T1)
+        db.create_goal(self.conn, "newest", person_handle=alice.handle, now=T2)
+        self.assertEqual(
+            db.list_goals(self.conn, person_handle="ALICE", oldest_first=True, limit=2),
+            (first, second),
+        )
+        self.assertEqual(db.list_goals(self.conn, oldest_first=True, limit=0), ())
+
+    def test_oldest_first_all_keeps_active_goals_first(self) -> None:
+        closed = db.create_goal(self.conn, "closed", now=T0)
+        closed = db.close_goal(self.conn, closed.id, now=T1)
+        older = db.create_goal(self.conn, "older", now=T1)
+        newer = db.create_goal(self.conn, "newer", now=T2)
+        self.assertEqual(
+            db.list_goals(self.conn, status=None, oldest_first=True),
+            (older, newer, closed),
+        )
+
     def test_repeated_close_preserves_outcome_and_timestamps(self) -> None:
         for dropped in (False, True):
             with self.subTest(dropped=dropped):

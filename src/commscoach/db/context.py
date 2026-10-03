@@ -14,7 +14,12 @@ from ..models import (
     ReviewEntryContext,
 )
 from . import tags as tags_mod
-from .entries import get_entry, list_entries_with_person, search_entries
+from .entries import (
+    count_scoped_entries,
+    get_entry,
+    list_entries_with_person,
+    search_entries,
+)
 from .errors import DBError, EntryNotFoundError, MissingSelfError, PersonNotFoundError
 from .feedback import list_feedback
 from .goals import list_goals
@@ -183,6 +188,13 @@ def get_review_context(
         entries=entry_contexts,
         prior_reviews=tuple(reversed(latest_reviews)),
         goals=list_goals(conn, limit=goal_limit),
+        total_entry_count=count_scoped_entries(
+            conn, tag=scope_tag, person_handle=person_handle, since=since, until=until,
+        ),
+        total_goal_count=conn.execute(
+            "SELECT COUNT(*) FROM goals WHERE status = 'active'"
+        ).fetchone()[0],
+        goal_limit=goal_limit,
     )
 
 

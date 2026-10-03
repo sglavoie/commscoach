@@ -197,6 +197,56 @@ def delete_entry(conn: sqlite3.Connection, entry_id: int) -> bool:
     return True
 
 
+def _scope_filters(
+    *, tag: str | None, person_handle: str | None,
+    since: str | None, until: str | None,
+) -> tuple[list[str], list[Any]]:
+    """Share scope predicates between entry retrieval and completeness counts."""
+    common.validate_range_bounds(
+        since, until, since_name="since", until_name="until"
+    )
+    where: list[str] = []
+    params: list[Any] = []
+    if tag:
+        where.append(
+            "EXISTS ("
+            "SELECT 1 FROM entry_tags et"
+            " JOIN tags t ON t.id = et.tag_id"
+            " WHERE et.entry_id = e.id AND t.name = ?)"
+        )
+        params.append(tags_mod.normalize_tag(tag))
+    if person_handle:
+        where.append(
+            "EXISTS ("
+            "SELECT 1 FROM entry_people ep"
+            " JOIN people p ON p.id = ep.person_id"
+            " WHERE ep.entry_id = e.id AND LOWER(p.handle) = LOWER(?))"
+        )
+        params.append(person_handle)
+    if since is not None:
+        where.append("COALESCE(e.occurred_at, e.created_at) >= ?")
+        params.append(common.date_bound_timestamp(since, name="since"))
+    if until is not None:
+        where.append("COALESCE(e.occurred_at, e.created_at) <= ?")
+        params.append(common.date_bound_timestamp(until, name="until", upper=True))
+    return where, params
+
+
+def count_scoped_entries(
+    conn: sqlite3.Connection, *, tag: str | None = None,
+    person_handle: str | None = None, since: str | None = None,
+    until: str | None = None,
+) -> int:
+    """Count a review's matching entries without hydrating the omitted rows."""
+    where, params = _scope_filters(
+        tag=tag, person_handle=person_handle, since=since, until=until,
+    )
+    sql = "SELECT COUNT(*) FROM entries e"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    return conn.execute(sql, params).fetchone()[0]
+
+
 def search_entries(
     conn: sqlite3.Connection,
     *,
@@ -226,11 +276,9 @@ def search_entries(
         raise DBError("limit must be non-negative")
     if mode not in {"auto", "like", "fts"}:
         raise DBError("mode must be one of: auto, like, fts")
-    common.validate_range_bounds(
-        since, until, since_name="since", until_name="until"
+    where, params = _scope_filters(
+        tag=tag, person_handle=person_handle, since=since, until=until,
     )
-    where: list[str] = []
-    params: list[Any] = []
     use_fts = False
     if query:
         fts_row = conn.execute(
@@ -249,28 +297,6 @@ def search_entries(
                 query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
             )
             params.append(f"%{literal_query}%")
-    if tag:
-        where.append(
-            "EXISTS ("
-            "SELECT 1 FROM entry_tags et"
-            " JOIN tags t ON t.id = et.tag_id"
-            " WHERE et.entry_id = e.id AND t.name = ?)"
-        )
-        params.append(tags_mod.normalize_tag(tag))
-    if person_handle:
-        where.append(
-            "EXISTS ("
-            "SELECT 1 FROM entry_people ep"
-            " JOIN people p ON p.id = ep.person_id"
-            " WHERE ep.entry_id = e.id AND LOWER(p.handle) = LOWER(?))"
-        )
-        params.append(person_handle)
-    if since is not None:
-        where.append("COALESCE(e.occurred_at, e.created_at) >= ?")
-        params.append(common.date_bound_timestamp(since, name="since"))
-    if until is not None:
-        where.append("COALESCE(e.occurred_at, e.created_at) <= ?")
-        params.append(common.date_bound_timestamp(until, name="until", upper=True))
     if without_feedback:
         where.append(
             "NOT EXISTS ("

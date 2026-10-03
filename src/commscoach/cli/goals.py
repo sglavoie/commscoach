@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from typing import Any
 
 from .. import db
@@ -39,6 +40,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     lst.add_argument("--person", default=None, metavar="HANDLE")
     lst.add_argument("--limit", type=non_negative_int, default=None, metavar="N")
+    lst.add_argument(
+        "--oldest-first", action="store_true",
+        help="Show oldest goals first before applying --limit (active first with --status all).",
+    )
     lst.set_defaults(func=cmd_goal_list)
 
     show = goal_sub.add_parser("show", help="Show one goal by id.")
@@ -90,10 +95,19 @@ def _format_goal_human(goal: db.Goal) -> str:
     return "\n".join(lines)
 
 
-def _format_goal_short(goal: db.Goal) -> str:
+def _format_goal_short(goal: db.Goal, *, now: datetime | None = None) -> str:
     parts = [f"[{goal.id}]", goal.status, goal.title]
     if goal.person is not None:
         parts.append(f"@{goal.person.handle}")
+    if goal.is_open:
+        try:
+            created = datetime.fromisoformat(goal.created_at)
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            days = max(0, ((now or datetime.now(timezone.utc)) - created).days)
+            parts.append(f"· age: {days} {'day' if days == 1 else 'days'}")
+        except ValueError:
+            pass
     return " ".join(parts)
 
 
@@ -118,8 +132,9 @@ def _emit_goals(args: argparse.Namespace, goals: tuple[db.Goal, ...]) -> None:
     if not goals:
         print("(no goals)")
         return
+    now = datetime.now(timezone.utc)
     for goal in goals:
-        print(_format_goal_short(goal))
+        print(_format_goal_short(goal, now=now))
 
 
 def cmd_goal_add(args: argparse.Namespace) -> int:
@@ -144,6 +159,7 @@ def cmd_goal_list(args: argparse.Namespace) -> int:
             status=status,
             person_handle=args.person,
             limit=args.limit,
+            oldest_first=args.oldest_first,
         )
     _emit_goals(args, goals)
     return 0

@@ -194,6 +194,9 @@ class ReviewContext:
     was asked to cover. There is no ``scope_person_handle`` here: a context is
     built against a person who must currently exist, so ``scope_person`` is
     never a dangling handle the way a stored review's can be.
+
+    Totals count matching entries and all active goals before their limits,
+    allowing the consumer to distinguish a complete context from a sample.
     """
 
     self_person: Person
@@ -207,3 +210,6 @@ class ReviewContext:
     prior_reviews: tuple[Review, ...] = field(default_factory=tuple)
     goals: tuple[Goal, ...] = field(default_factory=tuple)
     self_notes: str | None = None
+    total_entry_count: int = 0
+    total_goal_count: int = 0
+    goal_limit: int = 10

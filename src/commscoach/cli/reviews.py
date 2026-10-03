@@ -289,6 +289,8 @@ def _review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
             "kind": context.scope_kind,
             "limit": context.scope_limit,
             "entry_count": len(context.entries),
+            "total_entry_count": context.total_entry_count,
+            "entries_truncated": len(context.entries) < context.total_entry_count,
             "person": (
                 person_to_dict(context.scope_person)
                 if context.scope_person is not None
@@ -309,6 +311,12 @@ def _review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
             review_to_dict(review) for review in context.prior_reviews
         ],
         "goals": [goal_to_dict(goal) for goal in context.goals],
+        "goal_summary": {
+            "limit": context.goal_limit,
+            "count": len(context.goals),
+            "total_count": context.total_goal_count,
+            "truncated": len(context.goals) < context.total_goal_count,
+        },
     }
 
 

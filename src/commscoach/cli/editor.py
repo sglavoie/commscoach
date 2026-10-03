@@ -5,13 +5,50 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 from .. import db
 
 COMMENT_MARKER = "#>"
+_drafts: ContextVar[list[Path] | None] = ContextVar("editor_drafts", default=None)
+
+
+def _finish_draft(path: Path, *, recover: bool) -> None:
+    """Keep nonempty failed drafts, without masking the original error."""
+    try:
+        if recover:
+            raw = path.read_bytes()
+            # Preserve undecodable text too: a broken encoding must not lose work.
+            body = strip_comment_lines(raw.decode("utf-8", errors="replace")).strip()
+            if body:
+                path.chmod(0o600)
+                print(f"Draft saved for recovery: {path}", file=sys.stderr)
+                return
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        print(f"Could not finalize draft {path}: {exc}", file=sys.stderr)
+
+
+@contextmanager
+def recover_editor_drafts() -> Iterator[None]:
+    """Retain editor files until the entire CLI command succeeds."""
+    drafts: list[Path] = []
+    token = _drafts.set(drafts)
+    succeeded = False
+    try:
+        yield
+        succeeded = True
+    finally:
+        _drafts.reset(token)
+        for path in drafts:
+            _finish_draft(path, recover=not succeeded)
 
 
 def editor_command() -> list[str]:
@@ -41,9 +78,13 @@ def compose_in_editor(
     preamble: str,
     runner: Callable[[list[str]], int] | None = None,
 ) -> str:
-    """Open a secure temporary Markdown file and return its composed body."""
+    """Compose privately; failed drafts survive and CLI drafts await save."""
     fd, raw_path = tempfile.mkstemp(prefix="commscoach-", suffix=".md")
     path = Path(raw_path)
+    drafts = _drafts.get()
+    if drafts is not None:
+        drafts.append(path)
+    succeeded = False
     try:
         os.fchmod(fd, 0o600)
         comment_preamble = "\n".join(
@@ -67,13 +108,12 @@ def compose_in_editor(
         body = strip_comment_lines(path.read_text(encoding="utf-8")).strip()
         if not body:
             raise db.DBError("editor produced an empty body")
+        succeeded = True
         return body
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         raise db.DBError(f"cannot compose body in editor: {exc}") from exc
     finally:
         if fd >= 0:
             os.close(fd)
-        try:
-            os.unlink(path)
-        except FileNotFoundError:
-            pass
+        if drafts is None:
+            _finish_draft(path, recover=not succeeded)

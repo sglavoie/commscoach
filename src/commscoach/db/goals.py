@@ -190,8 +190,9 @@ def list_goals(
     status: str | None = "active",
     person_handle: str | None = None,
     limit: int | None = None,
+    oldest_first: bool = False,
 ) -> tuple[Goal, ...]:
-    """List goals newest-first; all-status lists put active goals first."""
+    """List goals by creation time; all-status lists put active goals first."""
     if status is not None:
         status = _validate_status(status)
     if limit is not None and limit < 0:
@@ -210,13 +211,11 @@ def list_goals(
     sql = "SELECT * FROM goals"
     if where:
         sql += " WHERE " + " AND ".join(where)
+    direction = "ASC" if oldest_first else "DESC"
+    sql += " ORDER BY "
     if status is None:
-        sql += (
-            " ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END,"
-            " created_at DESC, id DESC"
-        )
-    else:
-        sql += " ORDER BY created_at DESC, id DESC"
+        sql += "CASE status WHEN 'active' THEN 0 ELSE 1 END, "
+    sql += f"created_at {direction}, id {direction}"
     if limit is not None:
         sql += " LIMIT ?"
         params.append(limit)

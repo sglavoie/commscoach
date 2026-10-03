@@ -33,7 +33,7 @@ class ReviewContextTests(ReviewTestBase):
         payload = json.loads(out)
         self.assertEqual(
             set(payload.keys()),
-            {"self", "scope", "entries", "prior_reviews", "goals"},
+            {"self", "scope", "entries", "prior_reviews", "goals", "goal_summary"},
         )
         self.assertEqual(payload["self"]["handle"], "coach")
         self.assertEqual(
@@ -42,6 +42,8 @@ class ReviewContextTests(ReviewTestBase):
                 "kind": "latest",
                 "limit": 2,
                 "entry_count": 2,
+                "total_entry_count": 3,
+                "entries_truncated": True,
                 "person": None,
                 "tag": None,
                 "since": None,
@@ -60,6 +62,9 @@ class ReviewContextTests(ReviewTestBase):
         self.assertEqual([row["id"] for row in payload["prior_reviews"]], [prior.id])
         self.assertEqual(payload["prior_reviews"][0]["entry_ids"], [first.id])
         self.assertEqual([row["id"] for row in payload["goals"]], [goal.id])
+        self.assertEqual(payload["goal_summary"], {
+            "limit": 10, "count": 1, "total_count": 1, "truncated": False,
+        })
 
     def test_context_missing_self_exits_one(self) -> None:
         self._seed_entry("orphan")
@@ -136,6 +141,25 @@ class ReviewContextTests(ReviewTestBase):
 
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out)["goals"], [])
+        self.assertEqual(json.loads(out)["goal_summary"], {
+            "limit": 0, "count": 0, "total_count": 1, "truncated": True,
+        })
+
+    def test_goal_completeness_excludes_closed_goals(self) -> None:
+        self._seed_self()
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_goal(conn, "first")
+            db.create_goal(conn, "second")
+            done = db.create_goal(conn, "done")
+            db.close_goal(conn, done.id)
+        rc, out, err = self._run("review", "context", "--goal-limit", "1")
+        self.assertEqual(rc, 0, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["goal_summary"], {
+            "limit": 1, "count": 1, "total_count": 2, "truncated": True,
+        })
+        self.assertEqual(payload["scope"]["total_entry_count"], 0)
+        self.assertFalse(payload["scope"]["entries_truncated"])
 
 
 class ScopedContextBase(ReviewTestBase):
@@ -169,6 +193,25 @@ class ScopedContextBase(ReviewTestBase):
 
 
 class ScopeDerivationTests(ScopedContextBase):
+    def test_completeness_uses_same_scope_before_limit(self) -> None:
+        cases = [
+            ((), 3),
+            (("--person", "ALICE"), 2),
+            (("--tag", "Conflict"), 2),
+            (("--since", "2026-07-01T00:00:00+00:00"), 2),
+            (("--until", self.first.occurred_at), 2),
+            (("--since", self.first.occurred_at,
+              "--until", self.second.occurred_at), 2),
+            (("--tag", "missing"), 0),
+        ]
+        for flags, total in cases:
+            for limit in (0, 1, total, total + 1):
+                with self.subTest(flags=flags, limit=limit):
+                    payload = self._scope(*flags, "--limit", str(limit))
+                    self.assertEqual(payload["scope"]["total_entry_count"], total)
+                    self.assertEqual(payload["scope"]["entry_count"], min(limit, total))
+                    self.assertEqual(payload["scope"]["entries_truncated"], limit < total)
+
     def test_no_axis_flag_derives_latest(self) -> None:
         payload = self._scope()
         self.assertEqual(payload["scope"]["kind"], "latest")
