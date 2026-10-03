@@ -156,6 +156,35 @@ class PersonShowTests(PeopleTestBase):
 
 
 class PersonEditTests(PeopleTestBase):
+    def test_notes_editor_prefills_existing_notes_or_starts_empty(self) -> None:
+        person = self._seed_person("alice")
+        for existing in (None, "Existing private context"):
+            with self.subTest(existing=existing):
+                with closing(db.connect(self.db_path)) as conn:
+                    if existing is not None:
+                        db.set_person_note(conn, person.id, existing)
+                with mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
+                    cli_people, "compose_in_editor", return_value="Revised notes",
+                ) as compose:
+                    rc, _, err = self._run("person", "edit", "alice", "--notes")
+                self.assertEqual(rc, 0, err)
+                self.assertEqual(compose.call_args.kwargs["template"], existing or "")
+                with closing(db.connect(self.db_path)) as conn:
+                    self.assertEqual(db.get_person_note(conn, person.id).body, "Revised notes")
+
+    def test_notes_editor_checks_person_and_terminal_before_opening(self) -> None:
+        self._seed_person("alice")
+        with mock.patch("sys.stdin.isatty", return_value=False), mock.patch.object(
+            cli_people, "compose_in_editor",
+        ) as compose:
+            rc, _, err = self._run("person", "edit", "ghost", "--notes")
+            self.assertEqual(rc, 1)
+            self.assertIn("ghost", err)
+            rc, _, err = self._run("person", "edit", "alice", "--notes")
+            self.assertEqual(rc, 1)
+            self.assertIn("notes required", err)
+            compose.assert_not_called()
+
     def test_edit_handle(self) -> None:
         person = self._seed_person("alice")
         rc, out, _ = self._run(

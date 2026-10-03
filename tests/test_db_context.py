@@ -593,6 +593,37 @@ class EntryContextTests(DBTestCase):
 
         self.assertEqual(context.people[0].history, ())
 
+    def test_history_uses_occurrence_time_before_limiting_and_excludes_later_entries(self) -> None:
+        current = db.create_entry(
+            self.conn, "backdated target", people=["alice"],
+            occurred_at="2026-01-05T09:00:00Z",
+        )
+        db.create_entry(self.conn, "later, no occurrence time", people=["alice"])
+        for day in ("01", "05", "06"):
+            db.create_entry(
+                self.conn, f"day {day}", people=["alice"],
+                occurred_at=f"2026-01-{day}T09:00:00Z",
+            )
+        # Logged after the target, but actually happened before it.
+        prior = db.create_entry(
+            self.conn, "earlier interaction", people=["alice"],
+            occurred_at="2026-01-04T10:00:00+01:00",
+        )
+        context = db.get_entry_context(self.conn, current.id, history_limit=1)
+        self.assertEqual([item.entry.id for item in context.people[0].history], [prior.id])
+
+    def test_history_falls_back_to_creation_time_and_excludes_equal_timestamps(self) -> None:
+        with patch_timestamps(
+            "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00",
+            "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+        ):
+            prior = db.create_entry(self.conn, "prior", people=["alice"])
+            current = db.create_entry(self.conn, "target", people=["alice"])
+            db.create_entry(self.conn, "same instant", people=["alice"])
+            db.create_entry(self.conn, "later", people=["alice"])
+        context = db.get_entry_context(self.conn, current.id)
+        self.assertEqual([item.entry.id for item in context.people[0].history], [prior.id])
+
     def test_context_includes_open_goals_and_prior_reviews(self) -> None:
         prior_entry = db.create_entry(self.conn, "prior")
         current = db.create_entry(self.conn, "current")
@@ -623,6 +654,8 @@ class EntryContextTests(DBTestCase):
             db.get_entry_context(self.conn, entry.id, history_limit=-1)
         with self.assertRaises(db.DBError):
             db.get_entry_context(self.conn, entry.id, prior_review_limit=-1)
+        with self.assertRaises(db.DBError):
+            db.get_entry_context(self.conn, entry.id, goal_limit=-1)
 
     def test_context_missing_entry_raises(self) -> None:
         with self.assertRaises(db.EntryNotFoundError):

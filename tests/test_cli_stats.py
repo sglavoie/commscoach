@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import shlex
 import tempfile
 import unittest
 from contextlib import closing, redirect_stderr, redirect_stdout
@@ -124,6 +125,39 @@ class StatsCLITests(unittest.TestCase):
 
         self.assertEqual(rc, 1)
         self.assertIn("weeks must be non-negative", err)
+
+    def test_backlog_hint_preserves_database_and_resolved_date_window(self) -> None:
+        self.db_path = self.db_path.with_name("journal with spaces.sqlite3")
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            older = db.create_entry(conn, "old", occurred_at="2026-01-02T12:00:00Z")
+            newer = db.create_entry(conn, "new", occurred_at="2026-01-03T12:00:00Z")
+            coached = db.create_entry(conn, "coached", occurred_at="2026-01-04T12:00:00Z")
+            db.create_feedback(conn, coached.id, "first note")
+            db.create_feedback(conn, coached.id, "second note")
+            db.create_entry(conn, "outside window", occurred_at="2025-01-01T12:00:00Z")
+        rc, out, err = self._run("stats", "--since", "2026-01-01", "--until", "2026-01-31")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Entries awaiting feedback: 2", out)
+        command = shlex.split(out.split("Coach the oldest first: ")[1].strip())
+        self.assertEqual(command[:3], ["commscoach", "--db", str(self.db_path)])
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            rc = cli.main([*command[1:], "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual([e["id"] for e in json.loads(stdout.getvalue())], [older.id, newer.id])
+
+    def test_no_hint_when_empty_or_fully_coached(self) -> None:
+        for empty in (True, False):
+            with self.subTest(empty=empty):
+                if not empty:
+                    with closing(db.connect(self.db_path)) as conn:
+                        entry = db.create_entry(conn, "coached")
+                        db.create_feedback(conn, entry.id, "note")
+                rc, out, err = self._run("stats")
+                self.assertEqual(rc, 0, err)
+                self.assertIn("Entries awaiting feedback: 0", out)
+                self.assertNotIn("Coach the oldest first:", out)
 
 
 if __name__ == "__main__":

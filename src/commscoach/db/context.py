@@ -204,20 +204,25 @@ def get_entry_context(
     *,
     history_limit: int = 3,
     prior_review_limit: int = 1,
+    goal_limit: int = 10,
 ) -> EntryContext:
     """Aggregate the data the coaching skill needs for one entry.
 
     With the default limits, the enriched payload is roughly 6--10x larger
     than the original flat context. This is intentional, and the history and
-    prior-review limits are exposed as CLI flags. Raises ``EntryNotFoundError``
+    prior-review and goal limits are exposed as CLI flags. Raises ``EntryNotFoundError``
     if the entry is missing and ``MissingSelfError`` if no global self person
     is configured. Self is excluded from the returned ``people`` field;
-    ``prior_feedback`` is oldest-first.
+    ``prior_feedback`` is oldest-first. Person history includes only entries
+    strictly before the target's occurrence time (falling back to creation time).
+    Goals and prior reviews remain current coaching context, not historical snapshots.
     """
     if history_limit < 0:
         raise DBError("history_limit must be non-negative")
     if prior_review_limit < 0:
         raise DBError("prior_review_limit must be non-negative")
+    if goal_limit < 0:
+        raise DBError("goal_limit must be non-negative")
     entry = get_entry(conn, entry_id)
     if entry is None:
         raise EntryNotFoundError(entry_id)
@@ -233,6 +238,7 @@ def get_entry_context(
             person.id,
             exclude_entry_id=entry_id,
             limit=history_limit,
+            before=entry.occurred_at or entry.created_at,
         )
         history = tuple(
             PersonHistoryItem(
@@ -258,6 +264,10 @@ def get_entry_context(
         self_notes=self_note.body if self_note is not None else None,
         people=tuple(people),
         prior_feedback=prior_feedback,
-        goals=list_goals(conn),
+        goals=list_goals(conn, limit=goal_limit),
         prior_reviews=tuple(reversed(latest_reviews)),
+        total_goal_count=conn.execute(
+            "SELECT COUNT(*) FROM goals WHERE status = 'active'"
+        ).fetchone()[0],
+        goal_limit=goal_limit,
     )

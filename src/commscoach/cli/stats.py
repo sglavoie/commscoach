@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 
 from .. import db
 from .common import add_date_bounds, open_db, parse_date_bounds, print_json
@@ -52,6 +53,7 @@ def _format_human(stats: db.Stats, *, weeks: int) -> str:
         f"People: {stats.people_count}",
         f"Tags: {stats.tag_count}",
         f"Feedback: {stats.feedback_count}",
+        f"Entries awaiting feedback: {stats.entry_count - stats.entries_with_feedback}",
         (
             "Feedback coverage: "
             f"{stats.entries_with_feedback}/{stats.entry_count} ({coverage:.1%})"
@@ -87,4 +89,13 @@ def cmd_stats(args: argparse.Namespace) -> int:
         print_json(stats_to_dict(summary, weeks=args.weeks))
     else:
         print(_format_human(summary, weeks=args.weeks))
+        if summary.entry_count > summary.entries_with_feedback:
+            command = ["commscoach"]
+            if args.db:
+                command.extend(("--db", args.db))
+            command.extend(("entry", "search", "--no-feedback", "--oldest-first", "--limit", "5"))
+            for flag, bound in (("--since", since), ("--until", until)):
+                if bound is not None:
+                    command.extend((flag, bound))
+            print(f"\nCoach the oldest first: {shlex.join(command)}")
     return 0

@@ -58,6 +58,7 @@ class DraftRecoveryTests(EntryTestBase):
 
     def test_all_editor_commands_keep_draft_after_save_failure(self) -> None:
         entry = self._seed_entry()
+        self._create_person("alice")
         with closing(db.connect(self.db_path)) as conn:
             feedback = db.create_feedback(conn, entry.id, "original feedback")
             review = db.create_review(conn, "original review", [entry.id])
@@ -68,6 +69,7 @@ class DraftRecoveryTests(EntryTestBase):
             (("feedback", "edit", str(feedback.id), "--body"), "update_feedback"),
             (("review", "add", "--entry", str(entry.id)), "create_review"),
             (("review", "edit", str(review.id), "--body"), "update_review"),
+            (("person", "edit", "alice", "--notes"), "set_person_note"),
         )
         for args, mutator in cases:
             with self.subTest(command=args), mock.patch.object(
@@ -78,6 +80,27 @@ class DraftRecoveryTests(EntryTestBase):
                 self.assertEqual(out, "")
                 self.assertIn("save failed", err)
                 self._assert_recovered(err)
+
+    def test_notes_editor_cleans_successful_draft_and_rejects_empty_edits(self) -> None:
+        person = self._create_person("alice")
+        with mock.patch.object(editor.subprocess, "call", side_effect=self._write_draft):
+            rc, _, err = self._run("person", "edit", "alice", "--notes", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertFalse(self.draft_path.exists())
+
+        def empty_draft(command):
+            self.draft_path = Path(command[-1])
+            self.draft_path.write_text("#> instructions only\n", encoding="utf-8")
+            return 0
+
+        with mock.patch.object(editor.subprocess, "call", side_effect=empty_draft):
+            rc, _, err = self._run("person", "edit", "alice", "--notes", "--name", "Changed")
+        self.assertEqual(rc, 1)
+        self.assertIn("empty body", err)
+        self.assertFalse(self.draft_path.exists())
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.get_person_note(conn, person.id).body, "My unsaved text")
+            self.assertIsNone(db.get_person(conn, person.id).name)
 
     def test_draft_exists_during_save_and_is_removed_after_success(self) -> None:
         create_entry = db.create_entry

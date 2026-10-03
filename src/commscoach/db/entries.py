@@ -172,18 +172,25 @@ def list_entries_with_person(
     *,
     exclude_entry_id: int,
     limit: int,
+    before: str | None = None,
 ) -> tuple[Entry, ...]:
-    """Return one person's other entries newest-first, capped by ``limit``."""
+    """Return other entries newest-first, optionally strictly before an instant."""
     if limit < 0:
         raise DBError("limit must be non-negative")
-    rows = conn.execute(
+    sql = (
         "SELECT e.* FROM entries e"
         " JOIN entry_people ep ON ep.entry_id = e.id"
         " WHERE ep.person_id = ? AND e.id != ?"
+    )
+    params: list[Any] = [person_id, exclude_entry_id]
+    if before is not None:
+        sql += " AND COALESCE(e.occurred_at, e.created_at) < ?"
+        params.append(common.date_bound_timestamp(before, name="before"))
+    sql += (
         " ORDER BY COALESCE(e.occurred_at, e.created_at) DESC, e.id DESC"
-        " LIMIT ?",
-        (person_id, exclude_entry_id, limit),
-    ).fetchall()
+        " LIMIT ?"
+    )
+    rows = conn.execute(sql, [*params, limit]).fetchall()
     return tuple(hydrate_entry(conn, row) for row in rows)
 
 

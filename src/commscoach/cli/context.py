@@ -37,6 +37,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Number of prior review syntheses to include.",
     )
     context_parser.set_defaults(func=cmd_context)
+    context_parser.add_argument(
+        "--goal-limit",
+        type=non_negative_int,
+        default=10,
+        metavar="N",
+        help="Number of active goals to include (default: 10).",
+    )
 
 
 def _context_to_dict(context: db.EntryContext) -> dict[str, Any]:
@@ -62,6 +69,12 @@ def _context_to_dict(context: db.EntryContext) -> dict[str, Any]:
         ],
         "prior_feedback": [feedback_to_dict(f) for f in context.prior_feedback],
         "goals": [goal_to_dict(goal) for goal in context.goals],
+        "goal_summary": {
+            "limit": context.goal_limit,
+            "count": len(context.goals),
+            "total_count": context.total_goal_count,
+            "truncated": len(context.goals) < context.total_goal_count,
+        },
         "prior_reviews": [
             review_to_dict(review) for review in context.prior_reviews
         ],
@@ -75,6 +88,7 @@ def cmd_context(args: argparse.Namespace) -> int:
             args.entry_id,
             history_limit=args.history,
             prior_review_limit=args.prior_review_limit,
+            goal_limit=args.goal_limit,
         )
     print_json(_context_to_dict(context))
     return 0

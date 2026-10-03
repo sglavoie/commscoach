@@ -176,6 +176,8 @@ class EntryContext:
     goals: tuple[Goal, ...] = field(default_factory=tuple)
     prior_reviews: tuple[Review, ...] = field(default_factory=tuple)
     self_notes: str | None = None
+    total_goal_count: int = 0
+    goal_limit: int = 10
 
 
 @dataclass(frozen=True, slots=True)

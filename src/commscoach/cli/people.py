@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from typing import Any, Iterable
 
 from .. import db
-from .common import confirm, open_db, print_json, read_body_or_raise
+from .common import confirm, open_db, print_json, read_body_arg, read_body_or_raise
+from .editor import compose_in_editor
 from .serializers import person_to_dict
+
+_EDIT_NOTES = object()
+NOTES_PREAMBLE = (
+    "Edit private notes below. Lines beginning with #> are ignored.\n"
+    "Use --clear-notes to remove notes; an empty draft will not be saved."
+)
 
 
 def ensure_people(
@@ -76,9 +84,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     notes = edit.add_mutually_exclusive_group()
     notes.add_argument(
         "--notes",
+        nargs="?",
+        const=_EDIT_NOTES,
         default=None,
         metavar="TEXT|-|@PATH",
-        help="Set private notes from text, stdin, or a UTF-8 file.",
+        help="Set private notes from text, stdin, or a UTF-8 file; omit the value to open $EDITOR.",
     )
     notes.add_argument(
         "--clear-notes",
@@ -182,9 +192,13 @@ def cmd_person_edit(args: argparse.Namespace) -> int:
         update_kwargs["handle"] = args.new_handle
     if args.name is not None:
         update_kwargs["name"] = args.name if args.name else None
-    note_body = read_body_or_raise(args.notes) if args.notes is not None else None
+    edit_notes = args.notes is _EDIT_NOTES
+    note_body = (
+        read_body_or_raise(args.notes)
+        if args.notes is not None and not edit_notes else None
+    )
 
-    if not update_kwargs and note_body is None and not args.clear_notes:
+    if not update_kwargs and note_body is None and not edit_notes and not args.clear_notes:
         raise db.DBError(
             "person edit requires at least one of"
             " --handle/--name/--notes/--clear-notes"
@@ -192,6 +206,16 @@ def cmd_person_edit(args: argparse.Namespace) -> int:
 
     with open_db(args) as conn:
         person = _resolve_existing_person(conn, args.handle)
+        if edit_notes:
+            note = db.get_person_note(conn, person.id)
+            note_body = read_body_arg(
+                None,
+                what="notes",
+                template=note.body if note is not None else "",
+                preamble=NOTES_PREAMBLE,
+                isatty=sys.stdin.isatty,
+                compose=compose_in_editor,
+            )
         updated = (
             db.update_person(conn, person.id, **update_kwargs)
             if update_kwargs

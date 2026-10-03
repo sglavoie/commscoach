@@ -107,6 +107,8 @@ commscoach export --format json --out commscoach.json
 
 Editor drafts are kept until the command succeeds. If the editor fails, you interrupt the command, or the subsequent save fails, a nonempty draft is retained with mode `0600` and its recovery path is printed to stderr (including with `--json`). Open that file to recover your text; it preserves the editor contents, including any `#>` instruction lines. Successful commands and empty drafts are cleaned up automatically. Recovery files live in the system temporary directory, so recover them before system cleanup removes them.
 
+`person edit HANDLE --notes` also opens the editor, pre-filled with that person's private notes (or blank when unset). It uses the same draft recovery. Empty drafts are rejected; use `--clear-notes` to remove notes. Non-interactive callers must supply text, `-`, or `@PATH`.
+
 `--occurred-at`, `--since`, and `--until` accept ISO-8601 values and natural relative dates such as `today`, `yesterday`, `3 days ago`, `last monday`, and `now`. Stored timestamps are normalized to UTC. Entries are ordered by when they occurred, falling back to creation time.
 
 Date filters use your system's local timezone. A bare date, `today`, `yesterday`, or `last monday` covers the whole local day, including daylight-saving transitions. Explicit times and elapsed-time expressions such as `today 9am`, `now`, or `3 days ago` retain their time; timestamps with an offset use that offset. Both bounds are inclusive, and a `--since` instant after `--until` is rejected. These rules apply to entry listings, searches, stats, and review scopes:
@@ -292,10 +294,19 @@ Both context commands include your self profile's private notes as `self.notes` 
 
 ```sh
 commscoach person edit me --notes "Help me be direct without sounding abrupt. Prefer short examples."
+commscoach person edit me --notes            # edit existing preferences in $EDITOR
 commscoach person edit me --clear-notes
 ```
 
 Replace `me` with your self profile's handle. These notes are included even when the self profile is not linked to the entry.
+
+Entry coaching history includes only interactions strictly before the target entry's occurrence time, falling back to creation time for entries without an occurrence date. Interactions at the same instant are excluded. The newest matching interactions are selected before applying `--history`, then returned oldest-first. Notes, feedback, active goals, and prior reviews remain current coaching context, not snapshots of what was known at the time.
+
+Like review context, `context ENTRY_ID` accepts `--goal-limit N` (default 10). Goals remain global and newest-first; the top-level `goal_summary` reports `limit`, `count`, `total_count`, and `truncated`. `--goal-limit 0` returns no goals while still reporting how many active goals exist. Increase the limit when you need a complete goal assessment:
+
+```sh
+commscoach context 42 --goal-limit 20
+```
 
 The skill is [scope](#review-scopes)-aware. It derives the scope from how you ask — "how am I doing with @alice?" becomes `--person alice`, "how is my conflict tag trending?" becomes `--tag conflict`, "how did last quarter go?" becomes a `--since`/`--until` range — and passes the same axis flags to `review add` that it passed to `review context`, so the stored review records the slice it was generated from. It reports the stored scope back to you. A scope that matches nothing is reported as an answer rather than stored as an empty review.
 
@@ -329,6 +340,8 @@ commscoach --json stats --since "30 days ago" --until today --weeks 8
 ```
 
 The summary includes entry, people, tag, feedback, review, and goal counts; feedback coverage; first/last activity; entries per week; current and longest weekly streaks; weekly buckets; and top tags, sources, and people.
+
+Human-readable stats also show the number of entries awaiting feedback. When it is nonzero, a copyable command opens the five oldest uncoached entries, carrying over an explicit `--db` and the resolved date bounds. Stats JSON retains its existing fields.
 
 ## Schema version and migration
 

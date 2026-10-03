@@ -91,7 +91,9 @@ class ContextSuccessTests(ContextTestBase):
             alice = db.get_person_by_handle(conn, "alice")
             assert alice is not None
             db.set_person_note(conn, alice.id, "Use concise asks")
-            prior_entry = db.create_entry(conn, "prior hello", people=["alice"])
+            prior_entry = db.create_entry(
+                conn, "prior hello", people=["alice"], occurred_at="2020-01-01T09:00:00Z",
+            )
             history_feedback = db.create_feedback(
                 conn, prior_entry.id, "Good follow-through"
             )
@@ -109,6 +111,7 @@ class ContextSuccessTests(ContextTestBase):
                 "people",
                 "prior_feedback",
                 "goals",
+                "goal_summary",
                 "prior_reviews",
             },
         )
@@ -215,7 +218,7 @@ class ContextSuccessTests(ContextTestBase):
         payload = json.loads(out)
         self.assertEqual(
             sorted(payload.keys()),
-            ["entry", "goals", "people", "prior_feedback", "prior_reviews", "self"],
+            ["entry", "goal_summary", "goals", "people", "prior_feedback", "prior_reviews", "self"],
         )
         self.assertEqual(
             sorted(payload["entry"].keys()),
@@ -272,6 +275,28 @@ class ContextSuccessTests(ContextTestBase):
             0,
             f"json.tool rejected payload: {result.stderr}",
         )
+
+    def test_goal_limits_report_global_totals_including_when_zero(self) -> None:
+        self._seed_self()
+        self._seed_person("alice")
+        entry = self._seed_entry("solo")
+        with closing(db.connect(self.db_path)) as conn:
+            goals = [db.create_goal(conn, f"Goal {i}", person_handle="alice") for i in range(12)]
+            for dropped in (False, True):
+                goal = db.create_goal(conn, "closed")
+                db.close_goal(conn, goal.id, dropped=dropped)
+        for flags, count, limit in (((), 10, 10), (("--goal-limit", "0"), 0, 0),
+                                     (("--goal-limit", "2"), 2, 2),
+                                     (("--goal-limit", "20"), 12, 20)):
+            with self.subTest(flags=flags):
+                rc, out, err = self._run("context", str(entry.id), *flags)
+                self.assertEqual(rc, 0, err)
+                payload = json.loads(out)
+                self.assertEqual(payload["goal_summary"], {
+                    "limit": limit, "count": count, "total_count": 12, "truncated": count < 12,
+                })
+                self.assertEqual([g["id"] for g in payload["goals"]],
+                                 [g.id for g in reversed(goals)][:count])
 
 
 class ContextFailureTests(ContextTestBase):
