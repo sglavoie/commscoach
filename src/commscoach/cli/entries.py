@@ -19,6 +19,7 @@ from .common import (
     parse_when_or_raise,
     print_json,
     read_body_arg,
+    search_excerpt,
     truncate,
 )
 from .editor import compose_in_editor
@@ -236,12 +237,14 @@ def _format_entry_human(entry: db.Entry) -> str:
     return "\n".join(lines)
 
 
-def _format_entry_short(entry: db.Entry, *, has_feedback: bool = False) -> str:
+def _format_entry_short(
+    entry: db.Entry, *, has_feedback: bool = False, excerpt: str | None = None,
+) -> str:
     parts = [f"[{entry.id}]", format_stamp(entry.occurred_at or entry.created_at)]
     if entry.source:
         parts.append(" ".join(entry.source.split()))
     parts.append("has feedback" if has_feedback else "needs feedback")
-    parts.append(truncate(first_prose_line(entry.body)))
+    parts.append(excerpt if excerpt is not None else truncate(first_prose_line(entry.body)))
     if entry.tags:
         parts.append("#" + ",".join(entry.tags))
     if entry.people:
@@ -264,7 +267,8 @@ def _emit_entry(
 
 
 def _emit_entries(
-    args: argparse.Namespace, entries: tuple[db.Entry, ...], coached: set[int]
+    args: argparse.Namespace, entries: tuple[db.Entry, ...], coached: set[int],
+    *, excerpts: dict[int, str] | None = None,
 ) -> None:
     if args.json:
         print_json([entry_to_dict(e) for e in entries])
@@ -273,7 +277,10 @@ def _emit_entries(
         print("(no entries)")
         return
     for entry in entries:
-        print(_format_entry_short(entry, has_feedback=entry.id in coached))
+        print(_format_entry_short(
+            entry, has_feedback=entry.id in coached,
+            excerpt=excerpts.get(entry.id) if excerpts is not None else None,
+        ))
 
 
 def cmd_entry_add(args: argparse.Namespace) -> int:
@@ -434,6 +441,7 @@ def cmd_entry_list(args: argparse.Namespace) -> int:
 
 def cmd_entry_search(args: argparse.Namespace) -> int:
     since, until = parse_date_bounds(args)
+    excerpts = {}
     with open_db(args) as conn:
         entries = db.search_entries(
             conn,
@@ -448,11 +456,23 @@ def cmd_entry_search(args: argparse.Namespace) -> int:
             mode="like" if args.exact else "auto",
             oldest_first=args.oldest_first,
         )
+        if args.query and not args.json:
+            snippets = (
+                db.search_entry_snippets(conn, args.query, (e.id for e in entries))
+                if not args.exact else {}
+            )
+            excerpts = {
+                entry.id: (
+                    " ".join(snippets[entry.id].split()) if entry.id in snippets
+                    else search_excerpt(entry.body, args.query)
+                )
+                for entry in entries
+            }
         coached = (
             db.feedback_entry_ids(conn, (e.id for e in entries))
             if not args.json else set()
         )
-    _emit_entries(args, entries, coached)
+    _emit_entries(args, entries, coached, excerpts=excerpts)
     return 0
 
 

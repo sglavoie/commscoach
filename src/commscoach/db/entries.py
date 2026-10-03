@@ -362,3 +362,37 @@ def search_entries(
             oldest_first=oldest_first,
         )
     return tuple(hydrate_entry(conn, row) for row in rows)
+
+
+def search_entry_snippets(
+    conn: sqlite3.Connection, query: str, entry_ids: Iterable[int],
+) -> dict[int, str]:
+    """Return FTS excerpts for selected search results, keyed by entry ID.
+
+    Let SQLite locate matches so phrases, prefixes, boolean queries, and
+    diacritics follow the same tokenizer as search. Missing FTS support or an
+    invalid query returns no snippets, matching auto search's LIKE fallback.
+    Literal callers should use their own substring excerpts instead.
+    """
+    ids = tuple(dict.fromkeys(entry_ids))
+    if not query or not ids:
+        return {}
+    enabled = conn.execute("SELECT value FROM _meta WHERE key = 'fts5'").fetchone()
+    if enabled is None or enabled[0] != "1":
+        return {}
+    snippets: dict[int, str] = {}
+    try:
+        # Bound placeholders even when the caller searches without a limit.
+        for start in range(0, len(ids), 500):
+            batch = ids[start:start + 500]
+            placeholders = ",".join("?" for _ in batch)
+            rows = conn.execute(
+                "SELECT rowid, snippet(entries_fts, 0, '', '', '…', 32)"
+                " FROM entries_fts WHERE entries_fts MATCH ?"
+                f" AND rowid IN ({placeholders})",
+                (query, *batch),
+            ).fetchall()
+            snippets.update((row[0], row[1]) for row in rows)
+    except sqlite3.OperationalError:
+        return {}
+    return snippets

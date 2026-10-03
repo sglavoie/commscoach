@@ -15,6 +15,53 @@ from .cli_entry_case import EntryTestBase
 
 
 class EntryListTests(EntryTestBase):
+    def test_literal_search_shows_late_heading_match_and_preserves_json(self):
+        body = "Opening paragraph.\n" + "Background. " * 40 + "\n## A 10%_ improvement\n" + "Afterwards. " * 30
+        entry = self._seed_entry(body, source="email", tags=("work",))
+        for flags in (("--exact",), ()):
+            with self.subTest(flags=flags):
+                rc, out, err = self._run("entry", "search", "--query", "10%_", *flags)
+                self.assertEqual(rc, 0, err)
+                self.assertIn("## A 10%_ improvement", out)
+                self.assertIn("…", out)
+                self.assertIn("email · needs feedback", out)
+                self.assertIn("#work", out)
+                self.assertNotIn("Opening paragraph", out)
+        rc, out, err = self._run("entry", "search", "--exact", "--query", "10%_", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)[0]["body"], body)
+        rc, shown, err = self._run("entry", "show", str(entry.id), "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out), [json.loads(shown)])
+
+    def test_token_search_excerpts_follow_fts_matching(self):
+        with closing(db.connect(self.db_path)) as conn:
+            if conn.execute("SELECT value FROM _meta WHERE key = 'fts5'").fetchone()[0] != "1":
+                self.skipTest("FTS5 unavailable")
+        self._seed_entry("Opening words. " * 60 + "\n## Café listening carefully\n" + "Afterwards. " * 60)
+        for query in ('"listening carefully"', "listen*", "cafe", "absent OR listening",
+                      "listening NOT absent", "NEAR(cafe carefully)"):
+            with self.subTest(query=query):
+                rc, out, err = self._run("entry", "search", "--query", query)
+                self.assertEqual(rc, 0, err)
+                self.assertIn("Café listening carefully", out)
+                self.assertIn("…", out)
+                self.assertEqual(len(out.splitlines()), 1)
+
+    def test_search_without_fts_uses_literal_excerpt_and_no_query_keeps_preview(self):
+        self._seed_entry("Opening words.\n" + "Background. " * 40 + "A late target passage.")
+        with closing(db.connect(self.db_path)) as conn, conn:
+            conn.execute("UPDATE _meta SET value = '0' WHERE key = 'fts5'")
+        rc, out, err = self._run("entry", "search", "--query", "TARGET")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("late target passage", out)
+        self.assertNotIn("Opening words", out)
+        for command in ("list", "search"):
+            rc, out, err = self._run("entry", command)
+            self.assertEqual(rc, 0, err)
+            self.assertIn("Opening words", out)
+            self.assertNotIn("late target passage", out)
+
     def test_list_and_search_show_date_source_and_live_feedback_status(self):
         entry = self._seed_entry("## Situation\nA useful conversation", source="in-person",
                                  occurred_at="2026-06-01T18:30:00+00:00")

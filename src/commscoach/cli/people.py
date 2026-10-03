@@ -17,7 +17,10 @@ from .common import (
 )
 from .editor import compose_in_editor
 from .feedback import _format_feedback_human
-from .serializers import entry_to_dict, feedback_to_dict, goal_to_dict, person_to_dict
+from .reviews import _format_review_human
+from .serializers import (
+    entry_to_dict, feedback_to_dict, goal_to_dict, person_to_dict, review_to_dict,
+)
 
 _EDIT_NOTES = object()
 NOTES_PREAMBLE = (
@@ -78,6 +81,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     show.add_argument(
         "--with-feedback", action="store_true",
         help="Include full feedback for each recent interaction; requires --recent N.",
+    )
+    show.add_argument(
+        "--reviews", type=non_negative_int, default=None, metavar="N",
+        help="Also show the latest N person-scoped reviews in full.",
     )
     show.set_defaults(func=cmd_person_show)
 
@@ -200,6 +207,12 @@ def cmd_person_show(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         person = _resolve_existing_person(conn, args.handle)
         note = db.get_person_note(conn, person.id)
+        reviews = (
+            db.list_reviews(
+                conn, limit=args.reviews, scope_kind="person", person_handle=person.handle,
+            )
+            if args.reviews is not None else ()
+        )
         if args.recent is not None:
             entries = db.search_entries(
                 conn, person_handle=person.handle, limit=args.recent,
@@ -216,20 +229,24 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                     if args.with_feedback
                     else db.feedback_entry_ids(conn, (e.id for e in entries))
                 )
-    if args.recent is not None and args.json:
-        print_json({
+    if args.json:
+        payload = {
             **person_to_dict(person),
             "notes": note.body if note is not None else None,
-            "recent_entries": [
+        }
+        if args.recent is not None:
+            payload["recent_entries"] = [
                 {
                     **entry_to_dict(entry),
                     **({"feedback": [feedback_to_dict(note) for note in feedback[entry.id]]}
                        if args.with_feedback else {}),
                 }
                 for entry in entries
-            ],
-            "active_goals": [goal_to_dict(goal) for goal in goals],
-        })
+            ]
+            payload["active_goals"] = [goal_to_dict(goal) for goal in goals]
+        if args.reviews is not None:
+            payload["recent_reviews"] = [review_to_dict(review) for review in reviews]
+        print_json(payload)
         return 0
     _emit_person(args, person, note=note, include_notes=True)
     if args.recent is not None:
@@ -251,6 +268,9 @@ def cmd_person_show(args: argparse.Namespace) -> int:
             _emit_entries(args, entries, coached)
         print("\nActive goals:")
         _emit_goals(args, goals)
+    if args.reviews is not None:
+        print("\nRecent reviews:")
+        print("\n\n".join(_format_review_human(review) for review in reviews) or "(no reviews)")
     return 0
 
 

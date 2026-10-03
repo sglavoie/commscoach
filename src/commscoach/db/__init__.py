@@ -45,6 +45,7 @@ from .entries import (
     list_entries,
     list_entries_with_person,
     search_entries,
+    search_entry_snippets,
     update_entry,
 )
 from .errors import (
@@ -191,6 +192,7 @@ __all__ = [
     "prune_backups",
     "rename_tag",
     "search_entries",
+    "search_entry_snippets",
     "search_feedback",
     "set_person_note",
     "set_self",

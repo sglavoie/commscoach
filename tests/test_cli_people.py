@@ -110,6 +110,73 @@ class PersonAddTests(PeopleTestBase):
 
 
 class PersonShowTests(PeopleTestBase):
+    def test_reviews_are_person_scoped_full_newest_first_and_optional(self):
+        self._seed_person("alice")
+        self._seed_person("bob")
+        with closing(db.connect(self.db_path)) as conn:
+            entry = db.create_entry(conn, "Alice interaction", people=("alice",))
+            older = db.create_review(conn, "Older advice", (entry.id,),
+                                     scope_kind="person", scope_person_handle="alice")
+            newest = db.create_review(conn, "Latest advice. " * 40, (entry.id,),
+                                      scope_kind="person", scope_person_handle="alice")
+            other = db.create_entry(conn, "Bob interaction", people=("bob",))
+            db.create_review(conn, "Unrelated person advice", (other.id,),
+                             scope_kind="person", scope_person_handle="bob")
+            db.create_review(conn, "General review mentioning Alice", (entry.id,))
+            # Equal creation times exercise the stable ID tie-breaker.
+            with conn:
+                conn.execute("UPDATE reviews SET created_at = '2026-01-01T00:00:00+00:00'")
+        for extra in ((), ("--recent", "1", "--with-feedback")):
+            with self.subTest(extra=extra):
+                flags = ("person", "show", "ALICE", "--reviews", "2", *extra)
+                rc, out, err = self._run(*flags)
+                self.assertEqual(rc, 0, err)
+                self.assertIn(newest.body, out)
+                self.assertLess(out.index(newest.body), out.index(older.body))
+                self.assertNotIn("Unrelated person advice", out)
+                self.assertNotIn("General review", out)
+                rc, out, err = self._run(*flags, "--json")
+                self.assertEqual(rc, 0, err)
+                payload = json.loads(out)
+                self.assertEqual([r["id"] for r in payload["recent_reviews"]], [newest.id, older.id])
+                self.assertEqual(payload["recent_reviews"][0]["body"], newest.body)
+                self.assertEqual("recent_entries" in payload, bool(extra))
+                rc, out, err = self._run("person", "show", "alice", *extra, "--json")
+                self.assertEqual(rc, 0, err)
+                del payload["recent_reviews"]
+                self.assertEqual(payload, json.loads(out))
+        rc, out, err = self._run("person", "show", "alice", "--reviews", "1", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual([r["id"] for r in json.loads(out)["recent_reviews"]], [newest.id])
+        self._run("person", "edit", "alice", "--handle", "ally")
+        rc, out, err = self._run("person", "show", "ally", "--reviews", "1", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["recent_reviews"][0]["scope_person_handle"], "ally")
+
+    def test_reviews_zero_empty_and_invalid_limits(self):
+        self._seed_person("alice")
+        for limit in ("0", "2"):
+            rc, out, err = self._run("person", "show", "alice", "--reviews", limit)
+            self.assertEqual(rc, 0, err)
+            self.assertIn("Recent reviews:\n(no reviews)", out)
+            rc, out, err = self._run("person", "show", "alice", "--reviews", limit, "--json")
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(json.loads(out)["recent_reviews"], [])
+        with closing(db.connect(self.db_path)) as conn:
+            entry = db.create_entry(conn, "Alice interaction", people=("alice",))
+            db.create_review(conn, "Existing advice", (entry.id,),
+                             scope_kind="person", scope_person_handle="alice")
+        rc, out, err = self._run("person", "show", "alice", "--reviews", "0", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["recent_reviews"], [])
+        for limit in ("-1", "bad"):
+            with self.subTest(limit=limit), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+                cli.main(["--db", str(self.db_path), "person", "show", "alice", "--reviews", limit])
+            self.assertEqual(raised.exception.code, 2)
+        rc, out, err = self._run("person", "show", "missing", "--reviews", "1")
+        self.assertEqual(rc, 1)
+        self.assertIn("missing", err)
+
     def test_recent_feedback_is_full_oldest_first_and_only_for_selected_entries(self):
         self._seed_person("alice")
         self._seed_person("bob")
