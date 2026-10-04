@@ -15,6 +15,34 @@ from .cli_entry_case import EntryTestBase
 
 
 class EntryEditTests(EntryTestBase):
+    def test_body_edit_reminds_about_existing_coaching_without_changing_json(self) -> None:
+        entry = self._seed_entry("old body")
+        with closing(db.connect(self.db_path)) as conn:
+            feedback = db.create_feedback(conn, entry.id, "Advice")
+            review = db.create_review(conn, "Review", [entry.id])
+        rc, out, err = self._run("entry", "edit", str(entry.id), "--body", "new body", "--json")
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["body"], "new body")
+        self.assertIn("Existing coaching may refer to the previous text.", err)
+        self.assertIn(f"--db {self.db_path}", err)
+        self.assertIn(f"entry show {entry.id} --with-feedback", err)
+        self.assertIn(f"review show {review.id} --with-entries", err)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.get_feedback(conn, feedback.id), feedback)
+            self.assertEqual(db.get_review(conn, review.id).body, review.body)
+        for flags in (("--body", "new body"), ("--source", "email")):
+            self.assertEqual(self._run("entry", "edit", str(entry.id), *flags)[2], "")
+
+    def test_body_edit_reminder_supports_review_only_and_no_coaching(self) -> None:
+        entry = self._seed_entry("original")
+        self.assertEqual(self._run("entry", "edit", str(entry.id), "--body", "second")[2], "")
+        with closing(db.connect(self.db_path)) as conn:
+            review = db.create_review(conn, "Review only", [entry.id])
+        rc, _, err = self._run("entry", "edit", str(entry.id), "--body", "third")
+        self.assertEqual(rc, 0)
+        self.assertIn(f"review show {review.id} --with-entries", err)
+        self.assertNotIn("entry show", err)
+
     def test_edit_body(self) -> None:
         entry = self._seed_entry("old body")
         rc, out, _ = self._run("entry", "edit", str(entry.id), "--body", "new body")

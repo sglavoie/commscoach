@@ -86,6 +86,7 @@ def update_goal(
     *,
     title: Any = common.UNSET,
     detail: Any = common.UNSET,
+    outcome: Any = common.UNSET,
     person_handle: Any = common.UNSET,
     review_id: Any = common.UNSET,
     status: Any = common.UNSET,
@@ -113,7 +114,7 @@ def update_goal(
 
     updates: list[str] = []
     params: list[Any] = []
-    for column, value in (("title", title), ("detail", detail)):
+    for column, value in (("title", title), ("detail", detail), ("outcome", outcome)):
         if value is not common.UNSET:
             updates.append(f"{column} = ?")
             params.append(value)
@@ -195,6 +196,7 @@ def list_goals(
     include_general: bool = False,
     review_id: int | None = None,
     query: str | None = None,
+    prioritize_person_ids: tuple[int, ...] = (),
 ) -> tuple[Goal, ...]:
     """List goals by creation time; all-status lists put active goals first.
 
@@ -202,6 +204,8 @@ def list_goals(
     A review filter selects only goals originating from that review.
     Query matches literal substrings in titles, details, and outcomes.
     An unknown person handle is an error, even when the limit is zero.
+    Optional person priorities put their goals first, then general goals, then
+    other goals, preserving chronological order within each group.
     """
     if limit is not None and limit < 0:
         raise DBError("limit must be non-negative")
@@ -214,6 +218,13 @@ def list_goals(
     sql += " ORDER BY "
     if status is None:
         sql += "CASE status WHEN 'active' THEN 0 ELSE 1 END, "
+    if prioritize_person_ids:
+        placeholders = ", ".join("?" for _ in prioritize_person_ids)
+        sql += (
+            f"CASE WHEN person_id IN ({placeholders}) THEN 0 "
+            "WHEN person_id IS NULL THEN 1 ELSE 2 END, "
+        )
+        params.extend(prioritize_person_ids)
     sql += f"created_at {direction}, id {direction}"
     if limit is not None:
         sql += " LIMIT ?"

@@ -49,6 +49,44 @@ class PeopleTestBase(unittest.TestCase):
 
 
 class PersonAddTests(PeopleTestBase):
+    def test_activity_counts_and_dates_with_query_and_empty_people(self) -> None:
+        self._seed_person("me", is_self=True)
+        self._seed_person("alice", name="Alice Smith")
+        self._seed_person("bob")
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_entry(conn, "Earlier", people=["alice", "bob"],
+                            occurred_at="2026-01-01T00:00:00+00:00")
+            with mock.patch("commscoach.db.common.utcnow_iso", return_value="2026-02-01T00:00:00+00:00"):
+                db.create_entry(conn, "Latest", people=["alice"])
+            with mock.patch("commscoach.db.common.utcnow_iso", return_value="2026-03-01T00:00:00+00:00"):
+                db.create_entry(conn, "Backfilled", people=["alice"],
+                                occurred_at="2025-01-01T00:00:00+00:00")
+            for _ in range(2):
+                db.create_goal(conn, "Active", person_handle="alice")
+            for dropped in (False, True):
+                goal = db.create_goal(conn, "Closed", person_handle="alice")
+                db.close_goal(conn, goal.id, dropped=dropped)
+            db.create_goal(conn, "General")
+        rc, out, err = self._run("person", "list", "--with-activity", "--json")
+        self.assertEqual(rc, 0, err)
+        rows = json.loads(out)
+        self.assertEqual([row["handle"] for row in rows], ["me", "alice", "bob"])
+        self.assertEqual(rows[0]["activity"], {
+            "last_logged_interaction": None, "interaction_count": 0, "active_goal_count": 0,
+        })
+        self.assertEqual(rows[1]["activity"], {
+            "last_logged_interaction": "2026-02-01T00:00:00+00:00",
+            "interaction_count": 3, "active_goal_count": 2,
+        })
+        self.assertEqual(rows[2]["activity"]["interaction_count"], 1)
+        rc, out, err = self._run("person", "list", "--query", "SMITH", "--with-activity")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("last logged interaction:", out)
+        self.assertIn("interactions: 3 · active goals: 2", out)
+        self.assertNotIn("@bob", out)
+        self.assertNotIn("activity", json.loads(self._run("person", "list", "--json")[1])[0])
+        self.assertEqual(self._run("person", "list", "--query", "missing", "--with-activity")[1], "(no people)\n")
+
     def test_list_query_matches_names_handles_and_literal_characters(self) -> None:
         self._seed_person("jdoe", name="John Doe")
         self._seed_person("john_self", is_self=True)

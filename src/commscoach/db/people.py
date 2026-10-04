@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Iterable
 
-from ..models import Person
+from ..models import Person, PersonActivity
 from . import common
 from .errors import (
     DBError,
@@ -14,6 +14,30 @@ from .errors import (
     PersonNotFoundError,
 )
 from .rows import row_to_person
+
+
+def get_people_activity(conn: sqlite3.Connection) -> dict[int, PersonActivity]:
+    """Aggregate separately to avoid multiplying counts across goal/entry links."""
+    rows = conn.execute(
+        "SELECT p.id, interactions.last_logged_interaction, "
+        "COALESCE(interactions.total, 0) AS interaction_count, "
+        "COALESCE(active_goals.total, 0) AS active_goal_count "
+        "FROM people p LEFT JOIN ("
+        " SELECT ep.person_id, COUNT(*) AS total, "
+        " MAX(COALESCE(e.occurred_at, e.created_at)) AS last_logged_interaction "
+        " FROM entry_people ep JOIN entries e ON e.id = ep.entry_id "
+        " GROUP BY ep.person_id"
+        ") interactions ON interactions.person_id = p.id LEFT JOIN ("
+        " SELECT person_id, COUNT(*) AS total FROM goals "
+        " WHERE status = 'active' GROUP BY person_id"
+        ") active_goals ON active_goals.person_id = p.id"
+    ).fetchall()
+    return {
+        row["id"]: PersonActivity(
+            row["last_logged_interaction"], row["interaction_count"], row["active_goal_count"],
+        )
+        for row in rows
+    }
 
 
 def _wrap_people_integrity_error(

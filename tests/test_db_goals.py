@@ -14,6 +14,19 @@ T2 = "2026-08-25T12:00:00+00:00"
 
 
 class GoalCrudTests(DBTestCase):
+    def test_outcome_update_changes_only_outcome_and_update_timestamp(self) -> None:
+        goal = db.create_goal(self.conn, "Experiment", now=T0)
+        closed = db.close_goal(self.conn, goal.id, outcome="Original", dropped=True, now=T1)
+        edited = db.update_goal(self.conn, goal.id, outcome="Corrected", now=T2)
+        self.assertEqual(edited.outcome, "Corrected")
+        self.assertEqual(edited.status, "dropped")
+        self.assertEqual(edited.closed_at, closed.closed_at)
+        self.assertEqual(edited.created_at, T0)
+        self.assertEqual(edited.updated_at, T2)
+        cleared = db.update_goal(self.conn, goal.id, outcome=None, now=T2)
+        self.assertIsNone(cleared.outcome)
+        self.assertEqual(cleared.closed_at, T1)
+
     def test_unknown_person_is_rejected_even_with_general_goals_or_zero_limit(self) -> None:
         db.create_goal(self.conn, "General goal")
         for options in ({}, {"include_general": True}, {"limit": 0}, {"query": "General"}):

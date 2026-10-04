@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from typing import Any
 
@@ -418,7 +419,24 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
         if args.people is not None or args.add_person:
             ensure_people(conn, args.people or args.add_person, assume_yes=args.yes)
         entry = db.update_entry(conn, args.entry_id, **update_kwargs)
+        body_changed = entry.body != current.body
+        has_feedback = body_changed and bool(db.feedback_entry_ids(conn, (entry.id,)))
+        review_ids = (
+            [row[0] for row in conn.execute(
+                "SELECT review_id FROM review_entries WHERE entry_id = ? ORDER BY review_id",
+                (entry.id,),
+            )] if body_changed else []
+        )
     _emit_entry(args, entry, human_prefix="updated")
+    if has_feedback or review_ids:
+        command = ["commscoach"]
+        if args.db:
+            command.extend(("--db", args.db))
+        print("Existing coaching may refer to the previous text.", file=sys.stderr)
+        if has_feedback:
+            print(shlex.join([*command, "entry", "show", str(entry.id), "--with-feedback"]), file=sys.stderr)
+        for review_id in review_ids:
+            print(shlex.join([*command, "review", "show", str(review_id), "--with-entries"]), file=sys.stderr)
     return 0
 
 

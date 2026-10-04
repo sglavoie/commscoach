@@ -106,6 +106,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Replace detail (text, '-', or '@PATH'); omit the value to open $EDITOR.",
     )
     edit.add_argument("--clear-detail", action="store_true")
+    edit.add_argument(
+        "--outcome", nargs="?", const=_EDIT_TEXT, default=None,
+        help="Replace outcome without changing status (text, '-', '@PATH', or omit for $EDITOR).",
+    )
+    edit.add_argument("--clear-outcome", action="store_true")
     edit.add_argument("--person", default=None, metavar="HANDLE")
     edit.add_argument("--clear-person", action="store_true")
     edit.add_argument("--status", choices=("active", "done", "dropped"), default=None)
@@ -273,8 +278,11 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
         raise db.DBError("--clear-detail cannot be combined with --detail")
     if args.clear_person and args.person is not None:
         raise db.DBError("--clear-person cannot be combined with --person")
+    if args.clear_outcome and args.outcome is not None:
+        raise db.DBError("--clear-outcome cannot be combined with --outcome")
 
     edit_detail = args.detail is _EDIT_TEXT
+    edit_outcome = args.outcome is _EDIT_TEXT
     update_kwargs: dict[str, Any] = {}
     if args.title is not None:
         update_kwargs["title"] = args.title
@@ -282,6 +290,10 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
         update_kwargs["detail"] = None
     elif args.detail is not None and not edit_detail:
         update_kwargs["detail"] = read_body_or_raise(args.detail)
+    if args.clear_outcome:
+        update_kwargs["outcome"] = None
+    elif args.outcome is not None and not edit_outcome:
+        update_kwargs["outcome"] = read_body_or_raise(args.outcome)
     if args.clear_person:
         update_kwargs["person_handle"] = None
     elif args.person is not None:
@@ -289,16 +301,20 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
     if args.status is not None:
         update_kwargs["status"] = args.status
 
-    if not update_kwargs and not edit_detail:
+    if not update_kwargs and not edit_detail and not edit_outcome:
         raise db.DBError(
             "goal edit requires at least one of "
-            "--title/--detail/--clear-detail/--person/--clear-person/--status"
+            "--title/--detail/--clear-detail/--outcome/--clear-outcome/--person/--clear-person/--status"
         )
     with open_db(args) as conn:
+        current = db.get_goal(conn, args.goal_id)
+        if current is None:
+            raise db.GoalNotFoundError(args.goal_id)
+        if args.title is not None and not args.title.strip():
+            raise db.DBError("goal title must be a non-empty string")
+        if args.person is not None and db.get_person_by_handle(conn, args.person) is None:
+            raise db.PersonNotFoundError(args.person)
         if edit_detail:
-            current = db.get_goal(conn, args.goal_id)
-            if current is None:
-                raise db.GoalNotFoundError(args.goal_id)
             update_kwargs["detail"] = read_body_arg(
                 None,
                 what="detail",
@@ -306,6 +322,12 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
                 preamble=DETAIL_PREAMBLE,
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
+            )
+        if edit_outcome:
+            update_kwargs["outcome"] = read_body_arg(
+                None, what="outcome", template=current.outcome or "",
+                preamble=OUTCOME_PREAMBLE + "\nUse --clear-outcome to remove the outcome.",
+                isatty=sys.stdin.isatty, compose=compose_in_editor,
             )
         goal = db.update_goal(conn, args.goal_id, **update_kwargs)
     _emit_goal(args, goal, human_prefix="updated")

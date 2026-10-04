@@ -23,6 +23,15 @@ class Person:
 
 
 @dataclass(frozen=True, slots=True)
+class PersonActivity:
+    """Recorded interaction and active-goal totals for one person."""
+
+    last_logged_interaction: str | None
+    interaction_count: int
+    active_goal_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class PersonNote:
     """Private coaching context stored separately from a person row."""
 

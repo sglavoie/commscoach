@@ -17,6 +17,32 @@ from .db_case import DBTestCase, patch_timestamps
 
 
 class ReviewContextTests(DBTestCase):
+    def test_person_goal_priority_precedes_limit_without_filtering_other_goals(self) -> None:
+        for handle in ("alice", "bob", "carol"):
+            db.create_person(self.conn, handle)
+        entry = db.create_entry(self.conn, "Conversation", people=["alice", "bob", "me"])
+        alice = db.create_goal(self.conn, "Alice", person_handle="alice", now="2026-01-01T00:00:00+00:00")
+        bob = db.create_goal(self.conn, "Bob", person_handle="bob", now="2026-01-01T00:00:00+00:00")
+        general = db.create_goal(self.conn, "General", now="2026-02-01T00:00:00+00:00")
+        carol = db.create_goal(self.conn, "Carol", person_handle="carol", now="2026-03-01T00:00:00+00:00")
+        closed = db.create_goal(self.conn, "Closed Alice", person_handle="alice")
+        db.close_goal(self.conn, closed.id)
+        for limit in (0, 1, 2, 4, 10):
+            with self.subTest(limit=limit):
+                entry_context = db.get_entry_context(self.conn, entry.id, goal_limit=limit)
+                review_context = db.get_review_context(
+                    self.conn, scope_kind="person", person_handle="ALICE", goal_limit=limit,
+                )
+                self.assertEqual([g.id for g in entry_context.goals], [bob.id, alice.id, general.id, carol.id][:limit])
+                self.assertEqual([g.id for g in review_context.goals], [alice.id, general.id, carol.id, bob.id][:limit])
+                self.assertEqual(entry_context.total_goal_count, 4)
+                self.assertEqual(review_context.total_goal_count, 4)
+        for scope in ({}, {"scope_kind": "tag", "tag": "missing"},
+                      {"scope_kind": "range", "since": "2026-01-01"}):
+            self.assertEqual(db.get_review_context(self.conn, goal_limit=1, **scope).goals, (carol,))
+        alone = db.create_entry(self.conn, "Solo", people=["me"])
+        self.assertEqual(db.get_entry_context(self.conn, alone.id, goal_limit=1).goals, (carol,))
+
     def setUp(self) -> None:
         super().setUp()
         self.me = db.create_person(self.conn, "me", is_self=True)

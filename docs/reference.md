@@ -109,6 +109,12 @@ These flags may be repeated; tags also accept comma-separated values. Tag normal
 Entry creation validates the date and database before opening the editor. Feedback creation checks that its entry exists before asking for a body.
 Review creation also checks the database, every covered entry ID, and the scoped person (when supplied) before opening the editor.
 
+After an entry's body changes, existing feedback or linked reviews trigger a
+short reminder that coaching may refer to the previous text, with copyable
+commands to revisit it. The reminder goes to stderr, including with `--json`,
+and preserves an explicit `--db` path. Metadata-only edits and unchanged bodies
+produce no reminder. Existing coaching is left intact.
+
 ## Tags
 
 Tags live in their own table with their own normalization and orphan collection, so the vocabulary stays maintainable instead of letting one typo split a theme across your stats permanently:
@@ -195,7 +201,7 @@ Either bound alone is enough to select the `range` scope; an unbounded range wou
 
 - **Entries** are narrowed by the axis and capped by `--limit`.
 - **Prior reviews** are filtered to the same scope under `person` and `tag` only, so a review of @alice is measured against previous reviews of @alice. `latest` and `range` get the unfiltered recent listing instead: a date window is a one-off slice with no natural predecessor.
-- **Goals** are never scope-filtered, only capped by `--goal-limit`. A relationship or theme review should still be measured against your general goals.
+- **Goals** are never scope-filtered, only capped by `--goal-limit`. Person-scoped reviews prioritize that person's active goals, then general goals, then other people's goals before applying the limit. Each group is newest-first by creation time, then ID. Other review scopes retain global newest-first ordering.
 
 A scope that matches nothing returns an empty entry list rather than failing — "no entries with @alice yet" is an answer, not an error. An unknown person handle *is* an error, because that is a typo, and so is a reversed date range.
 
@@ -319,6 +325,15 @@ handles using literal, case-insensitive substring matching, retaining self-first
 then handle-alphabetical order. `%`, `_`, and `!` are literal characters; blank
 queries are rejected. An unmatched query returns an empty list.
 
+Add `person list --with-activity` to show each person's last logged interaction,
+interaction count, and active goal count. It combines with `--query` and retains
+the usual ordering. Dates use occurrence time, falling back to creation time;
+people with no interactions show `(none)` and zero. Counts include only goals
+linked to that person and exclude done or dropped goals. With `--json`, the flag
+adds an `activity` object containing `last_logged_interaction` (UTC timestamp or
+`null`), `interaction_count`, and `active_goal_count`. Without the flag, output is
+unchanged.
+
 Read the evidence behind a review with `review show ID --with-entries`, optionally
 combined with `--with-goals`. This shows the full current text and metadata of its
 surviving linked entries, in the review's existing entry order. It is not a snapshot
@@ -377,7 +392,14 @@ Entry coaching history includes only interactions strictly before the target ent
 
 Each person in entry context also has a `history_summary` with `limit`, `count`, `total_count`, and `truncated`. The total counts only eligible interactions strictly before the target, so the coach can distinguish "three prior interactions exist" from "three of 27 were included." `--history 0` still reports these totals, and a person with no eligible history has `total_count: 0` and `truncated: false`.
 
-Like review context, `context ENTRY_ID` accepts `--goal-limit N` (default 10). Goals remain global and newest-first; the top-level `goal_summary` reports `limit`, `count`, `total_count`, and `truncated`. `--goal-limit 0` returns no goals while still reporting how many active goals exist. Increase the limit when you need a complete goal assessment:
+Like review context, `context ENTRY_ID` accepts `--goal-limit N` (default 10).
+Before applying the limit, goals for the entry's non-self participants come first,
+then general goals, then other goals. Each group is newest-first by creation time,
+then ID. Entries without non-self participants retain global newest-first ordering.
+Goals remain globally eligible; the top-level `goal_summary` reports `limit`,
+`count`, `total_count`, and `truncated`. `--goal-limit 0` returns no goals while
+still reporting how many active goals exist. Increase the limit when you need a
+complete goal assessment:
 
 ```sh
 commscoach context 42 --goal-limit 20
@@ -399,6 +421,8 @@ commscoach goal list --oldest-first --limit 5
 commscoach goal show 1
 commscoach goal edit 1 --person jdoe
 commscoach goal edit 1 --detail                 # edit existing detail in $EDITOR
+commscoach goal edit 1 --outcome                # correct outcome, preserving status
+commscoach goal edit 1 --clear-outcome
 commscoach goal close 1 --outcome               # compose or revise the outcome in $EDITOR
 commscoach goal close 1 --outcome "Led with the decision needed in three meetings."
 commscoach goal close 2 --dropped --outcome "Role changed; this scenario no longer applies."
@@ -407,6 +431,13 @@ commscoach goal close 2 --dropped --outcome "Role changed; this scenario no long
 `goal close` marks a goal done; add `--dropped` when it is no longer relevant. Goal details and outcomes also accept `-` for stdin or `@PATH`.
 
 For `goal add --detail`, `goal edit --detail`, and `goal close --outcome`, passing the flag without a value opens `$VISUAL`/`$EDITOR`, pre-filled with the existing text (or blank for a new goal or unset field). These commands use the same draft recovery as entry editing and reject empty editor drafts. Goal creation validates the database, title, person, and review references before opening the editor. Use `goal edit --clear-detail` to remove detail. Non-interactive callers must supply text, `-`, or `@PATH`; omitting the flag entirely keeps the existing behavior.
+
+`goal edit --outcome` supports the same text, stdin, file, and editor forms. It
+changes the outcome without changing status or closure time; `--clear-outcome`
+removes it and cannot be combined with `--outcome`. This also works for active
+goals. An explicit `--status` on the same edit still performs the requested status
+transition. Goal edits validate the goal ID, supplied title, and person reference
+before opening either editor.
 
 Human-readable goal listings show active goals' age in whole elapsed days since creation, making lingering experiments easier to spot. Age does not reset when a goal is reopened. `--oldest-first` orders by creation time and ID before applying `--limit`; with `--status all`, active goals still come before closed goals. The default remains newest-first, and goal JSON fields are unchanged.
 

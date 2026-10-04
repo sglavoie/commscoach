@@ -18,6 +18,57 @@ from commscoach.cli import goals as cli_goals
 
 
 class GoalCliTests(unittest.TestCase):
+    def test_edit_outcome_preserves_status_and_closure(self) -> None:
+        for status in ("active", "done", "dropped"):
+            with self.subTest(status=status):
+                goal = self._seed_goal()
+                with closing(db.connect(self.db_path)) as conn:
+                    before = db.update_goal(conn, goal.id, status=status)
+                for flags, expected in (
+                    (("--outcome", "Corrected result"), "Corrected result"),
+                    (("--clear-outcome",), None),
+                ):
+                    rc, out, err = self._run("goal", "edit", str(goal.id), *flags, "--json")
+                    self.assertEqual(rc, 0, err)
+                    payload = json.loads(out)
+                    self.assertEqual(payload["outcome"], expected)
+                    self.assertEqual(payload["status"], before.status)
+                    self.assertEqual(payload["closed_at"], before.closed_at)
+
+    def test_edit_outcome_editor_and_input_sources(self) -> None:
+        goal = self._seed_goal()
+        with closing(db.connect(self.db_path)) as conn:
+            db.close_goal(conn, goal.id, outcome="Original", dropped=True)
+        with mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
+            cli_goals, "compose_in_editor", return_value="Revised",
+        ) as compose:
+            rc, out, err = self._run("goal", "edit", str(goal.id), "--outcome", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(compose.call_args.kwargs["template"], "Original")
+        self.assertEqual(json.loads(out)["outcome"], "Revised")
+        self.assertEqual(json.loads(out)["status"], "dropped")
+        source = self.tmpdir / "outcome.txt"
+        source.write_text("From file", encoding="utf-8")
+        rc, out, err = self._run("goal", "edit", str(goal.id), "--outcome", f"@{source}", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["outcome"], "From file")
+        rc, out, err = self._run("goal", "edit", str(goal.id), "--outcome", "-", "--json", stdin=io.StringIO("From stdin"))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["outcome"], "From stdin")
+
+    def test_edit_validates_before_opening_any_editor(self) -> None:
+        goal = self._seed_goal()
+        for field in ("--detail", "--outcome"):
+            for flags in (("--title", " "), ("--person", "missing"), ("--outcome", "--clear-outcome")):
+                with self.subTest(field=field, flags=flags), mock.patch.object(
+                    cli_goals, "compose_in_editor",
+                ) as compose:
+                    rc, _, _ = self._run("goal", "edit", str(goal.id), field, *flags)
+                    self.assertEqual(rc, 1)
+                    compose.assert_not_called()
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.get_goal(conn, goal.id), goal)
+
     def test_search_and_limited_list_footers_respect_filters(self):
         self._seed_person("alice")
         with closing(db.connect(self.db_path)) as conn:

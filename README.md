@@ -12,9 +12,11 @@ Ready to use. The CLI, SQLite schema, stored feedback and reviews, scoped review
 | --- | --- |
 | Get a short conversation brief | `commscoach person prep jdoe --brief` |
 | Find a person by name | `commscoach person list --query "John"` |
+| See recorded relationship activity | `commscoach person list --with-activity` |
 | Read actionable goal details | `commscoach goal list --with-detail` |
 | Compose a new goal's details in your editor | `commscoach goal add "Lead with the ask" --detail` |
 | Revisit what worked | `commscoach goal list --status done --with-outcome` |
+| Correct a goal's outcome without changing its status | `commscoach goal edit 1 --outcome` |
 | Find past experiments and outcomes | `commscoach goal search --query "lead with the ask"` |
 | Read a review with its evidence | `commscoach review show 1 --with-entries --with-goals` |
 | Prepare for a conversation | `commscoach person prep jdoe` |

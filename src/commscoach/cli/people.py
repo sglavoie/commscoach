@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import shlex
 import sys
+from dataclasses import asdict
 from typing import Any, Iterable
 
 from .. import db
 from .common import (
     confirm,
     first_prose_line,
+    format_stamp,
     non_negative_int,
     open_db,
     print_json,
@@ -149,6 +151,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "list", help="List people (self first, then handle-alphabetical)."
     )
     lst.add_argument("--query", metavar="TEXT", help="Match a literal name or handle substring.")
+    lst.add_argument(
+        "--with-activity", action="store_true",
+        help="Include last logged interaction, interaction count, and active goal count.",
+    )
     lst.set_defaults(func=cmd_person_list)
 
     rm = person_sub.add_parser(
@@ -395,7 +401,28 @@ def cmd_person_edit(args: argparse.Namespace) -> int:
 def cmd_person_list(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         people = db.list_people(conn, query=args.query)
-    _emit_people(args, people)
+        activity = db.get_people_activity(conn) if args.with_activity else {}
+    if not args.with_activity:
+        _emit_people(args, people)
+    elif args.json:
+        print_json([
+            {**person_to_dict(person), "activity": asdict(activity[person.id])}
+            for person in people
+        ])
+    else:
+        if not people:
+            print("(no people)")
+        for person in people:
+            summary = activity[person.id]
+            stamp = (
+                format_stamp(summary.last_logged_interaction)
+                if summary.last_logged_interaction else "(none)"
+            )
+            print(
+                f"{_format_person_human(person)} · last logged interaction: {stamp}"
+                f" · interactions: {summary.interaction_count}"
+                f" · active goals: {summary.active_goal_count}"
+            )
     return 0
 
 

@@ -115,7 +115,9 @@ def get_review_context(
       unfiltered listing instead: a date window is a one-off slice with no
       natural predecessor, so filtering it to "prior reviews of the same range"
       would return nothing useful.
-    * **Goals are never scope-filtered**, only capped by ``goal_limit``. The
+    * **Goals are never scope-filtered**, only capped by ``goal_limit``. Person
+      scopes prioritize that person's goals, then general goals, then others.
+      Within each group goals remain newest-first. The
       skill judges per-goal relevance itself, and restricting them to one
       person's or one tag's goals would hide the general goals a relationship
       or theme review should still be measured against.
@@ -194,7 +196,10 @@ def get_review_context(
         scope_until=until,
         entries=entry_contexts,
         prior_reviews=tuple(reversed(latest_reviews)),
-        goals=list_goals(conn, limit=goal_limit),
+        goals=list_goals(
+            conn, limit=goal_limit,
+            prioritize_person_ids=(scope_person.id,) if scope_person else (),
+        ),
         total_entry_count=count_scoped_entries(
             conn, tag=scope_tag, person_handle=person_handle, since=since, until=until,
         ),
@@ -276,7 +281,10 @@ def get_entry_context(
         self_notes=self_note.body if self_note is not None else None,
         people=tuple(people),
         prior_feedback=prior_feedback,
-        goals=list_goals(conn, limit=goal_limit),
+        goals=list_goals(
+            conn, limit=goal_limit,
+            prioritize_person_ids=tuple(p.id for p in non_self_people),
+        ),
         prior_reviews=tuple(reversed(latest_reviews)),
         total_goal_count=conn.execute(
             "SELECT COUNT(*) FROM goals WHERE status = 'active'"
