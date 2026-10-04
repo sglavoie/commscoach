@@ -49,6 +49,64 @@ class FeedbackTestBase(unittest.TestCase):
             return db.create_feedback(conn, entry_id, body)
 
 
+class FeedbackNavigationTests(FeedbackTestBase):
+    def test_show_with_entry_uses_current_full_entry_and_selected_feedback(self):
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_person(conn, "alice")
+            entry = db.create_entry(
+                conn, "Original conversation", people=["alice"], tags=["meeting"],
+                source="email", occurred_at="2026-01-02T15:00:00+00:00",
+            )
+            note = db.create_feedback(conn, entry.id, "Selected advice")
+            db.create_feedback(conn, entry.id, "Other advice")
+            db.update_entry(conn, entry.id, body="Corrected conversation\nFull second line")
+        rc, out, err = self._run("feedback", "show", str(note.id), "--with-entry")
+        self.assertEqual(rc, 0, err)
+        for text in ("Corrected conversation\nFull second line", "alice", "meeting",
+                     "email", "2026-01-02", "Selected advice"):
+            self.assertIn(text, out)
+        self.assertLess(out.index("Corrected conversation"), out.index("Selected advice"))
+        self.assertNotIn("Other advice", out)
+        plain = self._run("feedback", "show", str(note.id))[1]
+        self.assertNotIn("Corrected conversation", plain)
+        base = json.loads(self._run("feedback", "show", str(note.id), "--json")[1])
+        rc, expanded, err = self._run("feedback", "show", str(note.id), "--with-entry", "--json")
+        self.assertEqual(rc, 0, err)
+        payload = json.loads(expanded)
+        expected_entry = json.loads(self._run("entry", "show", str(entry.id), "--json")[1])
+        self.assertEqual(payload.pop("entry"), expected_entry)
+        self.assertEqual(payload, base)
+        for flags in ((), ("--json",)):
+            rc, out, err = self._run("feedback", "show", "9999", "--with-entry", *flags)
+            self.assertEqual(rc, 1)
+            self.assertEqual(out, "")
+            self.assertIn("9999", err)
+
+    def test_search_footer_counts_filtered_notes_without_duplicate_people(self):
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_person(conn, "alice")
+            db.create_person(conn, "bob")
+            entry = db.create_entry(conn, "Conversation", people=["alice", "bob"])
+            for _ in range(3):
+                db.create_feedback(conn, entry.id, "Try 10%_! less")
+            db.create_feedback(conn, entry.id, "Try 100xyz! less")
+            other = db.create_entry(conn, "Other conversation", people=["bob"])
+            db.create_feedback(conn, other.id, "Try 10%_! less")
+        flags = ("feedback", "search", "--query", "10%_!", "--person", "ALICE")
+        for limit in (0, 1, 3, 4):
+            with self.subTest(limit=limit):
+                rc, out, err = self._run(*flags, "--limit", str(limit))
+                self.assertEqual(rc, 0, err)
+                if limit < 3:
+                    self.assertIn(f"Showing {limit} of 3 matching feedback notes.", out)
+                else:
+                    self.assertNotIn("Showing", out)
+                rc, out, err = self._run(*flags, "--limit", str(limit), "--json")
+                self.assertEqual(rc, 0, err)
+                self.assertEqual(len(json.loads(out)), min(limit, 3))
+        self.assertEqual(self._run("feedback", "search", "--query", "missing")[1], "(no feedback)\n")
+
+
 class FeedbackAddTests(FeedbackTestBase):
     def test_add_creates_feedback(self) -> None:
         entry = self._seed_entry()

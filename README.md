@@ -22,6 +22,7 @@ Ready to use. The CLI, SQLite schema, stored feedback and reviews, scoped review
 | Find the oldest entries awaiting coaching | `commscoach entry search --no-feedback --oldest-first --limit 5` |
 | Revisit an interaction and its advice | `commscoach entry show 42 --with-feedback` |
 | Find past advice | `commscoach feedback search --query "lead with the ask"` |
+| Read advice alongside its conversation | `commscoach feedback show 1 --with-entry` |
 | Find a broader review | `commscoach review search --query "lead with the ask"` |
 | Review lingering goals | `commscoach goal list --oldest-first --limit 5` |
 

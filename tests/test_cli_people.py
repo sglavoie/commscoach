@@ -119,7 +119,7 @@ class PersonAddTests(PeopleTestBase):
             self.assertIn(text, full)
         recovered = []
         for line in out.splitlines():
-            if line.strip().startswith(("Full notes:", "Full goal:", "All goals:")):
+            if line.strip().startswith(("Full notes:", "Full interaction:", "Full goal:", "All goals:")):
                 argv = shlex.split(line.split(": ", 1)[1])
                 self.assertEqual(argv[:3], ["commscoach", "--db", str(self.db_path)])
                 rc, detail, err = self._run(*argv[3:])
@@ -128,6 +128,31 @@ class PersonAddTests(PeopleTestBase):
         self.assertIn("NOTES_END", "\n".join(recovered))
         self.assertIn("DETAIL_END", "\n".join(recovered))
         self.assertIn("Experiment 0", "\n".join(recovered))
+
+    def test_brief_prep_opens_coached_and_uncoached_interactions(self) -> None:
+        self.db_path = self.tmpdir / "journal's notes.sqlite3"
+        db.init_db(self.db_path)
+        self._seed_person("alice")
+        with closing(db.connect(self.db_path)) as conn:
+            uncoached = db.create_entry(conn, "Uncoached full text", people=["alice"])
+            coached = db.create_entry(conn, "Coached full text", people=["alice"])
+            db.create_feedback(conn, coached.id, "Advice")
+        rc, out, err = self._run("person", "prep", "alice", "--brief")
+        self.assertEqual(rc, 0, err)
+        commands = [shlex.split(line.split(": ", 1)[1]) for line in out.splitlines()
+                    if line.strip().startswith("Full interaction:")]
+        self.assertEqual(len(commands), 2)
+        self.assertEqual({argv[-2] for argv in commands}, {str(uncoached.id), str(coached.id)})
+        for argv in commands:
+            self.assertEqual(argv[:3], ["commscoach", "--db", str(self.db_path)])
+            self.assertEqual(argv[-1], "--with-feedback")
+            rc, detail, err = self._run(*argv[3:])
+            self.assertEqual(rc, 0, err)
+            self.assertIn("full text", detail)
+        self.assertEqual(
+            self._run("person", "prep", "alice", "--brief", "--json"),
+            self._run("person", "prep", "alice", "--json"),
+        )
 
     def test_brief_prep_empty_sections_and_zero_limits(self) -> None:
         self._seed_person("alice")

@@ -221,6 +221,33 @@ def list_reviews(
     """
     if limit is not None and limit < 0:
         raise DBError("limit must be non-negative")
+    filters, params = _review_filters(
+        scope_kind=scope_kind, person_handle=person_handle, tag=tag, query=query,
+    )
+    sql = "SELECT * FROM reviews" + filters + " ORDER BY created_at DESC, id DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    rows = conn.execute(sql, params).fetchall()
+    return tuple(hydrate_review(conn, row) for row in rows)
+
+
+def count_reviews(
+    conn: sqlite3.Connection, *, scope_kind: str | None = None,
+    person_handle: str | None = None, tag: str | None = None,
+    query: str | None = None,
+) -> int:
+    """Count stored reviews using the same filters as list_reviews."""
+    filters, params = _review_filters(
+        scope_kind=scope_kind, person_handle=person_handle, tag=tag, query=query,
+    )
+    return conn.execute("SELECT COUNT(*) FROM reviews" + filters, params).fetchone()[0]
+
+
+def _review_filters(
+    *, scope_kind: str | None, person_handle: str | None,
+    tag: str | None, query: str | None,
+) -> tuple[str, list[Any]]:
     where: list[str] = []
     params: list[Any] = []
     if query is not None:
@@ -242,15 +269,7 @@ def list_reviews(
     if tag is not None:
         where.append("scope_tag = ?")
         params.append(tags_mod.normalize_tag(tag))
-    sql = "SELECT * FROM reviews"
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY created_at DESC, id DESC"
-    if limit is not None:
-        sql += " LIMIT ?"
-        params.append(limit)
-    rows = conn.execute(sql, params).fetchall()
-    return tuple(hydrate_review(conn, row) for row in rows)
+    return (" WHERE " + " AND ".join(where) if where else ""), params
 
 
 def update_review(

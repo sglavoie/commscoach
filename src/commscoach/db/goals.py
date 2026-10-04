@@ -203,10 +203,45 @@ def list_goals(
     Query matches literal substrings in titles, details, and outcomes.
     An unknown person handle is an error, even when the limit is zero.
     """
-    if status is not None:
-        status = _validate_status(status)
     if limit is not None and limit < 0:
         raise DBError("limit must be non-negative")
+    filters, params = _goal_filters(
+        conn, status=status, person_handle=person_handle,
+        include_general=include_general, review_id=review_id, query=query,
+    )
+    sql = "SELECT * FROM goals" + filters
+    direction = "ASC" if oldest_first else "DESC"
+    sql += " ORDER BY "
+    if status is None:
+        sql += "CASE status WHEN 'active' THEN 0 ELSE 1 END, "
+    sql += f"created_at {direction}, id {direction}"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    rows = conn.execute(sql, params).fetchall()
+    return tuple(hydrate_goal(conn, row) for row in rows)
+
+
+def count_goals(
+    conn: sqlite3.Connection, *, status: str | None = "active",
+    person_handle: str | None = None, include_general: bool = False,
+    review_id: int | None = None, query: str | None = None,
+) -> int:
+    """Count goals using the same filters as list_goals, without a limit."""
+    filters, params = _goal_filters(
+        conn, status=status, person_handle=person_handle,
+        include_general=include_general, review_id=review_id, query=query,
+    )
+    return conn.execute("SELECT COUNT(*) FROM goals" + filters, params).fetchone()[0]
+
+
+def _goal_filters(
+    conn: sqlite3.Connection, *, status: str | None,
+    person_handle: str | None, include_general: bool,
+    review_id: int | None, query: str | None,
+) -> tuple[str, list[Any]]:
+    if status is not None:
+        status = _validate_status(status)
     if include_general and person_handle is None:
         raise DBError("include_general requires person_handle")
     where: list[str] = []
@@ -234,19 +269,7 @@ def list_goals(
     if review_id is not None:
         where.append("review_id = ?")
         params.append(review_id)
-    sql = "SELECT * FROM goals"
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    direction = "ASC" if oldest_first else "DESC"
-    sql += " ORDER BY "
-    if status is None:
-        sql += "CASE status WHEN 'active' THEN 0 ELSE 1 END, "
-    sql += f"created_at {direction}, id {direction}"
-    if limit is not None:
-        sql += " LIMIT ?"
-        params.append(limit)
-    rows = conn.execute(sql, params).fetchall()
-    return tuple(hydrate_goal(conn, row) for row in rows)
+    return (" WHERE " + " AND ".join(where) if where else ""), params
 
 
 def delete_goal(conn: sqlite3.Connection, goal_id: int) -> bool:

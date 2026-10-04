@@ -18,6 +18,33 @@ from commscoach.cli import goals as cli_goals
 
 
 class GoalCliTests(unittest.TestCase):
+    def test_search_and_limited_list_footers_respect_filters(self):
+        self._seed_person("alice")
+        with closing(db.connect(self.db_path)) as conn:
+            for _ in range(3):
+                goal = db.create_goal(conn, "Try 10%_! less", detail="10%_! detail", person_handle="alice")
+                db.close_goal(conn, goal.id, outcome="10%_! outcome")
+            db.create_goal(conn, "Try 10%_! less", person_handle="alice")
+            goal = db.create_goal(conn, "Try 10%_! less")
+            db.close_goal(conn, goal.id)
+            goal = db.create_goal(conn, "Try 100xyz! less", person_handle="alice")
+            db.close_goal(conn, goal.id)
+        for command, total in ((('search', '--query', '10%_!'), 3), (('list',), 4)):
+            flags = ("goal", *command, "--status", "done", "--person", "ALICE")
+            for limit in (0, 1, total, total + 1):
+                with self.subTest(command=command, limit=limit):
+                    rc, out, err = self._run(*flags, "--limit", str(limit), "--oldest-first")
+                    self.assertEqual(rc, 0, err)
+                    if limit < total:
+                        self.assertIn(f"Showing {limit} of {total} matching goals.", out)
+                    else:
+                        self.assertNotIn("Showing", out)
+                    rc, out, err = self._run(*flags, "--limit", str(limit), "--json")
+                    self.assertEqual(rc, 0, err)
+                    self.assertEqual(len(json.loads(out)), min(limit, total))
+        self.assertNotIn("Showing", self._run("goal", "list", "--status", "all")[1])
+        self.assertEqual(self._run("goal", "search", "--query", "missing")[1], "(no goals)\n")
+
     def test_outcome_list_and_search_show_full_text_without_duplicate_excerpt(self) -> None:
         with closing(db.connect(self.db_path)) as conn:
             goal = db.create_goal(conn, "Practice", detail="Try this")

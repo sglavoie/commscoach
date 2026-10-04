@@ -18,7 +18,7 @@ from .common import (
     search_excerpt,
 )
 from .editor import compose_in_editor
-from .serializers import feedback_to_dict
+from .serializers import entry_to_dict, feedback_to_dict
 
 
 FEEDBACK_PREAMBLE = (
@@ -68,11 +68,18 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Literal case-insensitive substring to find in feedback bodies.",
     )
     search.add_argument("--person", default=None, metavar="HANDLE")
-    search.add_argument("--limit", type=non_negative_int, default=20, metavar="N")
+    search.add_argument(
+        "--limit", type=non_negative_int, default=20, metavar="N",
+        help="Maximum results (default: 20); text output reports omitted matches.",
+    )
     search.set_defaults(func=cmd_feedback_search)
 
     show = feedback_sub.add_parser("show", help="Show one feedback note by id.")
     show.add_argument("feedback_id", type=int, metavar="FEEDBACK_ID")
+    show.add_argument(
+        "--with-entry", action="store_true",
+        help="Include the linked entry's full current text and metadata.",
+    )
     show.set_defaults(func=cmd_feedback_show)
 
     edit = feedback_sub.add_parser("edit", help="Rewrite a feedback note body.")
@@ -181,8 +188,21 @@ def cmd_feedback_list(args: argparse.Namespace) -> int:
 def cmd_feedback_show(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         feedback = db.get_feedback(conn, args.feedback_id)
-    if feedback is None:
-        raise db.FeedbackNotFoundError(args.feedback_id)
+        if feedback is None:
+            raise db.FeedbackNotFoundError(args.feedback_id)
+        entry = db.get_entry(conn, feedback.entry_id) if args.with_entry else None
+        if args.with_entry and entry is None:
+            raise db.EntryNotFoundError(feedback.entry_id)
+    if entry is not None:
+        if args.json:
+            print_json({**feedback_to_dict(feedback), "entry": entry_to_dict(entry)})
+            return 0
+        # Entry commands also use feedback renderers, so import at call time.
+        from .entries import _format_entry_human
+
+        print("Linked entry (current text):")
+        print(_format_entry_human(entry))
+        print("\nFeedback:")
     _emit_feedback(args, feedback)
     return 0
 
@@ -192,7 +212,13 @@ def cmd_feedback_search(args: argparse.Namespace) -> int:
         items = db.search_feedback(
             conn, query=args.query, person_handle=args.person, limit=args.limit,
         )
+        total = (
+            db.count_search_feedback(conn, query=args.query, person_handle=args.person)
+            if not args.json else len(items)
+        )
     _emit_feedback_list(args, items, query=args.query)
+    if not args.json and total > len(items):
+        print(f"Showing {len(items)} of {total} matching feedback notes.")
     return 0
 
 

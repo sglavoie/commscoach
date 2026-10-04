@@ -323,9 +323,8 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                     ) or "(no feedback)")
                     if len(feedback[entry.id]) > 1:
                         print(f"  Showing latest of {len(feedback[entry.id])} feedback notes.")
-                    if feedback[entry.id]:
-                        full = shlex.join([*command, "entry", "show", str(entry.id), "--with-feedback"])
-                        print(f"  Full notes: {full}")
+                    full = shlex.join([*command, "entry", "show", str(entry.id), "--with-feedback"])
+                    print(f"  Full interaction: {full}")
                 else:
                     print(
                         "\n\n".join(_format_feedback_human(note) for note in feedback[entry.id])

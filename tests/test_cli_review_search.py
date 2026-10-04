@@ -9,6 +9,36 @@ from .cli_review_case import ReviewTestBase
 
 
 class ReviewSearchTests(ReviewTestBase):
+    def test_footer_respects_scope_literal_query_and_deleted_person(self):
+        person = self._seed_person("alice")
+        entries = [self._seed_entry(people=("alice",)).id for _ in range(2)]
+        for _ in range(3):
+            self._seed_review("Try 10%_! less", entries, scope_kind="person", scope_person_handle="alice")
+        self._seed_review("Try 100xyz! less", entries, scope_kind="person", scope_person_handle="alice")
+        self._seed_review("Try 10%_! less", entries, scope_kind="tag", scope_tag="Meeting")
+        self._seed_review("Try 10%_! less", entries)
+        with closing(db.connect(self.db_path)) as conn:
+            db.delete_person(conn, person.id)
+        flags = ("review", "search", "--query", "10%_!", "--scope", "person", "--person", "ALICE")
+        for limit in (0, 1, 3, 4):
+            with self.subTest(limit=limit):
+                rc, out, err = self._run(*flags, "--limit", str(limit))
+                self.assertEqual(rc, 0, err)
+                if limit < 3:
+                    self.assertIn(f"Showing {limit} of 3 matching reviews.", out)
+                else:
+                    self.assertNotIn("Showing", out)
+                rc, out, err = self._run(*flags, "--limit", str(limit), "--json")
+                self.assertEqual(rc, 0, err)
+                self.assertEqual(len(json.loads(out)), min(limit, 3))
+        rc, out, err = self._run(
+            "review", "search", "--query", "10%_!", "--scope", "tag",
+            "--tag", "MEETING", "--limit", "0",
+        )
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Showing 0 of 1 matching reviews.", out)
+        self.assertEqual(self._run(*flags, "--tag", "meeting")[1], "(no reviews)\n")
+
     def test_search_shows_matching_excerpt_and_full_json(self):
         entry = self._seed_entry()
         body = "Introduction. " * 60 + "Lead with the ASK next time."

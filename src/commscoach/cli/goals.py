@@ -58,7 +58,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default="active",
     )
     lst.add_argument("--person", default=None, metavar="HANDLE")
-    lst.add_argument("--limit", type=non_negative_int, default=None, metavar="N")
+    lst.add_argument(
+        "--limit", type=non_negative_int, default=None, metavar="N",
+        help="Maximum results; text output reports omitted matches.",
+    )
     lst.add_argument(
         "--oldest-first", action="store_true",
         help="Show oldest goals first before applying --limit (active first with --status all).",
@@ -75,7 +78,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Goal status (default: all, active goals first).",
     )
     search.add_argument("--person", default=None, metavar="HANDLE")
-    search.add_argument("--limit", type=non_negative_int, default=20, metavar="N")
+    search.add_argument(
+        "--limit", type=non_negative_int, default=20, metavar="N",
+        help="Maximum results (default: 20); text output reports omitted matches.",
+    )
     search.add_argument("--oldest-first", action="store_true")
     search.add_argument("--with-detail", action="store_true")
     search.set_defaults(func=cmd_goal_list)
@@ -237,10 +243,19 @@ def cmd_goal_list(args: argparse.Namespace) -> int:
             oldest_first=args.oldest_first,
             query=getattr(args, "query", None),
         )
+        total = (
+            db.count_goals(
+                conn, status=status, person_handle=args.person,
+                query=getattr(args, "query", None),
+            )
+            if not args.json and args.limit is not None else len(goals)
+        )
     _emit_goals(
         args, goals, with_detail=args.with_detail, with_outcome=args.with_outcome,
         query=getattr(args, "query", None),
     )
+    if not args.json and total > len(goals):
+        print(f"Showing {len(goals)} of {total} matching goals.")
     return 0
 
 

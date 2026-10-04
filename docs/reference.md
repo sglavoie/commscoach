@@ -78,9 +78,22 @@ including full-text or literal matching and `--no-feedback`. `--limit 0` still
 reports omitted matches. Complete results have no footer; JSON remains an array
 of entries without extra metadata.
 
+The same omitted-match footer appears for `feedback search`, `review search`,
+`goal search`, and `goal list --limit N`, using each command's active filters.
+For example, `Showing 5 of 23 matching feedback notes.` means you can increase
+`--limit` to see more advice. Counts refer to matching records, so multiple linked
+people or entries do not inflate them. JSON output remains unchanged.
+
 When `entry search --query` finds a match, human output shows the matching passage instead of just the entry's opening paragraph. Literal searches use an excerpt around the first match; token searches use SQLite's matching snippet, including for phrases, prefixes, and accent-insensitive matches. Ellipses mark omitted text. Searches without a query retain the opening preview, and JSON still returns the full entry with its existing fields.
 
 `entry show --with-feedback` includes full feedback notes oldest-first, or an explicit empty marker when there are none. With `--json`, it adds a `feedback` array to the entry object; without this flag the JSON shape is unchanged.
+
+When starting from a feedback search result, use `feedback show ID --with-entry`
+to read the conversation behind that advice. It shows the linked entry's full
+current text, date, source, tags, and people before the selected feedback note.
+The entry is its current stored version, not a snapshot from when feedback was
+written. JSON adds an `entry` object only when this flag is supplied; plain
+`feedback show ID` is unchanged.
 
 `entry rm ID` includes the counts of feedback notes to delete and review links to remove in its confirmation. The reviews themselves remain. `--yes` continues to bypass confirmation.
 
@@ -298,6 +311,8 @@ records; an all-goals command appears when goals are omitted. These commands
 preserve an explicit `--db` path and the all-goals command preserves
 `--include-general-goals`. This is a text preview, not an AI summary. Existing
 interaction/review count options still apply. Full prep and JSON remain complete.
+Every interaction has a copyable `entry show ID --with-feedback` command,
+including interactions that have no feedback yet.
 
 Find a person's handle with `person list --query "John"`. This filters names and
 handles using literal, case-insensitive substring matching, retaining self-first,

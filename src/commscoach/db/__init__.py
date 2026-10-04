@@ -63,6 +63,7 @@ from .errors import (
     TagNotFoundError,
 )
 from .feedback import (
+    count_search_feedback,
     create_feedback,
     delete_feedback,
     get_feedback,
@@ -72,6 +73,7 @@ from .feedback import (
     update_feedback,
 )
 from .goals import (
+    count_goals,
     close_goal,
     create_goal,
     delete_goal,
@@ -96,6 +98,7 @@ from .people import (
     update_person,
 )
 from .reviews import (
+    count_reviews,
     SCOPE_KINDS,
     create_review,
     delete_review,
@@ -153,6 +156,9 @@ __all__ = [
     "backup_database",
     "connect",
     "count_search_entries",
+    "count_search_feedback",
+    "count_goals",
+    "count_reviews",
     "close_goal",
     "clear_person_note",
     "create_entry",

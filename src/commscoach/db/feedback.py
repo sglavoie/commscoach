@@ -78,12 +78,30 @@ def search_feedback(
     person_handle: str | None = None, limit: int = 20,
 ) -> tuple[Feedback, ...]:
     """Find literal body substrings, newest-first, optionally by linked person."""
-    if not query or not query.strip():
-        raise DBError("query must be a non-empty string")
     if limit < 0:
         raise DBError("limit must be non-negative")
+    sql, params = _feedback_search_filter(conn, query, person_handle)
+    return tuple(row_to_feedback(row) for row in conn.execute(
+        "SELECT f.*" + sql + " ORDER BY f.created_at DESC, f.id DESC LIMIT ?",
+        [*params, limit],
+    ))
+
+
+def count_search_feedback(
+    conn: sqlite3.Connection, *, query: str, person_handle: str | None = None,
+) -> int:
+    """Count matching feedback notes before limiting search results."""
+    sql, params = _feedback_search_filter(conn, query, person_handle)
+    return conn.execute("SELECT COUNT(*)" + sql, params).fetchone()[0]
+
+
+def _feedback_search_filter(
+    conn: sqlite3.Connection, query: str, person_handle: str | None,
+) -> tuple[str, list[object]]:
+    if not query or not query.strip():
+        raise DBError("query must be a non-empty string")
     literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
-    sql = "SELECT f.* FROM feedback f WHERE f.body LIKE ? ESCAPE '!' COLLATE NOCASE"
+    sql = " FROM feedback f WHERE f.body LIKE ? ESCAPE '!' COLLATE NOCASE"
     params: list[object] = [f"%{literal}%"]
     if person_handle is not None:
         person = get_person_by_handle(conn, person_handle)
@@ -94,8 +112,7 @@ def search_feedback(
             " WHERE ep.entry_id = f.entry_id AND ep.person_id = ?)"
         )
         params.append(person.id)
-    sql += " ORDER BY f.created_at DESC, f.id DESC LIMIT ?"
-    return tuple(row_to_feedback(row) for row in conn.execute(sql, [*params, limit]))
+    return sql, params
 
 
 def update_feedback(
