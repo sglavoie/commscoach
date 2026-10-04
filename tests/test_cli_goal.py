@@ -147,6 +147,54 @@ class GoalCliTests(unittest.TestCase):
                         if before.closed_at is not None:
                             self.assertEqual(payload["closed_at"], before.closed_at)
 
+    def test_add_detail_editor_saves_goal_with_references(self) -> None:
+        person = self._seed_person()
+        review = self._seed_review()
+        with mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
+            cli_goals, "compose_in_editor", return_value="Practice in three meetings",
+        ) as compose:
+            rc, out, err = self._run(
+                "goal", "add", "Lead with the ask", "--detail", "--person", "ALEX",
+                "--review", str(review.id), "--json",
+            )
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(compose.call_args.kwargs["template"], "")
+        goal = json.loads(out)
+        self.assertEqual(goal["detail"], "Practice in three meetings")
+        self.assertEqual(goal["person"]["id"], person.id)
+        self.assertEqual(goal["review_id"], review.id)
+
+    def test_add_validates_before_opening_editor(self) -> None:
+        cases = (
+            (("Practice", "--person", "unknown"), "unknown"),
+            (("Practice", "--review", "9999"), "9999"),
+            (("   ",), "title"),
+            (("Practice", "--db", str(self.tmpdir / "missing.sqlite3")), "init"),
+        )
+        for flags, message in cases:
+            with self.subTest(flags=flags), mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
+                cli_goals, "compose_in_editor",
+            ) as compose:
+                rc, out, err = self._run("goal", "add", *flags, "--detail")
+                self.assertEqual(rc, 1)
+                self.assertEqual(out, "")
+                self.assertIn(message, err)
+                compose.assert_not_called()
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.list_goals(conn), ())
+
+    def test_add_detail_editor_requires_tty_but_omitted_detail_stays_optional(self) -> None:
+        with mock.patch("sys.stdin.isatty", return_value=False), mock.patch.object(
+            cli_goals, "compose_in_editor",
+        ) as compose:
+            rc, _, err = self._run("goal", "add", "Practice", "--detail")
+            self.assertEqual(rc, 1)
+            self.assertIn("detail required", err)
+            rc, out, err = self._run("goal", "add", "Practice", "--json")
+            self.assertEqual(rc, 0, err)
+            self.assertIsNone(json.loads(out)["detail"])
+            compose.assert_not_called()
+
     def test_goal_editor_requires_tty_and_existing_goal(self) -> None:
         goal = self._seed_goal()
         for command, field in (("edit", "detail"), ("close", "outcome")):

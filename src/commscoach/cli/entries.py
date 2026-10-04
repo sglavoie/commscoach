@@ -456,6 +456,15 @@ def cmd_entry_search(args: argparse.Namespace) -> int:
             mode="like" if args.exact else "auto",
             oldest_first=args.oldest_first,
         )
+        total = (
+            db.count_search_entries(
+                conn, query=args.query, source=args.source, tag=args.tag,
+                person_handle=args.person, since=since, until=until,
+                without_feedback=args.no_feedback,
+                mode="like" if args.exact else "auto",
+            )
+            if not args.json and args.limit is not None else len(entries)
+        )
         if args.query and not args.json:
             snippets = (
                 db.search_entry_snippets(conn, args.query, (e.id for e in entries))
@@ -473,6 +482,8 @@ def cmd_entry_search(args: argparse.Namespace) -> int:
             if not args.json else set()
         )
     _emit_entries(args, entries, coached, excerpts=excerpts)
+    if not args.json and total > len(entries):
+        print(f"Showing {len(entries)} of {total} matching entries.")
     return 0
 
 

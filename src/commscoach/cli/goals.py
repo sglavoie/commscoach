@@ -42,8 +42,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add.add_argument("title", help="Short goal title.")
     add.add_argument(
         "--detail",
+        nargs="?",
+        const=_EDIT_TEXT,
         default=None,
-        help="Goal detail (literal text, '-' for stdin, or '@PATH' for a UTF-8 file).",
+        help="Goal detail (text, '-', or '@PATH'); omit the value to open $EDITOR.",
     )
     add.add_argument("--person", default=None, metavar="HANDLE")
     add.add_argument("--review", type=int, default=None, metavar="ID")
@@ -198,8 +200,21 @@ def _emit_goals(
 
 
 def cmd_goal_add(args: argparse.Namespace) -> int:
-    detail = read_body_or_raise(args.detail) if args.detail is not None else None
     with open_db(args) as conn:
+        if not args.title.strip():
+            raise db.DBError("goal title must be a non-empty string")
+        if args.person is not None and db.get_person_by_handle(conn, args.person) is None:
+            raise db.PersonNotFoundError(args.person)
+        if args.review is not None and db.get_review(conn, args.review) is None:
+            raise db.ReviewNotFoundError(args.review)
+        if args.detail is _EDIT_TEXT:
+            detail = read_body_arg(
+                None, what="detail", template="",
+                preamble="Write goal detail below. Lines beginning with #> are ignored.",
+                isatty=sys.stdin.isatty, compose=compose_in_editor,
+            )
+        else:
+            detail = read_body_or_raise(args.detail) if args.detail is not None else None
         goal = db.create_goal(
             conn,
             args.title,

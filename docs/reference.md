@@ -72,6 +72,12 @@ commscoach entry search --source email --person jdoe --since "30 days ago"
 
 `--oldest-first` applies to `entry search` and orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters.
 
+When `entry search --limit N` omits matches, human output ends with a count such
+as `Showing 5 of 23 matching entries.` The total respects every search filter,
+including full-text or literal matching and `--no-feedback`. `--limit 0` still
+reports omitted matches. Complete results have no footer; JSON remains an array
+of entries without extra metadata.
+
 When `entry search --query` finds a match, human output shows the matching passage instead of just the entry's opening paragraph. Literal searches use an excerpt around the first match; token searches use SQLite's matching snippet, including for phrases, prefixes, and accent-insensitive matches. Ellipses mark omitted text. Searches without a query retain the opening preview, and JSON still returns the full entry with its existing fields.
 
 `entry show --with-feedback` includes full feedback notes oldest-first, or an explicit empty marker when there are none. With `--json`, it adds a `feedback` array to the entry object; without this flag the JSON shape is unchanged.
@@ -361,6 +367,7 @@ Goals make coaching experiments durable instead of leaving them in review Markdo
 
 ```sh
 commscoach goal add "Lead with the ask" --detail "Practice in the next three 1:1s."
+commscoach goal add "Lead with the ask" --detail # compose detail in $EDITOR
 commscoach goal list
 commscoach goal list --oldest-first --limit 5
 commscoach goal show 1
@@ -373,7 +380,7 @@ commscoach goal close 2 --dropped --outcome "Role changed; this scenario no long
 
 `goal close` marks a goal done; add `--dropped` when it is no longer relevant. Goal details and outcomes also accept `-` for stdin or `@PATH`.
 
-For `goal edit --detail` and `goal close --outcome`, passing the flag without a value opens `$VISUAL`/`$EDITOR`, pre-filled with the existing text (or blank when unset). These commands use the same draft recovery as entry editing and reject empty editor drafts. Use `goal edit --clear-detail` to remove detail. Non-interactive callers must supply text, `-`, or `@PATH`; omitting the flag entirely keeps the existing behavior.
+For `goal add --detail`, `goal edit --detail`, and `goal close --outcome`, passing the flag without a value opens `$VISUAL`/`$EDITOR`, pre-filled with the existing text (or blank for a new goal or unset field). These commands use the same draft recovery as entry editing and reject empty editor drafts. Goal creation validates the database, title, person, and review references before opening the editor. Use `goal edit --clear-detail` to remove detail. Non-interactive callers must supply text, `-`, or `@PATH`; omitting the flag entirely keeps the existing behavior.
 
 Human-readable goal listings show active goals' age in whole elapsed days since creation, making lingering experiments easier to spot. Age does not reset when a goal is reopened. `--oldest-first` orders by creation time and ID before applying `--limit`; with `--status all`, active goals still come before closed goals. The default remains newest-first, and goal JSON fields are unchanged.
 
@@ -464,6 +471,12 @@ commscoach backup --keep 7
 ## Export
 
 Markdown export is human-readable and lossy. JSON export is complete and restorable. Both write to stdout by default; pass `--out PATH` to create a mode-`0600` file.
+
+File exports are written to a private temporary file beside the destination and
+replace it atomically after writing succeeds. A failed write leaves an existing
+export intact. The active database and its SQLite sidecars cannot be export
+destinations, including through symbolic or hard links. Other destination
+symlinks are replaced by the export file; their targets remain untouched.
 
 ```sh
 commscoach export                       # print Markdown to stdout

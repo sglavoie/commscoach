@@ -297,6 +297,50 @@ def search_entries(
     ``without_feedback`` selects the coaching backlog. Results are newest-first
     unless ``oldest_first`` is set; ordering is applied before the limit.
     """
+    rows = _search_entry_rows(
+        conn, query=query, source=source, tag=tag, person_handle=person_handle,
+        since=since, until=until, without_feedback=without_feedback,
+        limit=limit, mode=mode, oldest_first=oldest_first,
+    )
+    return tuple(hydrate_entry(conn, row) for row in rows)
+
+
+def count_search_entries(
+    conn: sqlite3.Connection,
+    *,
+    query: str | None = None,
+    source: str | None = None,
+    tag: str | None = None,
+    person_handle: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    without_feedback: bool = False,
+    mode: Literal["auto", "like", "fts"] = "auto",
+) -> int:
+    """Count all search matches using the same predicates and FTS fallback."""
+    rows = _search_entry_rows(
+        conn, query=query, source=source, tag=tag, person_handle=person_handle,
+        since=since, until=until, without_feedback=without_feedback, mode=mode,
+        count_only=True,
+    )
+    return rows[0][0]
+
+
+def _search_entry_rows(
+    conn: sqlite3.Connection,
+    *,
+    query: str | None,
+    source: str | None,
+    tag: str | None,
+    person_handle: str | None,
+    since: str | None,
+    until: str | None,
+    without_feedback: bool,
+    mode: Literal["auto", "like", "fts"],
+    limit: int | None = None,
+    oldest_first: bool = False,
+    count_only: bool = False,
+) -> list[sqlite3.Row]:
     if limit is not None and limit < 0:
         raise DBError("limit must be non-negative")
     if mode not in {"auto", "like", "fts"}:
@@ -330,25 +374,26 @@ def search_entries(
             "NOT EXISTS ("
             "SELECT 1 FROM feedback f WHERE f.entry_id = e.id)"
         )
-    sql = "SELECT e.* FROM entries e"
+    sql = "SELECT " + ("COUNT(*)" if count_only else "e.*") + " FROM entries e"
     if use_fts:
         sql += " JOIN entries_fts ON entries_fts.rowid = e.id"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    direction = "ASC" if oldest_first else "DESC"
-    sql += (
-        f" ORDER BY COALESCE(e.occurred_at, e.created_at) {direction},"
-        f" e.id {direction}"
-    )
-    if limit is not None:
-        sql += " LIMIT ?"
-        params.append(limit)
+    if not count_only:
+        direction = "ASC" if oldest_first else "DESC"
+        sql += (
+            f" ORDER BY COALESCE(e.occurred_at, e.created_at) {direction},"
+            f" e.id {direction}"
+        )
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
     try:
         rows = conn.execute(sql, params).fetchall()
     except sqlite3.OperationalError:
         if not use_fts or mode != "auto":
             raise
-        return search_entries(
+        return _search_entry_rows(
             conn,
             query=query,
             source=source,
@@ -360,8 +405,9 @@ def search_entries(
             limit=limit,
             mode="like",
             oldest_first=oldest_first,
+            count_only=count_only,
         )
-    return tuple(hydrate_entry(conn, row) for row in rows)
+    return rows
 
 
 def search_entry_snippets(

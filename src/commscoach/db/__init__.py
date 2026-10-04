@@ -39,6 +39,7 @@ from .dump import (
     validate_dump,
 )
 from .entries import (
+    count_search_entries,
     create_entry,
     delete_entry,
     get_entry,
@@ -151,6 +152,7 @@ __all__ = [
     "TagNotFoundError",
     "backup_database",
     "connect",
+    "count_search_entries",
     "close_goal",
     "clear_person_note",
     "create_entry",

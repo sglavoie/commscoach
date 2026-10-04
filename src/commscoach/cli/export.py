@@ -6,10 +6,11 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from .. import db, paths
-from .common import format_scope, open_db, print_err
+from .common import format_scope, open_db, print_err, resolve_db_path
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -152,22 +153,46 @@ def _render_markdown_export(
 
 
 def _write_export_file(out_path: Path, content: str) -> None:
-    """Write rendered export content to ``out_path`` with restricted permissions.
+    """Replace the destination only after a complete, private sibling is written."""
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=out_path.parent,
+            prefix=f".{out_path.name}.", suffix=".tmp", delete=False,
+        ) as fh:
+            temporary = Path(fh.name)
+            paths.secure_file(temporary)
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temporary, out_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
-    Opens with ``O_CREAT | O_WRONLY | O_TRUNC`` and mode ``0o600`` so a fresh
-    file is never world-readable, then calls ``paths.secure_file`` to enforce
-    ``0o600`` even when overwriting a file that already existed with broader
-    permissions.
-    """
-    fd = os.open(
-        out_path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, paths.DB_FILE_MODE
-    )
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(content)
-    paths.secure_file(out_path)
+
+def _validate_export_destination(out_path: Path, source_path: Path) -> None:
+    """Protect the active store and SQLite sidecars, including filesystem aliases."""
+    source = source_path.resolve()
+    protected = [source, *(
+        Path(f"{source}{suffix}") for suffix in ("-wal", "-shm", "-journal")
+    )]
+    for path in protected:
+        if out_path.resolve() == path or (
+            out_path.exists() and path.exists() and out_path.samefile(path)
+        ):
+            raise db.DBError(
+                "export destination must differ from the source database and its SQLite sidecars"
+            )
 
 
 def cmd_export(args: argparse.Namespace) -> int:
+    out_path = Path(args.out).expanduser() if args.out is not None else None
+    if out_path is not None:
+        try:
+            _validate_export_destination(out_path, resolve_db_path(args))
+        except OSError as exc:
+            raise db.DBError(f"cannot write export to {out_path}: {exc}") from exc
     with open_db(args) as conn:
         if args.format == "json":
             rendered = json.dumps(
@@ -188,10 +213,9 @@ def cmd_export(args: argparse.Namespace) -> int:
             )
     if not rendered.endswith("\n"):
         rendered += "\n"
-    if args.out is None:
+    if out_path is None:
         sys.stdout.write(rendered)
         return 0
-    out_path = Path(args.out).expanduser()
     try:
         _write_export_file(out_path, rendered)
     except OSError as exc:

@@ -23,6 +23,10 @@ class EntryConvenienceTests(EntryTestBase):
         self._seed_entry("Ask", source="email", tags=("work",), occurred_at="2026-01-01")
         self._seed_entry("Ask", source="email", people=("alice",), occurred_at="2026-01-01")
         self._seed_entry("Ask", people=("alice",), tags=("work",), occurred_at="2026-01-01")
+        self._seed_entry("Other", source="email", people=("alice",),
+                         tags=("work",), occurred_at="2026-01-01")
+        self._seed_entry("Ask", source="email", people=("alice",),
+                         tags=("work",), occurred_at="2025-01-01")
         coached = self._seed_entry("Ask", source="email", people=("alice",),
                                    tags=("work",), occurred_at="2025-12-01")
         with closing(db.connect(self.db_path)) as conn:
@@ -35,6 +39,54 @@ class EntryConvenienceTests(EntryTestBase):
         )
         self.assertEqual(rc, 0, err)
         self.assertEqual([row["id"] for row in json.loads(out)], [older.id])
+        rc, out, err = self._run(
+            "entry", "search", "--source", "EMAIL", "--person", "ALICE",
+            "--tag", "work", "--query", "Ask", "--no-feedback",
+            "--since", "2025-12-01", "--until", "2026-02-02",
+            "--oldest-first", "--limit", "1",
+        )
+        self.assertEqual(rc, 0, err)
+        self.assertIn(f"[{older.id}]", out)
+        self.assertIn("Showing 1 of 2 matching entries.", out)
+
+    def test_search_totals_follow_fts_literal_and_fallback_matching(self):
+        for body in ("café discussion 10%", "cafe discussion 10%", "cafeteria", "unrelated"):
+            self._seed_entry(body)
+        with closing(db.connect(self.db_path)) as conn:
+            fts = conn.execute("SELECT value FROM _meta WHERE key = 'fts5'").fetchone()[0] == "1"
+        cases = [("%", (), 2), ("10%", ("--exact",), 2)]
+        if fts:
+            cases.extend((("cafe", (), 2), ('"cafe discussion"', (), 2), ("caf*", (), 3)))
+        for query, extra, total in cases:
+            with self.subTest(query=query, extra=extra):
+                rc, out, err = self._run(
+                    "entry", "search", "--query", query, "--limit", "1", *extra,
+                )
+                self.assertEqual(rc, 0, err)
+                self.assertIn(f"Showing 1 of {total} matching entries.", out)
+        with closing(db.connect(self.db_path)) as conn, conn:
+            conn.execute("UPDATE _meta SET value = '0' WHERE key = 'fts5'")
+        rc, out, err = self._run("entry", "search", "--query", "10%", "--limit", "1")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Showing 1 of 2 matching entries.", out)
+
+    def test_search_totals_only_appear_when_human_results_are_omitted(self):
+        for _ in range(2):
+            self._seed_entry("matching")
+        for flags in ((), ("--limit", "2"), ("--limit", "3"),
+                      ("--query", "absent", "--limit", "1")):
+            with self.subTest(flags=flags):
+                rc, out, err = self._run("entry", "search", *flags)
+                self.assertEqual(rc, 0, err)
+                self.assertNotIn("Showing", out)
+        rc, out, err = self._run("entry", "search", "--limit", "0")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Showing 0 of 2 matching entries.", out)
+        with mock.patch.object(db, "count_search_entries") as count:
+            rc, out, err = self._run("entry", "search", "--limit", "1", "--json")
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(len(json.loads(out)), 1)
+            count.assert_not_called()
 
     def test_source_filter_survives_fts_fallback_and_is_an_exact_match(self):
         match = self._seed_entry("10% better", source="email")
