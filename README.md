@@ -10,8 +10,8 @@ Ready to use. The CLI, SQLite schema, stored feedback and reviews, scoped review
 
 | When you want to… | Command |
 | --- | --- |
-| Prepare for a conversation | `commscoach person show jdoe --recent 5 --with-feedback` |
-| Include broader relationship advice | `commscoach person show jdoe --recent 5 --with-feedback --reviews 2` |
+| Prepare for a conversation | `commscoach person prep jdoe` |
+| Read broader relationship advice | `commscoach person show jdoe --reviews 2` |
 | Find the oldest entries awaiting coaching | `commscoach entry search --no-feedback --oldest-first --limit 5` |
 | Revisit an interaction and its advice | `commscoach entry show 42 --with-feedback` |
 | Find past advice | `commscoach feedback search --query "lead with the ask"` |
@@ -315,10 +315,19 @@ Review search returns newest-first results (creation time, then ID), with a defa
 Before a conversation, see someone's notes, recent interactions, and active goals together:
 
 ```sh
+commscoach person prep jdoe
+commscoach person prep jdoe --recent 3 --reviews 1
 commscoach person show jdoe --recent 5
 commscoach person show jdoe --recent 5 --with-feedback
 commscoach --json person show jdoe --recent 5
 ```
+
+`person prep HANDLE` combines private notes, all active goals linked to that person,
+five recent interactions with full feedback, and two person-scoped reviews. Human
+output puts goals before the interactions so your current experiments are easy to
+spot. Override the counts with `--recent N` and `--reviews N`; either accepts zero.
+Its JSON output is the same as `person show HANDLE --recent 5 --with-feedback --reviews 2`
+with the corresponding limits. General goals are not included.
 
 `--recent N` adds the latest N interactions by occurrence time (falling back to creation time), plus all active goals linked to that person. General goals and goals linked to other people are excluded. `--recent 0` shows no interactions but still includes active goals. JSON adds `recent_entries` and `active_goals` arrays only when this option is supplied; plain `person show` retains its existing output.
 
@@ -332,6 +341,12 @@ commscoach person show jdoe --reviews 2
 ```
 
 This option works independently of `--recent`. It includes person-scoped reviews, not general or tag reviews that happen to cover an interaction with that person. Human output shows `(no reviews)` when none match; JSON adds a `recent_reviews` array only when `--reviews` is supplied. `--reviews 0` returns an empty array, and negative limits are rejected. Renaming a person's handle carries their review history into this view as well.
+
+`person rm HANDLE` reports how many private notes will be deleted, entry links
+removed, and goals and person-scoped reviews detached before asking for confirmation.
+Entries, feedback, goals, and reviews remain; person-scoped reviews keep the handle
+as history. Deleting your self profile also explains that coaching context needs a
+new self profile. `--yes` continues to bypass confirmation.
 
 ## Correcting stored coaching
 
@@ -407,6 +422,12 @@ For `goal edit --detail` and `goal close --outcome`, passing the flag without a 
 Human-readable goal listings show active goals' age in whole elapsed days since creation, making lingering experiments easier to spot. Age does not reset when a goal is reopened. `--oldest-first` orders by creation time and ID before applying `--limit`; with `--status all`, active goals still come before closed goals. The default remains newest-first, and goal JSON fields are unchanged.
 
 Repeating `goal close` preserves the saved outcome when `--outcome` is omitted. An unchanged repeat leaves timestamps alone; supplying a corrected outcome updates the goal while retaining its original closure time. Changing between done and dropped records a new closure time.
+
+Likewise, repeating `goal edit ID --status done` (or the current active/dropped
+status) leaves timestamps alone. Editing other fields alongside an unchanged
+status updates `updated_at` while preserving the original closure time. Reopening
+a goal clears its closure time; changing to a different closed status records a
+new closure time. These status edits preserve the saved outcome.
 
 Use `stats` for stored activity and coverage numbers rather than reconstructing them from exports:
 

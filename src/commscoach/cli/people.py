@@ -88,6 +88,20 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     show.set_defaults(func=cmd_person_show)
 
+    prep = person_sub.add_parser(
+        "prep", help="Prepare for a conversation with notes, goals, feedback, and reviews.",
+    )
+    prep.add_argument("handle", metavar="HANDLE")
+    prep.add_argument(
+        "--recent", type=non_negative_int, default=5, metavar="N",
+        help="Number of recent interactions, with full feedback (default: 5).",
+    )
+    prep.add_argument(
+        "--reviews", type=non_negative_int, default=2, metavar="N",
+        help="Number of person-scoped reviews (default: 2).",
+    )
+    prep.set_defaults(func=cmd_person_show, with_feedback=True)
+
     edit = person_sub.add_parser(
         "edit", help="Update handle, name, or private notes for a person."
     )
@@ -254,6 +268,9 @@ def cmd_person_show(args: argparse.Namespace) -> int:
         from .entries import _emit_entries
         from .goals import _emit_goals
 
+        if args.person_command == "prep":
+            print("\nActive goals:")
+            _emit_goals(args, goals)
         print("\nRecent interactions:")
         if args.with_feedback and entries:
             for entry in entries:
@@ -266,8 +283,9 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                 print()
         else:
             _emit_entries(args, entries, coached)
-        print("\nActive goals:")
-        _emit_goals(args, goals)
+        if args.person_command != "prep":
+            print("\nActive goals:")
+            _emit_goals(args, goals)
     if args.reviews is not None:
         print("\nRecent reviews:")
         print("\n\n".join(_format_review_human(review) for review in reviews) or "(no reviews)")
@@ -327,7 +345,29 @@ def cmd_person_list(args: argparse.Namespace) -> int:
 def cmd_person_rm(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         person = _resolve_existing_person(conn, args.handle)
-        if not confirm(f"Delete person @{person.handle}?", assume_yes=args.yes):
+        note_count = conn.execute(
+            "SELECT COUNT(*) FROM person_notes WHERE person_id = ?", (person.id,),
+        ).fetchone()[0]
+        entry_count = conn.execute(
+            "SELECT COUNT(*) FROM entry_people WHERE person_id = ?", (person.id,),
+        ).fetchone()[0]
+        goal_count = conn.execute(
+            "SELECT COUNT(*) FROM goals WHERE person_id = ?", (person.id,),
+        ).fetchone()[0]
+        review_count = conn.execute(
+            "SELECT COUNT(*) FROM reviews WHERE scope_person_id = ?", (person.id,),
+        ).fetchone()[0]
+        prompt = (
+            f"Delete person @{person.handle}? This will delete {note_count} private "
+            f"{'note' if note_count == 1 else 'notes'}, remove {entry_count} "
+            f"{'entry link' if entry_count == 1 else 'entry links'}, and detach "
+            f"{goal_count} {'goal' if goal_count == 1 else 'goals'} and "
+            f"{review_count} {'person-scoped review' if review_count == 1 else 'person-scoped reviews'}. "
+            "Entries, feedback, goals, and reviews remain; person-scoped reviews keep the handle."
+        )
+        if person.is_self:
+            prompt += " This removes your self profile; coaching context requires a new self profile."
+        if not confirm(prompt, assume_yes=args.yes):
             raise db.DBError("aborted")
         deleted = db.delete_person(conn, person.id)
     if not deleted:

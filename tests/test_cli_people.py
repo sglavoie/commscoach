@@ -109,6 +109,80 @@ class PersonAddTests(PeopleTestBase):
         self.assertIsInstance(payload["id"], int)
 
 
+class PersonPrepTests(PeopleTestBase):
+    def test_prep_defaults_match_full_show_with_goals_first(self):
+        alice = self._seed_person("alice")
+        self._seed_person("bob")
+        with closing(db.connect(self.db_path)) as conn:
+            db.set_person_note(conn, alice.id, "Prefers short updates")
+            for day in range(1, 7):
+                entry = db.create_entry(
+                    conn, f"Conversation {day}", people=("alice",),
+                    occurred_at=f"2026-01-0{day}",
+                )
+                db.create_feedback(conn, entry.id, f"Advice {day}")
+            for number in range(3):
+                db.create_review(
+                    conn, f"Review {number}", (entry.id,),
+                    scope_kind="person", scope_person_handle="alice",
+                )
+            goal = db.create_goal(conn, "Ask a question", person_handle="alice")
+            closed = db.create_goal(conn, "Completed", person_handle="alice")
+            db.close_goal(conn, closed.id)
+            db.create_goal(conn, "General goal")
+            db.create_goal(conn, "Bob goal", person_handle="bob")
+        rc, out, err = self._run("person", "prep", "ALICE", "--json")
+        self.assertEqual(rc, 0, err)
+        payload = json.loads(out)
+        rc, full, err = self._run(
+            "person", "show", "alice", "--recent", "5", "--with-feedback",
+            "--reviews", "2", "--json",
+        )
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(payload, json.loads(full))
+        self.assertEqual(len(payload["recent_entries"]), 5)
+        self.assertEqual(len(payload["recent_reviews"]), 2)
+        self.assertEqual([g["id"] for g in payload["active_goals"]], [goal.id])
+        rc, out, err = self._run("person", "prep", "alice")
+        self.assertEqual(rc, 0, err)
+        for text in ("Prefers short updates", "Ask a question", "Advice 6", "Review 2"):
+            self.assertIn(text, out)
+        self.assertLess(out.index("Active goals:"), out.index("Recent interactions:"))
+        self.assertEqual(out.count("Active goals:"), 1)
+        self.assertNotIn("Conversation 1", out)
+        self.assertNotIn("Review 0", out)
+
+    def test_prep_limits_empty_results_and_errors(self):
+        self._seed_person("alice")
+        rc, out, err = self._run("person", "prep", "alice")
+        self.assertEqual(rc, 0, err)
+        for text in ("(no goals)", "(no entries)", "(no reviews)"):
+            self.assertIn(text, out)
+        with closing(db.connect(self.db_path)) as conn:
+            entry = db.create_entry(conn, "Conversation", people=("alice",))
+            db.create_review(
+                conn, "Advice", (entry.id,),
+                scope_kind="person", scope_person_handle="alice",
+            )
+            goal = db.create_goal(conn, "Practice", person_handle="alice")
+        for limit in ("0", "1"):
+            rc, out, err = self._run(
+                "person", "prep", "alice", "--recent", limit, "--reviews", limit, "--json",
+            )
+            self.assertEqual(rc, 0, err)
+            payload = json.loads(out)
+            self.assertEqual(len(payload["recent_entries"]), int(limit))
+            self.assertEqual(len(payload["recent_reviews"]), int(limit))
+            self.assertEqual(payload["active_goals"][0]["id"], goal.id)
+        for flag in ("--recent", "--reviews"):
+            with self.subTest(flag=flag), self.assertRaises(SystemExit) as raised:
+                self._run("person", "prep", "alice", flag, "-1")
+            self.assertEqual(raised.exception.code, 2)
+        rc, _, err = self._run("person", "prep", "missing")
+        self.assertEqual(rc, 1)
+        self.assertIn("missing", err)
+
+
 class PersonShowTests(PeopleTestBase):
     def test_reviews_are_person_scoped_full_newest_first_and_optional(self):
         self._seed_person("alice")
@@ -518,6 +592,56 @@ class PersonListTests(PeopleTestBase):
 
 
 class PersonRmTests(PeopleTestBase):
+    def test_confirmation_counts_effects_and_declining_preserves_everything(self):
+        person = self._seed_person("alice")
+        self._seed_person("bob")
+        with closing(db.connect(self.db_path)) as conn:
+            db.set_person_note(conn, person.id, "Private context")
+            entry = db.create_entry(conn, "Conversation", people=("alice", "bob"))
+            feedback = db.create_feedback(conn, entry.id, "Advice")
+            review = db.create_review(
+                conn, "Review", (entry.id,),
+                scope_kind="person", scope_person_handle="alice",
+            )
+            db.create_review(conn, "General review", (entry.id,))
+            goal = db.create_goal(conn, "Practice", person_handle="alice")
+            closed = db.create_goal(conn, "Finished", person_handle="alice")
+            db.close_goal(conn, closed.id)
+        with mock.patch.object(cli_people, "confirm", return_value=False) as confirm:
+            rc, _, err = self._run("person", "rm", "ALICE")
+        self.assertEqual(rc, 1)
+        self.assertIn("aborted", err)
+        prompt = confirm.call_args.args[0]
+        for text in ("1 private note,", "1 entry link,", "2 goals", "1 person-scoped review.",
+                     "Entries, feedback, goals, and reviews remain", "keep the handle"):
+            self.assertIn(text, prompt)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.get_person(conn, person.id), person)
+            self.assertEqual(db.get_entry(conn, entry.id), entry)
+            self.assertEqual(db.get_goal(conn, goal.id), goal)
+            self.assertEqual(db.get_review(conn, review.id), review)
+            self.assertEqual(db.get_person_note(conn, person.id).body, "Private context")
+        rc, out, err = self._run("person", "rm", "alice", "--yes", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out), {"deleted": True, "id": person.id, "handle": "alice"})
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertIsNone(db.get_person_note(conn, person.id))
+            self.assertEqual([p.handle for p in db.get_entry(conn, entry.id).people], ["bob"])
+            self.assertEqual(db.list_feedback(conn, entry.id), (feedback,))
+            self.assertIsNone(db.get_goal(conn, goal.id).person)
+            kept = db.get_review(conn, review.id)
+            self.assertIsNone(kept.scope_person)
+            self.assertEqual(kept.scope_person_handle, "alice")
+
+    def test_empty_self_deletion_prompt_explains_self_requirement(self):
+        self._seed_person("me", is_self=True)
+        with mock.patch.object(cli_people, "confirm", return_value=False) as confirm:
+            self._run("person", "rm", "me")
+        prompt = confirm.call_args.args[0]
+        for text in ("0 private notes", "0 entry links", "0 goals", "0 person-scoped reviews",
+                     "removes your self profile"):
+            self.assertIn(text, prompt)
+
     def test_rm_with_yes_skips_prompt(self) -> None:
         person = self._seed_person("alice")
         rc, out, _ = self._run("--yes", "person", "rm", "alice")

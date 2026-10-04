@@ -14,6 +14,27 @@ T2 = "2026-08-25T12:00:00+00:00"
 
 
 class GoalCrudTests(DBTestCase):
+    def test_repeated_status_edit_preserves_timestamps_and_outcome(self) -> None:
+        for status in ("active", "done", "dropped"):
+            with self.subTest(status=status):
+                goal = db.create_goal(self.conn, "goal", now=T0)
+                if status != "active":
+                    goal = db.close_goal(
+                        self.conn, goal.id, outcome="original outcome",
+                        dropped=status == "dropped", now=T1,
+                    )
+                self.assertEqual(
+                    db.update_goal(self.conn, goal.id, status=status, now=T2), goal,
+                )
+                edited = db.update_goal(
+                    self.conn, goal.id, status=status, detail="new detail", now=T2,
+                )
+                self.assertEqual(edited.detail, "new detail")
+                self.assertEqual(edited.updated_at, T2)
+                self.assertEqual(edited.closed_at, goal.closed_at)
+                self.assertEqual(edited.outcome, goal.outcome)
+                self.assertEqual(edited.created_at, T0)
+
     def test_oldest_first_sorts_before_limit_with_id_tiebreaker(self) -> None:
         alice = db.create_person(self.conn, "alice")
         db.create_goal(self.conn, "unrelated", now=T0)

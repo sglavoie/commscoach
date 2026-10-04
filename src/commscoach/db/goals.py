@@ -124,11 +124,12 @@ def update_goal(
         updates.append("review_id = ?")
         params.append(review.id if review is not None else None)
 
-    if not updates and status is common.UNSET:
+    status_changed = status is not common.UNSET and status != current.status
+    if not updates and not status_changed:
         return current
 
     timestamp = now if now is not None else common.utcnow_iso()
-    if status is not common.UNSET:
+    if status_changed:
         updates.extend(("status = ?", "closed_at = ?"))
         params.extend((status, None if status == "active" else timestamp))
     updates.append("updated_at = ?")
