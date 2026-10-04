@@ -15,6 +15,7 @@ from .common import (
     print_json,
     read_body_arg,
     read_body_or_raise,
+    search_excerpt,
 )
 from .editor import compose_in_editor
 from .serializers import goal_to_dict
@@ -61,6 +62,21 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Show oldest goals first before applying --limit (active first with --status all).",
     )
     lst.set_defaults(func=cmd_goal_list)
+    lst.add_argument(
+        "--with-detail", action="store_true", help="Show full detail beneath each goal.",
+    )
+
+    search = goal_sub.add_parser("search", help="Search goal titles, details, and outcomes.")
+    search.add_argument("--query", required=True, metavar="TEXT")
+    search.add_argument(
+        "--status", choices=("active", "done", "dropped", "all"), default="all",
+        help="Goal status (default: all, active goals first).",
+    )
+    search.add_argument("--person", default=None, metavar="HANDLE")
+    search.add_argument("--limit", type=non_negative_int, default=20, metavar="N")
+    search.add_argument("--oldest-first", action="store_true")
+    search.add_argument("--with-detail", action="store_true")
+    search.set_defaults(func=cmd_goal_list)
 
     show = goal_sub.add_parser("show", help="Show one goal by id.")
     show.add_argument("goal_id", type=int, metavar="GOAL_ID")
@@ -147,6 +163,7 @@ def _emit_goal(
 
 def _emit_goals(
     args: argparse.Namespace, goals: tuple[db.Goal, ...], *, with_detail: bool = False,
+    query: str | None = None,
 ) -> None:
     if args.json:
         print_json([goal_to_dict(goal) for goal in goals])
@@ -162,6 +179,12 @@ def _emit_goals(
         print(line)
         if with_detail and goal.detail is not None:
             print("\n".join(f"  {line}" for line in goal.detail.splitlines()))
+        if query is not None:
+            fold = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+            for label, body in (("title", goal.title), ("detail", goal.detail),
+                                ("outcome", goal.outcome)):
+                if body is not None and query.translate(fold) in body.translate(fold):
+                    print(f"  {label}: {search_excerpt(body, query)}")
 
 
 def cmd_goal_add(args: argparse.Namespace) -> int:
@@ -187,8 +210,9 @@ def cmd_goal_list(args: argparse.Namespace) -> int:
             person_handle=args.person,
             limit=args.limit,
             oldest_first=args.oldest_first,
+            query=getattr(args, "query", None),
         )
-    _emit_goals(args, goals)
+    _emit_goals(args, goals, with_detail=args.with_detail, query=getattr(args, "query", None))
     return 0
 
 

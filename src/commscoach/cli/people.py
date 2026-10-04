@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from typing import Any, Iterable
 
 from .. import db
 from .common import (
     confirm,
+    first_prose_line,
     non_negative_int,
     open_db,
     print_json,
     read_body_arg,
     read_body_or_raise,
+    truncate,
 )
 from .editor import compose_in_editor
 from .feedback import _format_feedback_human
@@ -93,6 +96,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     prep.add_argument("handle", metavar="HANDLE")
     prep.add_argument(
+        "--brief", action="store_true",
+        help="Show short feedback and review previews; notes, goals, and JSON stay complete.",
+    )
+    prep.add_argument(
         "--recent", type=non_negative_int, default=5, metavar="N",
         help="Number of recent interactions, with full feedback (default: 5).",
     )
@@ -141,6 +148,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     lst = person_sub.add_parser(
         "list", help="List people (self first, then handle-alphabetical)."
     )
+    lst.add_argument("--query", metavar="TEXT", help="Match a literal name or handle substring.")
     lst.set_defaults(func=cmd_person_list)
 
     rm = person_sub.add_parser(
@@ -270,6 +278,9 @@ def cmd_person_show(args: argparse.Namespace) -> int:
         print_json(payload)
         return 0
     _emit_person(args, person, note=note, include_notes=True)
+    command = ["commscoach"]
+    if args.db:
+        command.extend(("--db", args.db))
     if args.recent is not None:
         # Entry commands import ensure_people, so load their renderer at call time.
         from .entries import _emit_entries
@@ -283,10 +294,19 @@ def cmd_person_show(args: argparse.Namespace) -> int:
             for entry in entries:
                 _emit_entries(args, (entry,), coached)
                 print("Feedback:")
-                print(
-                    "\n\n".join(_format_feedback_human(note) for note in feedback[entry.id])
-                    or "(no feedback)"
-                )
+                if getattr(args, "brief", False):
+                    print("\n".join(
+                        f"  Feedback [{note.id}]: {truncate(first_prose_line(note.body), width=180)}"
+                        for note in feedback[entry.id]
+                    ) or "(no feedback)")
+                    if feedback[entry.id]:
+                        full = shlex.join([*command, "entry", "show", str(entry.id), "--with-feedback"])
+                        print(f"  Full notes: {full}")
+                else:
+                    print(
+                        "\n\n".join(_format_feedback_human(note) for note in feedback[entry.id])
+                        or "(no feedback)"
+                    )
                 print()
         else:
             _emit_entries(args, entries, coached)
@@ -295,7 +315,14 @@ def cmd_person_show(args: argparse.Namespace) -> int:
             _emit_goals(args, goals)
     if args.reviews is not None:
         print("\nRecent reviews:")
-        print("\n\n".join(_format_review_human(review) for review in reviews) or "(no reviews)")
+        if getattr(args, "brief", False):
+            print("\n".join(
+                f"  Review [{review.id}]: {truncate(first_prose_line(review.body), width=180)}\n"
+                f"  Full review: {shlex.join([*command, 'review', 'show', str(review.id)])}"
+                for review in reviews
+            ) or "(no reviews)")
+        else:
+            print("\n\n".join(_format_review_human(review) for review in reviews) or "(no reviews)")
     return 0
 
 
@@ -344,7 +371,7 @@ def cmd_person_edit(args: argparse.Namespace) -> int:
 
 def cmd_person_list(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
-        people = db.list_people(conn)
+        people = db.list_people(conn, query=args.query)
     _emit_people(args, people)
     return 0
 

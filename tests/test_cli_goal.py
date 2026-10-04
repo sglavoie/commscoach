@@ -18,6 +18,36 @@ from commscoach.cli import goals as cli_goals
 
 
 class GoalCliTests(unittest.TestCase):
+    def test_list_with_detail_keeps_json_and_default_output(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_goal(conn, "Practice", detail="First step\nSecond step")
+        rc, out, err = self._run("goal", "list", "--with-detail")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("  First step\n  Second step", out)
+        self.assertNotIn("First step", self._run("goal", "list")[1])
+        self.assertEqual(
+            self._run("goal", "list", "--json"),
+            self._run("goal", "list", "--with-detail", "--json"),
+        )
+
+    def test_search_finds_outcomes_and_shows_matching_passages(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            goal = db.create_goal(conn, "Practice", detail="Details")
+            db.close_goal(conn, goal.id, outcome="Unrelated introduction. " * 30 + "Saved 10% effort!")
+            db.create_goal(conn, "Saved 100% effort")
+        rc, out, err = self._run("goal", "search", "--query", "10%")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("outcome:", out)
+        self.assertIn("Saved 10% effort!", out)
+        self.assertNotIn("Saved 100%", out)
+        rc, out, err = self._run("goal", "search", "--query", "10%", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual([row["id"] for row in json.loads(out)], [goal.id])
+        self.assertTrue(json.loads(out)[0]["outcome"].startswith("Unrelated"))
+        self.assertEqual(self._run("goal", "search", "--query", "10%", "--status", "active")[1], "(no goals)\n")
+        self.assertEqual(self._run("goal", "search", "--query", "   ")[0], 1)
+        self.assertEqual(self._run("goal", "search", "--query", "10%", "--limit", "0", "--json")[1], "[]\n")
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.tmpdir = Path(self._tmp.name)

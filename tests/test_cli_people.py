@@ -48,6 +48,52 @@ class PeopleTestBase(unittest.TestCase):
 
 
 class PersonAddTests(PeopleTestBase):
+    def test_list_query_matches_names_handles_and_literal_characters(self) -> None:
+        self._seed_person("jdoe", name="John Doe")
+        self._seed_person("john_self", is_self=True)
+        self._seed_person("john_other")
+        self._seed_person("literal_%!", name=None)
+        rc, out, err = self._run("person", "list", "--query", "JOHN", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual([p["handle"] for p in json.loads(out)], ["john_self", "jdoe", "john_other"])
+        self.assertIn("@literal_%!", self._run("person", "list", "--query", "_%!")[1])
+        self.assertEqual(self._run("person", "list", "--query", "missing")[1], "(no people)\n")
+        self.assertEqual(self._run("person", "list", "--query", " ")[0], 1)
+
+    def test_brief_prep_preserves_notes_goals_and_full_json(self) -> None:
+        person = self._seed_person("alice")
+        with closing(db.connect(self.db_path)) as conn:
+            db.set_person_note(conn, person.id, "Complete private notes")
+            db.create_goal(conn, "Experiment", detail="Full experiment detail", person_handle="alice")
+            db.create_goal(conn, "General experiment", detail="General detail")
+            entry = db.create_entry(conn, "Conversation", people=["alice"])
+            feedback = db.create_feedback(conn, entry.id, "# Heading\n\nBrief advice " + "x" * 300 + " hidden ending")
+            review = db.create_review(conn, "Brief review " + "y" * 300 + " hidden review ending", [entry.id], scope_kind="person", scope_person_handle="alice")
+        rc, out, err = self._run("person", "prep", "alice", "--brief", "--include-general-goals")
+        self.assertEqual(rc, 0, err)
+        for text in ("Complete private notes", "Full experiment detail", "General detail",
+                     f"Feedback [{feedback.id}]", f"Review [{review.id}]", "Brief advice", "Brief review"):
+            self.assertIn(text, out)
+        self.assertNotIn("hidden ending", out)
+        self.assertNotIn("hidden review ending", out)
+        self.assertIn(f"--db {self.db_path}", out)
+        self.assertIn(f"entry show {entry.id} --with-feedback", out)
+        self.assertIn(f"review show {review.id}", out)
+        self.assertEqual(
+            self._run("person", "prep", "alice", "--json"),
+            self._run("person", "prep", "alice", "--brief", "--json"),
+        )
+
+    def test_brief_prep_empty_sections_and_zero_limits(self) -> None:
+        self._seed_person("alice")
+        rc, out, err = self._run("person", "prep", "alice", "--brief", "--recent", "0", "--reviews", "0")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("(no reviews)", out)
+        self.assertIn("(no goals)", out)
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_entry(conn, "Uncoached", people=["alice"])
+        self.assertIn("(no feedback)", self._run("person", "prep", "alice", "--brief")[1])
+
     def test_add_minimal_creates_person(self) -> None:
         rc, out, _ = self._run("person", "add", "alice")
         self.assertEqual(rc, 0)

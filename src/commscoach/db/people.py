@@ -144,10 +144,20 @@ def get_person_by_handle(conn: sqlite3.Connection, handle: str) -> Person | None
     return row_to_person(row)
 
 
-def list_people(conn: sqlite3.Connection) -> tuple[Person, ...]:
-    """Return all people with the self row first, then handle-alphabetical."""
+def list_people(
+    conn: sqlite3.Connection, *, query: str | None = None,
+) -> tuple[Person, ...]:
+    """Return people self-first, optionally matching a literal name/handle substring."""
+    sql = "SELECT * FROM people"
+    params: list[str] = []
+    if query is not None:
+        if not query.strip():
+            raise DBError("query must be a non-empty string")
+        literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        sql += " WHERE (handle LIKE ? ESCAPE '!' OR name LIKE ? ESCAPE '!')"
+        params = [f"%{literal}%"] * 2
     rows = conn.execute(
-        "SELECT * FROM people ORDER BY is_self DESC, handle COLLATE NOCASE"
+        sql + " ORDER BY is_self DESC, handle COLLATE NOCASE", params,
     ).fetchall()
     return tuple(row_to_person(row) for row in rows)
 

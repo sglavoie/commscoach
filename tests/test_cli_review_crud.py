@@ -21,6 +21,30 @@ from .cli_review_case import ReviewTestBase
 
 
 class ReviewAddTests(ReviewTestBase):
+    def test_show_with_entries_and_goals_preserves_json(self) -> None:
+        entry = self._seed_entry("Complete evidence text", tags=("work",))
+        review = self._seed_review("Synthesis", [entry.id])
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_goal(conn, "Linked experiment", review_id=review.id)
+        args = ("review", "show", str(review.id))
+        self.assertNotIn("Complete evidence text", self._run(*args)[1])
+        rc, out, err = self._run(*args, "--with-entries", "--with-goals")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Linked entries (current text):", out)
+        self.assertIn("Complete evidence text", out)
+        self.assertIn("Linked experiment", out)
+        self.assertEqual(self._run(*args, "--json"), self._run(*args, "--with-entries", "--json"))
+        self.assertEqual(
+            self._run(*args, "--with-goals", "--json"),
+            self._run(*args, "--with-entries", "--with-goals", "--json"),
+        )
+        with closing(db.connect(self.db_path)) as conn:
+            db.delete_entry(conn, entry.id)
+        rc, out, err = self._run(*args, "--with-entries")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("(no linked entries remain)", out)
+        self.assertEqual(self._run("review", "show", "9999", "--with-entries")[0], 1)
+
     def test_invalid_prerequisites_do_not_open_editor(self) -> None:
         entry = self._seed_entry()
         cases = (

@@ -283,6 +283,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Include linked goals of every status, with details and outcomes.",
     )
     show.set_defaults(func=cmd_review_show)
+    show.add_argument(
+        "--with-entries", action="store_true",
+        help="Show surviving linked entries in full (already included in JSON).",
+    )
 
     edit = review_sub.add_parser("edit", help="Rewrite a stored review body.")
     edit.add_argument("review_id", type=int, metavar="REVIEW_ID")
@@ -493,6 +497,12 @@ def cmd_review_show(args: argparse.Namespace) -> int:
         })
         return 0
     _emit_review(args, review)
+    if args.with_entries and not args.json:
+        from .entries import _format_entry_human
+
+        print("\nLinked entries (current text):")
+        print("\n\n".join(_format_entry_human(entry) for entry in review.entries)
+              or "(no linked entries remain)")
     if args.with_goals:
         from .goals import _format_goal_human
 

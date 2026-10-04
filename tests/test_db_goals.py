@@ -14,6 +14,23 @@ T2 = "2026-08-25T12:00:00+00:00"
 
 
 class GoalCrudTests(DBTestCase):
+    def test_query_filters_all_text_fields_before_sorting_and_limit(self) -> None:
+        db.create_person(self.conn, "alice")
+        title = db.create_goal(self.conn, "Try A_B!", person_handle="alice", now=T0)
+        detail = db.create_goal(self.conn, "Detail", detail="Try a_b!", person_handle="alice", now=T1)
+        closed = db.create_goal(self.conn, "Outcome", person_handle="alice", now=T2)
+        db.close_goal(self.conn, closed.id, outcome="Tried A_B!", now=T2)
+        db.create_goal(self.conn, "Wrong person A_B!", now=T2)
+        db.create_goal(self.conn, "Try AXB!", person_handle="alice", now=T2)
+        found = db.list_goals(self.conn, query="a_b!", person_handle="ALICE", status=None)
+        self.assertEqual([goal.id for goal in found], [detail.id, title.id, closed.id])
+        self.assertEqual(
+            db.list_goals(self.conn, query="a_b!", person_handle="alice", oldest_first=True, limit=1),
+            (title,),
+        )
+        with self.assertRaisesRegex(db.DBError, "non-empty"):
+            db.list_goals(self.conn, query=" ")
+
     def test_person_general_and_review_filters_apply_before_limit(self) -> None:
         db.create_person(self.conn, "alice")
         db.create_person(self.conn, "bob")

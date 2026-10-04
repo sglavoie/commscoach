@@ -194,11 +194,13 @@ def list_goals(
     oldest_first: bool = False,
     include_general: bool = False,
     review_id: int | None = None,
+    query: str | None = None,
 ) -> tuple[Goal, ...]:
     """List goals by creation time; all-status lists put active goals first.
 
     With a person filter, include_general also selects unlinked goals.
     A review filter selects only goals originating from that review.
+    Query matches literal substrings in titles, details, and outcomes.
     """
     if status is not None:
         status = _validate_status(status)
@@ -208,6 +210,15 @@ def list_goals(
         raise DBError("include_general requires person_handle")
     where: list[str] = []
     params: list[Any] = []
+    if query is not None:
+        if not query.strip():
+            raise DBError("query must be a non-empty string")
+        literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        where.append("(" + " OR ".join(
+            f"{column} LIKE ? ESCAPE '!' COLLATE NOCASE"
+            for column in ("title", "detail", "outcome")
+        ) + ")")
+        params.extend([f"%{literal}%"] * 3)
     if status is not None:
         where.append("status = ?")
         params.append(status)
