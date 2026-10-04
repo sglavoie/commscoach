@@ -278,6 +278,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     show = review_sub.add_parser("show", help="Show one review by id.")
     show.add_argument("review_id", type=int, metavar="REVIEW_ID")
+    show.add_argument(
+        "--with-goals", action="store_true",
+        help="Include linked goals of every status, with details and outcomes.",
+    )
     show.set_defaults(func=cmd_review_show)
 
     edit = review_sub.add_parser("edit", help="Rewrite a stored review body.")
@@ -476,9 +480,24 @@ def cmd_review_list(args: argparse.Namespace) -> int:
 def cmd_review_show(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         review = db.get_review(conn, args.review_id)
-    if review is None:
-        raise db.ReviewNotFoundError(args.review_id)
+        if review is None:
+            raise db.ReviewNotFoundError(args.review_id)
+        goals = (
+            db.list_goals(conn, status=None, review_id=review.id)
+            if args.with_goals else ()
+        )
+    if args.with_goals and args.json:
+        print_json({
+            **review_to_dict(review),
+            "goals": [goal_to_dict(goal) for goal in goals],
+        })
+        return 0
     _emit_review(args, review)
+    if args.with_goals:
+        from .goals import _format_goal_human
+
+        print("\nLinked goals:")
+        print("\n\n".join(_format_goal_human(goal) for goal in goals) or "(no goals)")
     return 0
 
 

@@ -145,7 +145,9 @@ def _emit_goal(
     print(_format_goal_human(goal))
 
 
-def _emit_goals(args: argparse.Namespace, goals: tuple[db.Goal, ...]) -> None:
+def _emit_goals(
+    args: argparse.Namespace, goals: tuple[db.Goal, ...], *, with_detail: bool = False,
+) -> None:
     if args.json:
         print_json([goal_to_dict(goal) for goal in goals])
         return
@@ -154,7 +156,12 @@ def _emit_goals(args: argparse.Namespace, goals: tuple[db.Goal, ...]) -> None:
         return
     now = datetime.now(timezone.utc)
     for goal in goals:
-        print(_format_goal_short(goal, now=now))
+        line = _format_goal_short(goal, now=now)
+        if with_detail and goal.person is None:
+            line += " (general)"
+        print(line)
+        if with_detail and goal.detail is not None:
+            print("\n".join(f"  {line}" for line in goal.detail.splitlines()))
 
 
 def cmd_goal_add(args: argparse.Namespace) -> int:

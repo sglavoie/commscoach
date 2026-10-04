@@ -192,23 +192,38 @@ def list_goals(
     person_handle: str | None = None,
     limit: int | None = None,
     oldest_first: bool = False,
+    include_general: bool = False,
+    review_id: int | None = None,
 ) -> tuple[Goal, ...]:
-    """List goals by creation time; all-status lists put active goals first."""
+    """List goals by creation time; all-status lists put active goals first.
+
+    With a person filter, include_general also selects unlinked goals.
+    A review filter selects only goals originating from that review.
+    """
     if status is not None:
         status = _validate_status(status)
     if limit is not None and limit < 0:
         raise DBError("limit must be non-negative")
+    if include_general and person_handle is None:
+        raise DBError("include_general requires person_handle")
     where: list[str] = []
     params: list[Any] = []
     if status is not None:
         where.append("status = ?")
         params.append(status)
     if person_handle is not None:
-        where.append(
+        person_filter = (
             "EXISTS (SELECT 1 FROM people p"
             " WHERE p.id = goals.person_id AND LOWER(p.handle) = LOWER(?))"
         )
+        where.append(
+            f"({person_filter} OR goals.person_id IS NULL)"
+            if include_general else person_filter
+        )
         params.append(person_handle)
+    if review_id is not None:
+        where.append("review_id = ?")
+        params.append(review_id)
     sql = "SELECT * FROM goals"
     if where:
         sql += " WHERE " + " AND ".join(where)

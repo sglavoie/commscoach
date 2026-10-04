@@ -14,6 +14,28 @@ T2 = "2026-08-25T12:00:00+00:00"
 
 
 class GoalCrudTests(DBTestCase):
+    def test_person_general_and_review_filters_apply_before_limit(self) -> None:
+        db.create_person(self.conn, "alice")
+        db.create_person(self.conn, "bob")
+        review = db.create_review(self.conn, "review", [db.create_entry(self.conn, "entry").id])
+        linked = db.create_goal(self.conn, "linked", person_handle="alice", review_id=review.id, now=T0)
+        general = db.create_goal(self.conn, "general", review_id=review.id, now=T1)
+        closed = db.create_goal(self.conn, "closed general", review_id=review.id, now=T2)
+        db.close_goal(self.conn, closed.id)
+        db.create_goal(self.conn, "bob", person_handle="bob", review_id=review.id, now=T2)
+        db.create_goal(self.conn, "another review", person_handle="alice", now=T2)
+        self.assertEqual(
+            db.list_goals(self.conn, person_handle="ALICE", include_general=True, review_id=review.id),
+            (general, linked),
+        )
+        self.assertEqual(
+            db.list_goals(self.conn, person_handle="ALICE", include_general=True,
+                          review_id=review.id, oldest_first=True, limit=1),
+            (linked,),
+        )
+        with self.assertRaisesRegex(db.DBError, "requires person_handle"):
+            db.list_goals(self.conn, include_general=True)
+
     def test_repeated_status_edit_preserves_timestamps_and_outcome(self) -> None:
         for status in ("active", "done", "dropped"):
             with self.subTest(status=status):

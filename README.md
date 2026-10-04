@@ -312,11 +312,23 @@ commscoach review search --query "conflict" --tag work --json
 
 Review search returns newest-first results (creation time, then ID), with a default limit of 20 and matching excerpts in human output. `--scope`, `--person`, and `--tag` combine with AND and have the same meaning as `review list`: they filter the review's stored scope, not the people or tags on its covered entries. Reviews about a deleted person remain searchable by their preserved handle; an unmatched handle returns no reviews. Empty queries are rejected, `--limit 0` returns an empty result, and JSON returns complete review objects.
 
+Revisit the experiments that came from a review:
+
+```sh
+commscoach review show 1 --with-goals
+```
+
+`--with-goals` includes all goals linked to that review, with their details, status,
+and recorded outcomes. Active goals appear first; within active and closed groups,
+goals are newest-first by creation time, then ID. Human output shows `(no goals)`
+when none are linked. JSON adds a `goals` array only when the flag is supplied.
+
 Before a conversation, see someone's notes, recent interactions, and active goals together:
 
 ```sh
 commscoach person prep jdoe
 commscoach person prep jdoe --recent 3 --reviews 1
+commscoach person prep jdoe --include-general-goals
 commscoach person show jdoe --recent 5
 commscoach person show jdoe --recent 5 --with-feedback
 commscoach --json person show jdoe --recent 5
@@ -324,10 +336,16 @@ commscoach --json person show jdoe --recent 5
 
 `person prep HANDLE` combines private notes, all active goals linked to that person,
 five recent interactions with full feedback, and two person-scoped reviews. Human
-output puts goals before the interactions so your current experiments are easy to
-spot. Override the counts with `--recent N` and `--reviews N`; either accepts zero.
+output puts goals before the interactions and shows each goal's full detail beneath
+its title, so your current experiments are easy to act on. Override the counts with
+`--recent N` and `--reviews N`; either accepts zero.
 Its JSON output is the same as `person show HANDLE --recent 5 --with-feedback --reviews 2`
-with the corresponding limits. General goals are not included.
+with the corresponding limits. General goals are excluded by default. Add
+`--include-general-goals` to include active goals with no linked person alongside
+this person's active goals, newest-first. Human output labels these goals
+`(general)`; JSON includes them in `active_goals`. This includes goals detached
+by deleting their person. Closed goals and goals linked to other people are excluded.
+Goal details are already present in JSON, so its shape is unchanged.
 
 `--recent N` adds the latest N interactions by occurrence time (falling back to creation time), plus all active goals linked to that person. General goals and goals linked to other people are excluded. `--recent 0` shows no interactions but still includes active goals. JSON adds `recent_entries` and `active_goals` arrays only when this option is supplied; plain `person show` retains its existing output.
 

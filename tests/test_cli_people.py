@@ -110,6 +110,40 @@ class PersonAddTests(PeopleTestBase):
 
 
 class PersonPrepTests(PeopleTestBase):
+    def test_prep_shows_details_and_optionally_includes_only_active_general_goals(self):
+        self._seed_person("alice")
+        self._seed_person("bob")
+        detail = "Practice in three meetings.\nStart with the decision needed."
+        with closing(db.connect(self.db_path)) as conn:
+            linked = db.create_goal(conn, "Be direct", person_handle="alice", detail=detail)
+            general = db.create_goal(conn, "Pause first", detail="Take one breath.")
+            db.create_goal(conn, "Bob only", person_handle="bob")
+            closed = db.create_goal(conn, "Completed general")
+            db.close_goal(conn, closed.id)
+            dropped = db.create_goal(conn, "Dropped general")
+            db.close_goal(conn, dropped.id, dropped=True)
+        rc, out, err = self._run("person", "prep", "alice")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("  Practice in three meetings.\n  Start with the decision needed.", out)
+        self.assertNotIn("Pause first", out)
+        rc, out, err = self._run("person", "show", "alice", "--recent", "0")
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("Practice in three meetings.", out)
+        args = ("person", "prep", "ALICE", "--include-general-goals", "--recent", "0", "--reviews", "0")
+        rc, out, err = self._run(*args)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Pause first", out)
+        self.assertIn("(general)", out)
+        self.assertIn("  Take one breath.", out)
+        for excluded in ("Bob only", "Completed general", "Dropped general"):
+            self.assertNotIn(excluded, out)
+        rc, out, err = self._run(*args, "--json")
+        self.assertEqual(rc, 0, err)
+        payload = json.loads(out)
+        self.assertEqual([g["id"] for g in payload["active_goals"]], [general.id, linked.id])
+        self.assertEqual(payload["active_goals"][1]["detail"], detail)
+        self.assertEqual(payload["recent_entries"], [])
+
     def test_prep_defaults_match_full_show_with_goals_first(self):
         alice = self._seed_person("alice")
         self._seed_person("bob")

@@ -803,6 +803,53 @@ class DeletedPersonJsonTests(ReviewTestBase):
 
 
 class ReviewShowTests(ReviewTestBase):
+    def test_with_goals_includes_linked_experiments_and_outcomes_only(self) -> None:
+        entry = self._seed_entry("entry")
+        review = self._seed_review("Review to revisit", [entry.id])
+        other = self._seed_review("Other review", [entry.id])
+        with closing(db.connect(self.db_path)) as conn:
+            active = db.create_goal(conn, "Keep practicing", review_id=review.id, detail="Ask first.")
+            done = db.create_goal(conn, "Completed experiment", review_id=review.id)
+            db.close_goal(conn, done.id, outcome="Worked in three meetings.")
+            dropped = db.create_goal(conn, "Dropped experiment", review_id=review.id)
+            db.close_goal(conn, dropped.id, dropped=True, outcome="Role changed.")
+            db.create_goal(conn, "Unrelated experiment", review_id=other.id)
+            db.create_goal(conn, "Unlinked experiment")
+        rc, out, err = self._run("review", "show", str(review.id), "--with-goals")
+        self.assertEqual(rc, 0, err)
+        for text in ("Review to revisit", "Linked goals:", "Keep practicing", "Ask first.",
+                     "Completed experiment", "Worked in three meetings.", "Dropped experiment", "Role changed."):
+            self.assertIn(text, out)
+        self.assertNotIn("Unrelated experiment", out)
+        self.assertNotIn("Unlinked experiment", out)
+        rc, out, err = self._run("review", "show", str(review.id), "--with-goals", "--json")
+        self.assertEqual(rc, 0, err)
+        payload = json.loads(out)
+        self.assertEqual([g["id"] for g in payload["goals"]], [active.id, dropped.id, done.id])
+        self.assertEqual([g["status"] for g in payload["goals"]], ["active", "dropped", "done"])
+        self.assertEqual(payload["goals"][2]["outcome"], "Worked in three meetings.")
+        rc, out, err = self._run("review", "show", str(review.id), "--json")
+        self.assertEqual(rc, 0, err)
+        goals = payload.pop("goals")
+        self.assertEqual(json.loads(out), payload)
+        self.assertEqual(len(goals), 3)
+        rc, out, err = self._run("review", "show", str(review.id))
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("Linked goals:", out)
+
+    def test_with_goals_handles_empty_and_missing_reviews(self) -> None:
+        review = self._seed_review("No experiments yet", [self._seed_entry().id])
+        rc, out, err = self._run("review", "show", str(review.id), "--with-goals")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Linked goals:\n(no goals)", out)
+        rc, out, err = self._run("review", "show", str(review.id), "--with-goals", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["goals"], [])
+        rc, out, err = self._run("review", "show", "9999", "--with-goals", "--json")
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, "")
+        self.assertIn("9999", err)
+
     def test_show_existing_prints_human(self) -> None:
         entry = self._seed_entry("entry")
         review = self._seed_review("strong summary", [entry.id])

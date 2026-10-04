@@ -100,6 +100,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--reviews", type=non_negative_int, default=2, metavar="N",
         help="Number of person-scoped reviews (default: 2).",
     )
+    prep.add_argument(
+        "--include-general-goals", action="store_true",
+        help="Also include active goals that are not linked to a person.",
+    )
     prep.set_defaults(func=cmd_person_show, with_feedback=True)
 
     edit = person_sub.add_parser(
@@ -231,7 +235,10 @@ def cmd_person_show(args: argparse.Namespace) -> int:
             entries = db.search_entries(
                 conn, person_handle=person.handle, limit=args.recent,
             )
-            goals = db.list_goals(conn, person_handle=person.handle)
+            goals = db.list_goals(
+                conn, person_handle=person.handle,
+                include_general=getattr(args, "include_general_goals", False),
+            )
             feedback = (
                 {entry.id: db.list_feedback(conn, entry.id) for entry in entries}
                 if args.with_feedback else {}
@@ -270,7 +277,7 @@ def cmd_person_show(args: argparse.Namespace) -> int:
 
         if args.person_command == "prep":
             print("\nActive goals:")
-            _emit_goals(args, goals)
+            _emit_goals(args, goals, with_detail=True)
         print("\nRecent interactions:")
         if args.with_feedback and entries:
             for entry in entries:
