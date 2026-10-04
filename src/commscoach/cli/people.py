@@ -97,7 +97,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     prep.add_argument("handle", metavar="HANDLE")
     prep.add_argument(
         "--brief", action="store_true",
-        help="Show short feedback and review previews; notes, goals, and JSON stay complete.",
+        help="Preview notes, up to five goals, latest feedback, and reviews; JSON stays complete.",
     )
     prep.add_argument(
         "--recent", type=non_negative_int, default=5, metavar="N",
@@ -277,10 +277,14 @@ def cmd_person_show(args: argparse.Namespace) -> int:
             payload["recent_reviews"] = [review_to_dict(review) for review in reviews]
         print_json(payload)
         return 0
-    _emit_person(args, person, note=note, include_notes=True)
+    brief = getattr(args, "brief", False)
     command = ["commscoach"]
     if args.db:
         command.extend(("--db", args.db))
+    _emit_person(args, person, note=note, include_notes=not brief)
+    if brief and note is not None:
+        print(f"\nNotes:\n{truncate(first_prose_line(note.body), width=180)}")
+        print(f"  Full notes: {shlex.join([*command, 'person', 'show', person.handle])}")
     if args.recent is not None:
         # Entry commands import ensure_people, so load their renderer at call time.
         from .entries import _emit_entries
@@ -288,17 +292,37 @@ def cmd_person_show(args: argparse.Namespace) -> int:
 
         if args.person_command == "prep":
             print("\nActive goals:")
-            _emit_goals(args, goals, with_detail=True)
+            if brief:
+                from .goals import _format_goal_short
+
+                for goal in goals[:5]:
+                    label = truncate(" ".join(_format_goal_short(goal).split()), width=180)
+                    print(label + (" (general)" if goal.person is None else ""))
+                    if goal.detail is not None:
+                        print(f"  {truncate(first_prose_line(goal.detail), width=180)}")
+                    print(f"  Full goal: {shlex.join([*command, 'goal', 'show', str(goal.id)])}")
+                if not goals:
+                    print("(no goals)")
+                if len(goals) > 5:
+                    full = [*command, "person", "prep", person.handle, "--recent", "0", "--reviews", "0"]
+                    if args.include_general_goals:
+                        full.append("--include-general-goals")
+                    print(f"  Showing 5 of {len(goals)} active goals.")
+                    print(f"  All goals: {shlex.join(full)}")
+            else:
+                _emit_goals(args, goals, with_detail=True)
         print("\nRecent interactions:")
         if args.with_feedback and entries:
             for entry in entries:
                 _emit_entries(args, (entry,), coached)
                 print("Feedback:")
-                if getattr(args, "brief", False):
+                if brief:
                     print("\n".join(
                         f"  Feedback [{note.id}]: {truncate(first_prose_line(note.body), width=180)}"
-                        for note in feedback[entry.id]
+                        for note in feedback[entry.id][-1:]
                     ) or "(no feedback)")
+                    if len(feedback[entry.id]) > 1:
+                        print(f"  Showing latest of {len(feedback[entry.id])} feedback notes.")
                     if feedback[entry.id]:
                         full = shlex.join([*command, "entry", "show", str(entry.id), "--with-feedback"])
                         print(f"  Full notes: {full}")
@@ -315,7 +339,7 @@ def cmd_person_show(args: argparse.Namespace) -> int:
             _emit_goals(args, goals)
     if args.reviews is not None:
         print("\nRecent reviews:")
-        if getattr(args, "brief", False):
+        if brief:
             print("\n".join(
                 f"  Review [{review.id}]: {truncate(first_prose_line(review.body), width=180)}\n"
                 f"  Full review: {shlex.join([*command, 'review', 'show', str(review.id)])}"

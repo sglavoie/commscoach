@@ -77,6 +77,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     search.add_argument("--oldest-first", action="store_true")
     search.add_argument("--with-detail", action="store_true")
     search.set_defaults(func=cmd_goal_list)
+    for parser in (lst, search):
+        parser.add_argument(
+            "--with-outcome", action="store_true",
+            help="Show the full recorded outcome beneath each goal.",
+        )
 
     show = goal_sub.add_parser("show", help="Show one goal by id.")
     show.add_argument("goal_id", type=int, metavar="GOAL_ID")
@@ -163,7 +168,7 @@ def _emit_goal(
 
 def _emit_goals(
     args: argparse.Namespace, goals: tuple[db.Goal, ...], *, with_detail: bool = False,
-    query: str | None = None,
+    query: str | None = None, with_outcome: bool = False,
 ) -> None:
     if args.json:
         print_json([goal_to_dict(goal) for goal in goals])
@@ -179,10 +184,15 @@ def _emit_goals(
         print(line)
         if with_detail and goal.detail is not None:
             print("\n".join(f"  {line}" for line in goal.detail.splitlines()))
+        if with_outcome:
+            print("  outcome:")
+            print("\n".join(f"    {line}" for line in (goal.outcome or "(no outcome recorded)").splitlines()))
         if query is not None:
             fold = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
             for label, body in (("title", goal.title), ("detail", goal.detail),
                                 ("outcome", goal.outcome)):
+                if label == "outcome" and with_outcome:
+                    continue
                 if body is not None and query.translate(fold) in body.translate(fold):
                     print(f"  {label}: {search_excerpt(body, query)}")
 
@@ -212,7 +222,10 @@ def cmd_goal_list(args: argparse.Namespace) -> int:
             oldest_first=args.oldest_first,
             query=getattr(args, "query", None),
         )
-    _emit_goals(args, goals, with_detail=args.with_detail, query=getattr(args, "query", None))
+    _emit_goals(
+        args, goals, with_detail=args.with_detail, with_outcome=args.with_outcome,
+        query=getattr(args, "query", None),
+    )
     return 0
 
 

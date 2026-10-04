@@ -201,6 +201,7 @@ def list_goals(
     With a person filter, include_general also selects unlinked goals.
     A review filter selects only goals originating from that review.
     Query matches literal substrings in titles, details, and outcomes.
+    An unknown person handle is an error, even when the limit is zero.
     """
     if status is not None:
         status = _validate_status(status)
@@ -223,15 +224,13 @@ def list_goals(
         where.append("status = ?")
         params.append(status)
     if person_handle is not None:
-        person_filter = (
-            "EXISTS (SELECT 1 FROM people p"
-            " WHERE p.id = goals.person_id AND LOWER(p.handle) = LOWER(?))"
-        )
+        person = _resolve_person(conn, person_handle)
+        person_filter = "goals.person_id = ?"
         where.append(
             f"({person_filter} OR goals.person_id IS NULL)"
             if include_general else person_filter
         )
-        params.append(person_handle)
+        params.append(person.id)
     if review_id is not None:
         where.append("review_id = ?")
         params.append(review_id)

@@ -18,6 +18,44 @@ from commscoach.cli import goals as cli_goals
 
 
 class GoalCliTests(unittest.TestCase):
+    def test_outcome_list_and_search_show_full_text_without_duplicate_excerpt(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            goal = db.create_goal(conn, "Practice", detail="Try this")
+            db.close_goal(conn, goal.id, outcome="Worked well\nTry again next week")
+            empty = db.create_goal(conn, "Practice without outcome")
+            db.close_goal(conn, empty.id)
+            dropped = db.create_goal(conn, "Practice dropped")
+            db.close_goal(conn, dropped.id, dropped=True, outcome="No longer relevant")
+        for command in (("list", "--status", "all"), ("search", "--query", "Practice"),
+                        ("search", "--query", "Worked")):
+            with self.subTest(command=command):
+                rc, out, err = self._run("goal", *command, "--with-outcome", "--with-detail")
+                self.assertEqual(rc, 0, err)
+                self.assertIn("  outcome:\n    Worked well\n    Try again next week", out)
+                self.assertEqual(out.count("Worked well"), 1)
+                self.assertIn("  Try this", out)
+                self.assertEqual(
+                    self._run("goal", *command, "--json"),
+                    self._run("goal", *command, "--with-outcome", "--json"),
+                )
+        out = self._run("goal", "list", "--status", "all", "--with-outcome")[1]
+        self.assertIn("(no outcome recorded)", out)
+        self.assertIn("No longer relevant", out)
+        self.assertNotIn("Worked well", self._run("goal", "list", "--status", "done")[1])
+
+    def test_person_filter_distinguishes_unknown_from_empty(self) -> None:
+        self._seed_person("alex")
+        for command in (("list",), ("search", "--query", "Practice")):
+            for output in ((), ("--json",)):
+                with self.subTest(command=command, output=output):
+                    rc, out, err = self._run("goal", *command, "--person", "typo", "--limit", "0", *output)
+                    self.assertEqual(rc, 1)
+                    self.assertIn("typo", err)
+                    self.assertEqual(out, "")
+                    rc, out, err = self._run("goal", *command, "--person", "ALEX", *output)
+                    self.assertEqual(rc, 0, err)
+                    self.assertEqual(out, "[]\n" if output else "(no goals)\n")
+
     def test_list_with_detail_keeps_json_and_default_output(self) -> None:
         with closing(db.connect(self.db_path)) as conn:
             db.create_goal(conn, "Practice", detail="First step\nSecond step")

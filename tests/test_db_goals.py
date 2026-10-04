@@ -14,6 +14,14 @@ T2 = "2026-08-25T12:00:00+00:00"
 
 
 class GoalCrudTests(DBTestCase):
+    def test_unknown_person_is_rejected_even_with_general_goals_or_zero_limit(self) -> None:
+        db.create_goal(self.conn, "General goal")
+        for options in ({}, {"include_general": True}, {"limit": 0}, {"query": "General"}):
+            with self.subTest(options=options), self.assertRaises(db.PersonNotFoundError):
+                db.list_goals(self.conn, person_handle="missing", **options)
+        db.create_person(self.conn, "alice")
+        self.assertEqual(db.list_goals(self.conn, person_handle="ALICE"), ())
+
     def test_query_filters_all_text_fields_before_sorting_and_limit(self) -> None:
         db.create_person(self.conn, "alice")
         title = db.create_goal(self.conn, "Try A_B!", person_handle="alice", now=T0)

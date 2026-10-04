@@ -283,12 +283,15 @@ Entries, feedback, goals, and reviews remain; person-scoped reviews keep the han
 as history. Deleting your self profile also explains that coaching context needs a
 new self profile. `--yes` continues to bypass confirmation.
 
-For a shorter terminal view, use `person prep HANDLE --brief`. It keeps private
-notes and active goal details in full, but replaces feedback and review bodies with
-opening prose previews of at most 180 characters. Each preview identifies its record;
-commands beneath the previews open the full notes or review and preserve an explicit
-`--db` path. This is a text preview, not an AI summary. Existing count options and
-`--include-general-goals` still apply. JSON remains complete with `--brief`.
+For a shorter terminal view, use `person prep HANDLE --brief`. It shows opening
+prose previews of private notes, goal details, feedback, and reviews, each at most
+180 characters. It includes the five newest active goals and only the latest
+feedback note per interaction, reporting when more goals or feedback notes exist.
+Goal title rows are shortened too. Commands beneath the previews open the full
+records; an all-goals command appears when goals are omitted. These commands
+preserve an explicit `--db` path and the all-goals command preserves
+`--include-general-goals`. This is a text preview, not an AI summary. Existing
+interaction/review count options still apply. Full prep and JSON remain complete.
 
 Find a person's handle with `person list --query "John"`. This filters names and
 handles using literal, case-insensitive substring matching, retaining self-first,
@@ -396,6 +399,12 @@ Human-readable stats also show the number of entries awaiting feedback. When it 
 Show the full experiment beneath each goal title with `goal list --with-detail`.
 JSON already contains goal details and is unchanged by this flag.
 
+Revisit completed experiments with `goal list --status done --with-outcome`.
+`--with-outcome` works with both `goal list` and `goal search`, and can be combined
+with `--with-detail`. It prints the full recorded outcome or `(no outcome recorded)`
+under each goal. Search omits the outcome excerpt when the full outcome is shown.
+JSON already includes outcomes and is unchanged by this flag.
+
 Search titles, details, and recorded outcomes together:
 
 ```sh
@@ -407,8 +416,10 @@ commscoach goal search --query "ask" --oldest-first --limit 5 --json
 Matching is literal and case-insensitive, including `%`, `_`, and `!`. Empty or
 whitespace-only queries are rejected. Search defaults to all statuses and a limit
 of 20, with active goals first and newest-first within the active and closed groups.
-`--status`, `--person`, and the query combine before ordering and limiting results;
-an unmatched person returns no goals, as with `goal list`. `--oldest-first` reverses
+`--status`, `--person`, and the query combine before ordering and limiting results.
+Both `goal list` and `goal search` reject an unknown person handle, including with
+`--limit 0`; an existing person with no matching goals returns an empty list.
+Person matching remains case-insensitive. `--oldest-first` reverses
 creation-time order within those groups. `--limit 0` returns no results. Human output
 labels matching excerpts by title, detail, or outcome; JSON returns complete goal
 objects. Add `--with-detail` to include full details in human search results too.

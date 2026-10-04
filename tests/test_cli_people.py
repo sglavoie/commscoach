@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import shlex
 import sys
 import tempfile
 import unittest
@@ -60,7 +61,7 @@ class PersonAddTests(PeopleTestBase):
         self.assertEqual(self._run("person", "list", "--query", "missing")[1], "(no people)\n")
         self.assertEqual(self._run("person", "list", "--query", " ")[0], 1)
 
-    def test_brief_prep_preserves_notes_goals_and_full_json(self) -> None:
+    def test_brief_prep_previews_notes_goals_and_preserves_full_json(self) -> None:
         person = self._seed_person("alice")
         with closing(db.connect(self.db_path)) as conn:
             db.set_person_note(conn, person.id, "Complete private notes")
@@ -83,6 +84,50 @@ class PersonAddTests(PeopleTestBase):
             self._run("person", "prep", "alice", "--json"),
             self._run("person", "prep", "alice", "--brief", "--json"),
         )
+
+    def test_brief_bounds_long_notes_goals_and_feedback_with_working_full_commands(self) -> None:
+        # Exercise shell quoting in every recovery command.
+        self.db_path = self.tmpdir / "journal's notes.sqlite3"
+        db.init_db(self.db_path)
+        person = self._seed_person("alice")
+        with closing(db.connect(self.db_path)) as conn:
+            db.set_person_note(conn, person.id, "# Notes\n\n" + "Context " * 60 + "NOTES_END")
+            for index in range(7):
+                db.create_goal(
+                    conn, f"Experiment {index}", detail="Practice " * 60 + "DETAIL_END",
+                    person_handle="alice" if index % 2 else None,
+                    now=f"2026-10-0{index + 1}T00:00:00+00:00",
+                )
+            entry = db.create_entry(conn, "Conversation", people=["alice"])
+            db.create_feedback(conn, entry.id, "Older advice")
+            latest = db.create_feedback(conn, entry.id, "Latest advice")
+        flags = ("--include-general-goals",)
+        rc, out, err = self._run("person", "prep", "alice", "--brief", *flags)
+        self.assertEqual(rc, 0, err)
+        for hidden in ("NOTES_END", "DETAIL_END", "Older advice", "Experiment 0", "Experiment 1"):
+            self.assertNotIn(hidden, out)
+        self.assertIn("Showing 5 of 7 active goals", out)
+        self.assertIn("Showing latest of 2 feedback notes", out)
+        self.assertIn(f"Feedback [{latest.id}]: Latest advice", out)
+        self.assertIn("(general)", out)
+        self.assertEqual(
+            self._run("person", "prep", "alice", *flags, "--json"),
+            self._run("person", "prep", "alice", *flags, "--brief", "--json"),
+        )
+        full = self._run("person", "prep", "alice", *flags)[1]
+        for text in ("NOTES_END", "DETAIL_END", "Older advice", "Experiment 0"):
+            self.assertIn(text, full)
+        recovered = []
+        for line in out.splitlines():
+            if line.strip().startswith(("Full notes:", "Full goal:", "All goals:")):
+                argv = shlex.split(line.split(": ", 1)[1])
+                self.assertEqual(argv[:3], ["commscoach", "--db", str(self.db_path)])
+                rc, detail, err = self._run(*argv[3:])
+                self.assertEqual(rc, 0, err)
+                recovered.append(detail)
+        self.assertIn("NOTES_END", "\n".join(recovered))
+        self.assertIn("DETAIL_END", "\n".join(recovered))
+        self.assertIn("Experiment 0", "\n".join(recovered))
 
     def test_brief_prep_empty_sections_and_zero_limits(self) -> None:
         self._seed_person("alice")
