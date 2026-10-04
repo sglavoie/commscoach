@@ -352,6 +352,17 @@ The skill source lives at `~/scripts/skill_commscoach/unloaded_SKILL.md`. Instal
 
 Invoke the skill with an entry ID for entry-specific coaching, ask for a recent communications review, ask to catch up on uncoached entries, or ask "how am I doing?" Entry coaching uses `commscoach context <id>` and stores feedback via `commscoach --json feedback add <id> -`. Reviews use `commscoach review context` to gather entries, prior syntheses, and active goals; after storing the review, the skill creates its next experiments as linked goals and closes achieved or irrelevant goals only when the reviewed entries support that judgment.
 
+Reviews may propose zero to three new experiments. When existing goals already
+cover the useful next steps, the skill names those goals without creating duplicates.
+Goals lacking relevant evidence in the reviewed slice are reported as not assessed
+and left unchanged. New relationship-specific goals link to both the review and
+the person, making them available in that person's conversation prep; broader
+habits remain general goals.
+
+For reviews and stats, requests such as "last quarter" use the previous completed
+calendar period and report its explicit dates. For example, on October 4, 2026,
+last quarter means July 1 through September 30, rather than a rolling 12-week window.
+
 Both context commands include your self profile's private notes as `self.notes` (`null` when unset). Use them for durable coaching preferences, and edit or clear them with the existing person commands:
 
 ```sh
