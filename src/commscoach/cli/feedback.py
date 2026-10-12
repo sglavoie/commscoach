@@ -198,10 +198,10 @@ def cmd_feedback_show(args: argparse.Namespace) -> int:
             print_json({**feedback_to_dict(feedback), "entry": entry_to_dict(entry)})
             return 0
         # Entry commands also use feedback renderers, so import at call time.
-        from .entries import _format_entry_human
+        from .entries_format import format_entry_human
 
         print("Linked entry (current text):")
-        print(_format_entry_human(entry))
+        print(format_entry_human(entry))
         print("\nFeedback:")
     _emit_feedback(args, feedback)
     return 0

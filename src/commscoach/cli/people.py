@@ -22,7 +22,7 @@ from .common import (
 )
 from .editor import compose_in_editor
 from .feedback import _format_feedback_human
-from .reviews import _format_review_human
+from .reviews_format import format_review_human
 from .serializers import (
     entry_to_dict, feedback_to_dict, goal_to_dict, person_to_dict, review_to_dict,
 )
@@ -293,7 +293,7 @@ def cmd_person_show(args: argparse.Namespace) -> int:
         print(f"  Full notes: {shlex.join([*command, 'person', 'show', person.handle])}")
     if args.recent is not None:
         # Entry commands import ensure_people, so load their renderer at call time.
-        from .entries import _emit_entries
+        from .entries_format import emit_entries
         from .goals import _emit_goals
 
         if args.person_command == "prep":
@@ -320,7 +320,7 @@ def cmd_person_show(args: argparse.Namespace) -> int:
         print("\nRecent interactions:")
         if args.with_feedback and entries:
             for entry in entries:
-                _emit_entries(args, (entry,), coached)
+                emit_entries(args, (entry,), coached)
                 print("Feedback:")
                 if brief:
                     print("\n".join(
@@ -338,7 +338,7 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                     )
                 print()
         else:
-            _emit_entries(args, entries, coached)
+            emit_entries(args, entries, coached)
         if args.person_command != "prep":
             print("\nActive goals:")
             _emit_goals(args, goals)
@@ -351,7 +351,7 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                 for review in reviews
             ) or "(no reviews)")
         else:
-            print("\n\n".join(_format_review_human(review) for review in reviews) or "(no reviews)")
+            print("\n\n".join(format_review_human(review) for review in reviews) or "(no reviews)")
     return 0
 
 

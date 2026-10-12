@@ -87,15 +87,15 @@ The default database is `~/.local/share/commscoach/commscoach.sqlite3` (or under
 Database files, exports, and backups contain private personal data.
 
 - [Capture, editing, and dates](docs/reference.md#capture-and-dates)
-- [Finding coaching, conversation prep, and people](docs/reference.md#finding-past-coaching-and-relationship-context)
-- [Goals and stats](docs/reference.md#goals-and-stats)
+- [Finding coaching, conversation prep, and people](docs/reference-coaching.md#finding-past-coaching-and-relationship-context)
+- [Goals and stats](docs/reference-operations.md#goals-and-stats)
 - [Tags](docs/reference.md#tags) and [review scopes](docs/reference.md#review-scopes)
-- [Correcting stored coaching](docs/reference.md#correcting-stored-coaching)
-- [AI skill integration](docs/reference.md#skill-integration)
+- [Correcting stored coaching](docs/reference-coaching.md#correcting-stored-coaching)
+- [AI skill integration](docs/reference-coaching.md#skill-integration)
 - [Database location and privacy](docs/reference.md#default-database)
-- [Diagnostics and backups](docs/reference.md#diagnostics-and-backups)
-- [Export and import](docs/reference.md#export)
-- [Schema migrations](docs/reference.md#schema-version-and-migration)
+- [Diagnostics and backups](docs/reference-operations.md#diagnostics-and-backups)
+- [Export and import](docs/reference-operations.md#export)
+- [Schema migrations](docs/reference-operations.md#schema-version-and-migration)
 
 ## Layout
 

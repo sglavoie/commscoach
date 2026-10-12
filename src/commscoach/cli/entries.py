@@ -12,8 +12,6 @@ from ..db.tags import normalize_tag_list
 from .common import (
     add_date_bounds,
     confirm,
-    first_prose_line,
-    format_stamp,
     non_negative_int,
     open_db,
     parse_date_bounds,
@@ -21,9 +19,9 @@ from .common import (
     print_json,
     read_body_arg,
     search_excerpt,
-    truncate,
 )
 from .editor import compose_in_editor
+from .entries_format import emit_entries, emit_entry
 from .feedback import _format_feedback_human
 from .people import ensure_people
 from .serializers import entry_to_dict, feedback_to_dict
@@ -222,67 +220,6 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     rm.set_defaults(func=cmd_entry_rm)
 
 
-def _format_entry_human(entry: db.Entry) -> str:
-    header_parts = [f"[{entry.id}]", f"created {entry.created_at}"]
-    if entry.occurred_at:
-        header_parts.append(f"occurred {entry.occurred_at}")
-    if entry.source:
-        header_parts.append(f"source: {entry.source}")
-    lines = [" ".join(header_parts)]
-    if entry.people:
-        lines.append("people: " + ", ".join(p.handle for p in entry.people))
-    if entry.tags:
-        lines.append("tags: " + ", ".join(entry.tags))
-    lines.append("---")
-    lines.append(entry.body)
-    return "\n".join(lines)
-
-
-def _format_entry_short(
-    entry: db.Entry, *, has_feedback: bool = False, excerpt: str | None = None,
-) -> str:
-    parts = [f"[{entry.id}]", format_stamp(entry.occurred_at or entry.created_at)]
-    if entry.source:
-        parts.append(" ".join(entry.source.split()))
-    parts.append("has feedback" if has_feedback else "needs feedback")
-    parts.append(excerpt if excerpt is not None else truncate(first_prose_line(entry.body)))
-    if entry.tags:
-        parts.append("#" + ",".join(entry.tags))
-    if entry.people:
-        parts.append("@" + ",".join(p.handle for p in entry.people))
-    return " · ".join(parts)
-
-
-def _emit_entry(
-    args: argparse.Namespace,
-    entry: db.Entry,
-    *,
-    human_prefix: str | None = None,
-) -> None:
-    if args.json:
-        print_json(entry_to_dict(entry))
-        return
-    if human_prefix:
-        print(f"{human_prefix} entry {entry.id}")
-    print(_format_entry_human(entry))
-
-
-def _emit_entries(
-    args: argparse.Namespace, entries: tuple[db.Entry, ...], coached: set[int],
-    *, excerpts: dict[int, str] | None = None,
-) -> None:
-    if args.json:
-        print_json([entry_to_dict(e) for e in entries])
-        return
-    if not entries:
-        print("(no entries)")
-        return
-    for entry in entries:
-        print(_format_entry_short(
-            entry, has_feedback=entry.id in coached,
-            excerpt=excerpts.get(entry.id) if excerpts is not None else None,
-        ))
-
 
 def cmd_entry_add(args: argparse.Namespace) -> int:
     occurred_at = (
@@ -308,7 +245,7 @@ def cmd_entry_add(args: argparse.Namespace) -> int:
             tags=args.tags,
             people=args.people,
         )
-    _emit_entry(args, entry, human_prefix="created")
+    emit_entry(args, entry, human_prefix="created")
     return 0
 
 
@@ -326,7 +263,7 @@ def cmd_entry_show(args: argparse.Namespace) -> int:
             }
         )
     else:
-        _emit_entry(args, entry)
+        emit_entry(args, entry)
         if args.with_feedback:
             print("\nFeedback:")
             print(
@@ -427,7 +364,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
                 (entry.id,),
             )] if body_changed else []
         )
-    _emit_entry(args, entry, human_prefix="updated")
+    emit_entry(args, entry, human_prefix="updated")
     if has_feedback or review_ids:
         command = ["commscoach"]
         if args.db:
@@ -453,7 +390,7 @@ def cmd_entry_list(args: argparse.Namespace) -> int:
             db.feedback_entry_ids(conn, (e.id for e in entries))
             if not args.json else set()
         )
-    _emit_entries(args, entries, coached)
+    emit_entries(args, entries, coached)
     return 0
 
 
@@ -499,7 +436,7 @@ def cmd_entry_search(args: argparse.Namespace) -> int:
             db.feedback_entry_ids(conn, (e.id for e in entries))
             if not args.json else set()
         )
-    _emit_entries(args, entries, coached, excerpts=excerpts)
+    emit_entries(args, entries, coached, excerpts=excerpts)
     if not args.json and total > len(entries):
         print(f"Showing {len(entries)} of {total} matching entries.")
     return 0
