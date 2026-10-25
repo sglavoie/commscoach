@@ -137,7 +137,9 @@ commscoach --yes review rm 1
 
 ## Skill integration
 
-The skill source lives at `~/scripts/skill_commscoach/unloaded_SKILL.md`. Install or link that file into the harness where you want to invoke it; the former documented path `~/scripts/skills/commscoach/SKILL.md` does not exist.
+The skill is included in this repository at [skills/commscoach/SKILL.md](../skills/commscoach/SKILL.md). Install or link the `skills/commscoach` directory into your harness's skill directory, keeping the entrypoint named `SKILL.md`. The skill calls `commscoach` through `PATH`; install the CLI using the [quick-start instructions](../README.md#install-globally) before invoking it.
+
+Maintain the skill in this repository alongside the CLI. Existing local paths can be preserved with symlinks to the repository's `SKILL.md`, so they continue to read the same source without maintaining separate copies. Recreate those links if you move the checkout.
 
 Invoke the skill with an entry ID for entry-specific coaching, ask for a recent communications review, ask to catch up on uncoached entries, or ask "how am I doing?" Entry coaching uses `commscoach context <id>` and stores feedback via `commscoach --json feedback add <id> -`. Reviews use `commscoach review context` to gather entries, prior syntheses, and active goals; after storing the review, the skill creates its next experiments as linked goals and closes achieved or irrelevant goals only when the reviewed entries support that judgment.
 

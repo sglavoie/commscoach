@@ -101,6 +101,7 @@ Database files, exports, and backups contain private personal data.
 
 ```
 src/commscoach/   # Python package
+skills/commscoach/ # AI coaching skill
 tests/            # Test suite (`uv run pytest -q`)
 ```
 
