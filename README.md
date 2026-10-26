@@ -113,3 +113,7 @@ uv sync
 uv run commscoach --help
 uv run pytest -q
 ```
+
+## License
+
+[MIT](LICENSE)
