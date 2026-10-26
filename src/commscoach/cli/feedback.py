@@ -67,7 +67,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--query", required=True, metavar="TEXT",
         help="Literal case-insensitive substring to find in feedback bodies.",
     )
-    search.add_argument("--person", default=None, metavar="HANDLE")
+    search.add_argument(
+        "--person", default=None, metavar="HANDLE",
+        help="Only feedback on entries linked to this person.",
+    )
     search.add_argument(
         "--limit", type=non_negative_int, default=20, metavar="N",
         help="Maximum results (default: 20); text output reports omitted matches.",

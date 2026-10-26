@@ -48,8 +48,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Goal detail (text, '-', or '@PATH'); omit the value to open $EDITOR.",
     )
-    add.add_argument("--person", default=None, metavar="HANDLE")
-    add.add_argument("--review", type=int, default=None, metavar="ID")
+    add.add_argument(
+        "--person", default=None, metavar="HANDLE",
+        help="Tie the goal to an existing person (default: a general goal).",
+    )
+    add.add_argument(
+        "--review", type=int, default=None, metavar="ID",
+        help="Record the review this goal came from.",
+    )
     add.set_defaults(func=cmd_goal_add)
 
     lst = goal_sub.add_parser("list", help="List goals.")
@@ -57,8 +63,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--status",
         choices=("active", "done", "dropped", "all"),
         default="active",
+        help="Goal status to list (default: active).",
     )
-    lst.add_argument("--person", default=None, metavar="HANDLE")
+    lst.add_argument(
+        "--person", default=None, metavar="HANDLE",
+        help="Only goals tied to this person.",
+    )
     lst.add_argument(
         "--limit", type=non_negative_int, default=None, metavar="N",
         help="Maximum results; text output reports omitted matches.",
@@ -73,18 +83,29 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
 
     search = goal_sub.add_parser("search", help="Search goal titles, details, and outcomes.")
-    search.add_argument("--query", required=True, metavar="TEXT")
+    search.add_argument(
+        "--query", required=True, metavar="TEXT",
+        help="Case-insensitive substring to find in titles, details, and outcomes.",
+    )
     search.add_argument(
         "--status", choices=("active", "done", "dropped", "all"), default="all",
         help="Goal status (default: all, active goals first).",
     )
-    search.add_argument("--person", default=None, metavar="HANDLE")
+    search.add_argument(
+        "--person", default=None, metavar="HANDLE",
+        help="Only goals tied to this person.",
+    )
     search.add_argument(
         "--limit", type=non_negative_int, default=20, metavar="N",
         help="Maximum results (default: 20); text output reports omitted matches.",
     )
-    search.add_argument("--oldest-first", action="store_true")
-    search.add_argument("--with-detail", action="store_true")
+    search.add_argument(
+        "--oldest-first", action="store_true",
+        help="Show oldest goals first before applying --limit.",
+    )
+    search.add_argument(
+        "--with-detail", action="store_true", help="Show full detail beneath each goal.",
+    )
     search.set_defaults(func=cmd_goal_list)
     for parser in (lst, search):
         parser.add_argument(
@@ -98,7 +119,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     edit = goal_sub.add_parser("edit", help="Update an existing goal.")
     edit.add_argument("goal_id", type=int, metavar="GOAL_ID")
-    edit.add_argument("--title", default=None)
+    edit.add_argument("--title", default=None, help="Replace the goal title.")
     edit.add_argument(
         "--detail",
         nargs="?",
@@ -106,15 +127,24 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Replace detail (text, '-', or '@PATH'); omit the value to open $EDITOR.",
     )
-    edit.add_argument("--clear-detail", action="store_true")
+    edit.add_argument("--clear-detail", action="store_true", help="Remove the detail.")
     edit.add_argument(
         "--outcome", nargs="?", const=_EDIT_TEXT, default=None,
         help="Replace outcome without changing status (text, '-', '@PATH', or omit for $EDITOR).",
     )
-    edit.add_argument("--clear-outcome", action="store_true")
-    edit.add_argument("--person", default=None, metavar="HANDLE")
-    edit.add_argument("--clear-person", action="store_true")
-    edit.add_argument("--status", choices=("active", "done", "dropped"), default=None)
+    edit.add_argument("--clear-outcome", action="store_true", help="Remove the outcome.")
+    edit.add_argument(
+        "--person", default=None, metavar="HANDLE",
+        help="Tie the goal to this existing person.",
+    )
+    edit.add_argument(
+        "--clear-person", action="store_true",
+        help="Make the goal general (not tied to a person).",
+    )
+    edit.add_argument(
+        "--status", choices=("active", "done", "dropped"), default=None,
+        help="Set the status directly (use 'goal close' to record an outcome).",
+    )
     edit.set_defaults(func=cmd_goal_edit)
 
     close = goal_sub.add_parser("close", help="Close a goal as done or dropped.")
@@ -126,7 +156,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Outcome (text, '-', or '@PATH'); omit the value to open $EDITOR.",
     )
-    close.add_argument("--dropped", action="store_true")
+    close.add_argument(
+        "--dropped", action="store_true", help="Close as dropped instead of done.",
+    )
     close.set_defaults(func=cmd_goal_close)
 
     rm = goal_sub.add_parser("rm", help="Delete one goal.")

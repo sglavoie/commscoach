@@ -48,21 +48,21 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         type=non_negative_int,
         default=20,
         metavar="N",
-        help="Number of latest entries to include.",
+        help="Number of most recent entries in the scope to include (default: 20).",
     )
     context_cmd.add_argument(
         "--prior-review-limit",
         type=non_negative_int,
         default=3,
         metavar="N",
-        help="Number of prior review syntheses to include.",
+        help="Number of prior review syntheses to include (default: 3).",
     )
     context_cmd.add_argument(
         "--goal-limit",
         type=non_negative_int,
         default=10,
         metavar="N",
-        help="Number of active goals to include.",
+        help="Number of active goals to include (default: 10).",
     )
     add_scope_flags(context_cmd)
     context_cmd.set_defaults(func=cmd_review_context)
@@ -94,7 +94,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         type=non_negative_int,
         default=20,
         metavar="N",
-        help="Stored source context limit.",
+        help=(
+            "Entry limit of the 'review context' call this review was written"
+            " from, stored for provenance (default: 20)."
+        ),
     )
     add.set_defaults(func=cmd_review_add)
 
@@ -139,7 +142,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--limit", type=non_negative_int, default=20, metavar="N",
         help="Maximum results (default: 20); text output reports omitted matches.",
     )
-    search.add_argument("--scope", choices=db.SCOPE_KINDS, default=None, dest="scope_kind")
+    search.add_argument(
+        "--scope", choices=db.SCOPE_KINDS, default=None, dest="scope_kind",
+        help="Only search reviews with this scope kind.",
+    )
     search.add_argument(
         "--person", default=None, dest="person_handle", metavar="HANDLE",
         help="Only search reviews scoped to HANDLE, including deleted people.",

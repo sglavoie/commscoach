@@ -81,7 +81,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default=[],
         dest="tags",
         metavar="TAG",
-        help="Attach a tag (may be repeated; values are stripped + lowercased).",
+        help=(
+            "Attach a tag (repeatable or comma-separated, e.g. --tag 1on1,review;"
+            " values are stripped + lowercased)."
+        ),
     )
     add.add_argument(
         "--person",
@@ -207,7 +210,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Show entries without feedback (the coaching backlog).",
     )
-    srch.add_argument("--limit", type=non_negative_int, default=None, metavar="N")
+    srch.add_argument(
+        "--limit", type=non_negative_int, default=None, metavar="N",
+        help="Maximum results (default: all); text output reports omitted matches.",
+    )
     srch.add_argument(
         "--oldest-first", action="store_true",
         help="Return the oldest matching entries first, before applying --limit.",

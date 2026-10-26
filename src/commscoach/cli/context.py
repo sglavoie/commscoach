@@ -27,14 +27,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         type=non_negative_int,
         default=3,
         metavar="N",
-        help="Number of prior entries to include per linked person.",
+        help="Number of prior entries to include per linked person (default: 3).",
     )
     context_parser.add_argument(
         "--prior-review-limit",
         type=non_negative_int,
         default=1,
         metavar="N",
-        help="Number of prior review syntheses to include.",
+        help="Number of prior review syntheses to include (default: 1).",
     )
     context_parser.set_defaults(func=cmd_context)
     context_parser.add_argument(
