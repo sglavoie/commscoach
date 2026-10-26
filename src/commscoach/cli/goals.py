@@ -368,7 +368,11 @@ def cmd_goal_list(args: argparse.Namespace) -> int:
         query=getattr(args, "query", None),
     )
     if total > len(goals):
-        print(f"Showing {len(goals)} of {total} matching goals.", file=sys.stderr)
+        # Active goals are the default view, as all entries are for entry list.
+        query = getattr(args, "query", None)
+        filtered = args.person is not None or query is not None or args.status != "active"
+        noun = "matching goals" if filtered else "goals"
+        print(f"Showing {len(goals)} of {total} {noun}.", file=sys.stderr)
     return 0
 
 

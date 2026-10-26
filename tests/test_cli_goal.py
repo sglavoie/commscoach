@@ -121,6 +121,10 @@ class GoalOutcomeSearchTests(GoalTestBase):
                     self.assertEqual(len(json.loads(out)), min(limit, total))
         self.assertNotIn("Showing", "".join(self._run("goal", "list", "--status", "all")[1:]))
         self.assertEqual(self._run("goal", "search", "--query", "missing")[1], "(no goals)\n")
+        # Active goals are goal list's default view, so no filter is "matching".
+        rc, _, err = self._run("goal", "list", "--limit", "0")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Showing 0 of 1 goals.", err)
 
     def test_outcome_list_and_search_show_full_text_without_duplicate_excerpt(self) -> None:
         with closing(db.connect(self.db_path)) as conn:

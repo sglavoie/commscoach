@@ -347,7 +347,9 @@ def cmd_review_list(args: argparse.Namespace) -> int:
         )
     emit_reviews(args, reviews, query=query)
     if total > len(reviews):
-        print(f"Showing {len(reviews)} of {total} matching reviews.", file=sys.stderr)
+        filters = (args.scope_kind, args.person_handle, args.tag, query, since, until)
+        noun = "matching reviews" if any(value is not None for value in filters) else "reviews"
+        print(f"Showing {len(reviews)} of {total} {noun}.", file=sys.stderr)
     return 0
 
 
