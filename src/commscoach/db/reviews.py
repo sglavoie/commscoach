@@ -284,11 +284,13 @@ def _review_filters(
         where.append("scope_kind = ?")
         params.append(scope_kind)
     if person_handle is not None:
+        if not person_handle.strip():
+            raise DBError("person handle must be a non-empty string")
         where.append("handle_key(scope_person_handle) = handle_key(?)")
         params.append(person_handle)
     if tag is not None:
         where.append("scope_tag = ?")
-        params.append(tags_mod.normalize_tag(tag))
+        params.append(tags_mod._require_name(tag, what="tag"))
     return (" WHERE " + " AND ".join(where) if where else ""), params
 
 

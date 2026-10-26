@@ -184,6 +184,9 @@ def get_person(conn: sqlite3.Connection, person_id: int) -> Person | None:
 
 
 def get_person_by_handle(conn: sqlite3.Connection, handle: str) -> Person | None:
+    # A blank handle (say, an unset $VAR) is a mistake, not "no such person".
+    if not handle.strip():
+        raise DBError("person handle must be a non-empty string")
     row = conn.execute(
         "SELECT * FROM people WHERE handle_key(handle) = handle_key(?)",
         (handle,),

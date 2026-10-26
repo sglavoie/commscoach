@@ -102,7 +102,7 @@ written. JSON adds an `entry` object only when this flag is supplied; plain
 
 `entry rm ID` includes the counts of feedback notes to delete and review links to remove in its confirmation. The reviews themselves remain; when a review covered only this entry, the confirmation names it, and with `--yes` a stderr note says it now covers no entries. `--yes` continues to bypass confirmation.
 
-`entry edit ID` replaces links with `--tag TAG` and `--person HANDLE` (both repeatable; tags also accept comma-separated values) and removes them all with `--clear-tags` or `--clear-people`. An empty `--tag ""` or `--person ""` (often an unset shell variable) is rejected instead of clearing links. Edits that leave every value as it was print `unchanged` and keep `updated_at`; this applies to every `edit` command:
+`entry edit ID` replaces links with `--tag TAG` and `--person HANDLE` (both repeatable; tags also accept comma-separated values) and removes them all with `--clear-tags` or `--clear-people`. An empty `--tag ""` or `--person ""` (often an unset shell variable) is rejected instead of clearing links. The same goes for `entry add`, and for the `--person`, `--tag`, and `--source` filters on list, search, and context commands, which would otherwise silently match everything or nothing. Edits that leave every value as it was print `unchanged` and keep `updated_at`; this applies to every `edit` command:
 
 ```sh
 commscoach entry edit 42 --tag 1on1,review --person jdoe

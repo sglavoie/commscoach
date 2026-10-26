@@ -82,7 +82,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add.add_argument(
         "--tag",
         action="append",
-        default=[],
+        default=None,
         dest="tags",
         metavar="TAG",
         help=(
@@ -93,7 +93,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add.add_argument(
         "--person",
         action="extend",
-        default=[],
+        default=None,
         dest="people",
         type=handle_list_arg,
         metavar="HANDLE",
@@ -242,12 +242,27 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     rm.set_defaults(func=cmd_entry_rm)
 
 
+def _reject_empty_links(args: argparse.Namespace, *, clear_hint: bool) -> None:
+    """Reject an empty ``--person``/``--tag`` (say, an unset ``$VAR``).
+
+    On add it would silently drop the link; on edit it would clear every link.
+    """
+    if args.people == []:
+        hint = "; use --clear-people to remove every person" if clear_hint else ""
+        raise db.DBError(f"--person needs a handle{hint}")
+    if args.tags is not None and not normalize_tag_list(args.tags):
+        hint = "; use --clear-tags to remove every tag" if clear_hint else ""
+        raise db.DBError(f"--tag needs a tag{hint}")
+
+
 def cmd_entry_add(args: argparse.Namespace) -> int:
+    _reject_empty_links(args, clear_hint=False)
+    people = args.people or []
     occurred_at = parse_when_or_raise(args.occurred_at) if args.occurred_at is not None else None
     with open_db(args) as conn:
         # Ask about new people before the editor opens, so declining loses no draft.
         new_people = confirm_new_people(
-            conn, args.people, assume_yes=args.yes, command=command_prefix(args)
+            conn, people, assume_yes=args.yes, command=command_prefix(args)
         )
         body = read_body_arg(
             args.body,
@@ -264,8 +279,8 @@ def cmd_entry_add(args: argparse.Namespace) -> int:
                 body,
                 source=_clean_source(args.source),
                 occurred_at=occurred_at,
-                tags=args.tags,
-                people=args.people,
+                tags=args.tags or [],
+                people=people,
             )
     emit_entry(args, entry, human_prefix="created")
     return 0
@@ -312,11 +327,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
     removed_tags = set(normalize_tag_list(args.remove_tag))
     if removed_tags.intersection(added_tags):
         raise db.DBError("cannot add and remove the same tag")
-    # An empty --person/--tag (say, an unset $VAR) would silently clear every link.
-    if args.people == []:
-        raise db.DBError("--person needs a handle; use --clear-people to remove every person")
-    if args.tags is not None and not normalize_tag_list(args.tags):
-        raise db.DBError("--tag needs a tag; use --clear-tags to remove every tag")
+    _reject_empty_links(args, clear_hint=True)
     removed_people = {handle.lower() for handle in args.remove_person}
     if removed_people.intersection(handle.lower() for handle in args.add_person):
         raise db.DBError("cannot add and remove the same person")

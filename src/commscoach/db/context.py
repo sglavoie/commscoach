@@ -65,7 +65,7 @@ def _validate_context_scope(scope_kind: str, supplied: dict[str, Any]) -> None:
         if value is not None and name not in owned:
             raise DBError(f"scope_kind '{scope_kind}' does not accept {name}")
     if scope_kind == "person" and not str(supplied["person_handle"] or "").strip():
-        raise DBError("scope_kind 'person' requires person_handle")
+        raise DBError("person handle must be a non-empty string")
     if scope_kind == "tag" and not tags_mod.normalize_tag(supplied["tag"] or ""):
         raise DBError("scope_kind 'tag' requires a non-empty tag")
     if scope_kind == "range":

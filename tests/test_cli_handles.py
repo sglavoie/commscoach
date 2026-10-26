@@ -100,6 +100,35 @@ class FilterConsistencyTests(EntryTestBase):
                 self.assertEqual(out, "")
                 self.assertIn(message, err)
 
+    def test_blank_filters_are_rejected_not_ignored(self) -> None:
+        self._run("entry", "add", "hello", "--tag", "work")
+        for command, flags, message in (
+            (("entry", "search"), ("--person", ""), "person handle must be a non-empty"),
+            (("entry", "search"), ("--person", "@"), "person handle must be a non-empty"),
+            (("entry", "search"), ("--tag", " "), "tag must be a non-empty"),
+            (("entry", "search"), ("--source", ""), "source must be a non-empty"),
+            (("review", "list"), ("--person", ""), "person handle must be a non-empty"),
+            (("review", "list"), ("--tag", ""), "tag must be a non-empty"),
+            (("goal", "list"), ("--person", ""), "person handle must be a non-empty"),
+            (("feedback", "search"), ("--query", "x", "--person", ""), "non-empty"),
+            (("review", "context"), ("--person", ""), "person handle must be a non-empty"),
+        ):
+            with self.subTest(command=command, flags=flags):
+                rc, out, err = self._run(*command, *flags)
+                self.assertEqual(rc, 1)
+                self.assertEqual(out, "")
+                self.assertIn(message, err)
+
+    def test_entry_add_rejects_empty_person_or_tag(self) -> None:
+        for flag in ("--person", "--tag"):
+            with self.subTest(flag=flag):
+                rc, out, err = self._run("entry", "add", "hello", flag, "")
+                self.assertEqual(rc, 1)
+                self.assertEqual(out, "")
+                self.assertIn(f"{flag} needs a", err)
+        rc, out, _ = self._run("entry", "list")
+        self.assertIn("(no entries)", out)
+
     def test_explicit_empty_body_is_rejected_not_opened_in_the_editor(self) -> None:
         self._run("entry", "add", "hello")
         rc, _, err = self._run("entry", "edit", "1", "--body", "")

@@ -309,19 +309,20 @@ def _scope_filters(
     common.validate_range_bounds(since, until, since_name="since", until_name="until")
     where: list[str] = []
     params: list[Any] = []
-    if tag:
-        if tags_mod._find_tag_id(conn, tags_mod.normalize_tag(tag)) is None:
-            raise TagNotFoundError(
-                tags_mod.normalize_tag(tag), hint="'commscoach tag list' shows existing tags"
-            )
+    # Blank filters raise rather than being skipped: an unset $VAR must not
+    # silently widen a filtered search to every entry.
+    if tag is not None:
+        tag = tags_mod._require_name(tag, what="tag")
+        if tags_mod._find_tag_id(conn, tag) is None:
+            raise TagNotFoundError(tag, hint="'commscoach tag list' shows existing tags")
         where.append(
             "EXISTS ("
             "SELECT 1 FROM entry_tags et"
             " JOIN tags t ON t.id = et.tag_id"
             " WHERE et.entry_id = e.id AND t.name = ?)"
         )
-        params.append(tags_mod.normalize_tag(tag))
-    if person_handle:
+        params.append(tag)
+    if person_handle is not None:
         if get_person_by_handle(conn, person_handle) is None:
             raise PersonNotFoundError(person_handle)
         where.append(
@@ -462,6 +463,8 @@ def _search_entry_rows(
         until=until,
     )
     if source is not None:
+        if not source.strip():
+            raise DBError("source must be a non-empty string")
         # NOCASE folds ASCII only; handle_key gives the same identity as handles.
         where.append("handle_key(e.source) = handle_key(?)")
         params.append(source)
