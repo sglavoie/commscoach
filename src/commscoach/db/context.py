@@ -13,6 +13,7 @@ from ..models import (
     ReviewContext,
     ReviewEntryContext,
 )
+from . import common
 from . import tags as tags_mod
 from .entries import (
     count_entries_with_person,
@@ -79,6 +80,7 @@ def _validate_context_scope(scope_kind: str, supplied: dict[str, Any]) -> None:
         )
 
 
+@common.reads_snapshot
 def get_review_context(
     conn: sqlite3.Connection,
     limit: int = 20,
@@ -210,6 +212,7 @@ def get_review_context(
     )
 
 
+@common.reads_snapshot
 def get_entry_context(
     conn: sqlite3.Connection,
     entry_id: int,

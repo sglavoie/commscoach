@@ -155,6 +155,17 @@ def writes(func: _F) -> _F:
     return wrapper  # type: ignore[return-value]
 
 
+def reads_snapshot(func: _F) -> _F:
+    """Run a ``(conn, ...)`` multi-query reader in one :func:`read_snapshot`."""
+
+    @functools.wraps(func)
+    def wrapper(conn: sqlite3.Connection, *args: Any, **kwargs: Any) -> Any:
+        with read_snapshot(conn):
+            return func(conn, *args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
+
+
 # Sentinel for "argument not provided" in update_* APIs. Using a private
 # object() means it can never collide with a real caller-supplied value.
 UNSET: Any = object()

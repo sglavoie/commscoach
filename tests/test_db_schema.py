@@ -117,7 +117,16 @@ class InitDbSchemaTests(unittest.TestCase):
                 row["name"]
                 for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")
             }
+            update_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'entries_fts_after_update'"
+            ).fetchone()["sql"]
             db.validate_schema(conn)
+            entry = db.create_entry(conn, "Quarterly planning", tags=("work",))
+            db.update_entry(conn, entry.id, tags=["ops"])
+            self.assertEqual(
+                [e.id for e in db.search_entries(conn, query="quarterly", mode="fts")], [entry.id]
+            )
+        self.assertIn("AFTER UPDATE OF body ON entries", update_sql)
         self.assertIn("content='entries'", fts_sql)
         self.assertIn("content_rowid='id'", fts_sql)
         self.assertIn("tokenize='unicode61 remove_diacritics 2'", fts_sql)

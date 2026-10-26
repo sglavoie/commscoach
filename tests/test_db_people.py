@@ -117,6 +117,14 @@ class PeopleCrudTests(DBTestCase):
         self.assertEqual(len(people_with_self), 1)
         self.assertEqual(people_with_self[0].id, second.id)
 
+    def test_set_self_on_current_self_is_a_no_op(self) -> None:
+        with patch_timestamps("t0", "t0"):
+            me = db.create_person(self.conn, "me", is_self=True)
+        with patch_timestamps("t1"):
+            again = db.set_self(self.conn, me.id)
+        self.assertEqual(again, me)
+        self.assertEqual(db.get_person(self.conn, me.id).updated_at, "t0")
+
     def test_set_self_when_no_existing_self(self) -> None:
         person = db.create_person(self.conn, "me")
         promoted = db.set_self(self.conn, person.id)

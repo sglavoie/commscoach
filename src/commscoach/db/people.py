@@ -282,6 +282,9 @@ def set_self(conn: sqlite3.Connection, person_id: int) -> Person:
     person = get_person(conn, person_id)
     if person is None:
         raise PersonNotFoundError(person_id)
+    if person.is_self:
+        # Already self: like every other no-op edit, keep updated_at.
+        return person
     now = common.utcnow_iso()
     with common.write_transaction(conn):
         conn.execute(

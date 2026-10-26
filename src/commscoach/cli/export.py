@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 from .. import db, paths
+from ..db.common import read_snapshot
 from .common import format_scope, open_db, print_err, print_json, resolve_db_path
 
 
@@ -209,10 +210,14 @@ def cmd_export(args: argparse.Namespace) -> int:
                 sort_keys=True,
             )
         else:
-            reviews = db.list_reviews(conn)
-            goals = db.list_goals(conn, status=None)
-            entries = db.list_entries(conn)
-            feedback_by_entry = {entry.id: db.list_feedback(conn, entry.id) for entry in entries}
+            # One snapshot, as the JSON dump uses, so the sections agree.
+            with read_snapshot(conn):
+                reviews = db.list_reviews(conn)
+                goals = db.list_goals(conn, status=None)
+                entries = db.list_entries(conn)
+                feedback_by_entry = {
+                    entry.id: db.list_feedback(conn, entry.id) for entry in entries
+                }
             rendered = _render_markdown_export(entries, feedback_by_entry, reviews, goals)
     if not rendered.endswith("\n"):
         rendered += "\n"

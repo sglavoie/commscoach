@@ -179,8 +179,12 @@ AFTER DELETE ON entries BEGIN
     VALUES ('delete', old.id, old.body);
 END;
 
-CREATE TRIGGER IF NOT EXISTS entries_fts_after_update
-AFTER UPDATE ON entries BEGIN
+-- Only a body change touches the index; tag, people, and source edits also
+-- bump updated_at and used to delete and re-insert the body for nothing.
+-- Dropped first so init upgrades the older, unconditional trigger.
+DROP TRIGGER IF EXISTS entries_fts_after_update;
+CREATE TRIGGER entries_fts_after_update
+AFTER UPDATE OF body ON entries BEGIN
     INSERT INTO entries_fts(entries_fts, rowid, body)
     VALUES ('delete', old.id, old.body);
     INSERT INTO entries_fts(rowid, body) VALUES (new.id, new.body);

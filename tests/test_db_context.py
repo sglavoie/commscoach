@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+import unittest.mock
 
 from commscoach import db
 from commscoach.models import (
@@ -351,3 +352,21 @@ class EntryContextTests(DBTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContextSnapshotTests(DBTestCase):
+    def test_contexts_read_from_one_snapshot(self) -> None:
+        db.create_person(self.conn, "me", is_self=True)
+        entry = db.create_entry(self.conn, "body")
+        seen: list[bool] = []
+        real = db.context.list_goals
+
+        def spy(conn, *args, **kwargs):
+            seen.append(conn.in_transaction)
+            return real(conn, *args, **kwargs)
+
+        with unittest.mock.patch.object(db.context, "list_goals", side_effect=spy):
+            db.get_entry_context(self.conn, entry.id)
+            db.get_review_context(self.conn)
+        self.assertEqual(seen, [True, True])
+        self.assertFalse(self.conn.in_transaction)
