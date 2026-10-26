@@ -123,7 +123,7 @@ class TagMergeTests(EntryTestBase):
         both = self._seed_entry("a", tags=("conflcit", "conflict"))
         only_source = self._seed_entry("b", tags=("conflcit",))
 
-        rc, out, _ = self._run("--yes", "tag", "merge", "conflcit", "conflict")
+        rc, out, _ = self._run("--yes", "tag", "merge", "#Conflcit ", "conflict")
 
         self.assertEqual(rc, 0)
         self.assertIn("merged tag 'conflcit' into 'conflict'", out)

@@ -112,7 +112,7 @@ def cmd_tag_merge(args: argparse.Namespace) -> int:
         if not confirm(prompt, assume_yes=args.yes):
             raise db.DBError("aborted; pass --yes to confirm without a prompt")
         tag = db.merge_tags(conn, args.source, args.dest)
-    _emit_tag(args, tag, human_line=f"merged tag '{args.source}' into '{tag.name}'")
+    _emit_tag(args, tag, human_line=f"merged tag '{source.name}' into '{tag.name}'")
     return 0
 
 
