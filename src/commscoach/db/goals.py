@@ -10,7 +10,7 @@ from . import common
 from .errors import DBError, GoalNotFoundError, ReviewNotFoundError
 from .people import resolve_person_handles
 from .reviews import get_review
-from .rows import hydrate_goal
+from .rows import hydrate_goal, hydrate_goals
 
 GOAL_STATUSES = frozenset({"active", "done", "dropped"})
 
@@ -36,7 +36,8 @@ def _resolve_person(conn: sqlite3.Connection, person_handle: str | None) -> Pers
 def _resolve_review(conn: sqlite3.Connection, review_id: int | None) -> Review | None:
     if review_id is None:
         return None
-    review = get_review(conn, review_id)
+    # Goals reference the review only; its covered entries are not needed.
+    review = get_review(conn, review_id, with_entries=False)
     if review is None:
         raise ReviewNotFoundError(review_id)
     return review
@@ -230,7 +231,7 @@ def list_goals(
         sql += " LIMIT ?"
         params.append(limit)
     rows = conn.execute(sql, params).fetchall()
-    return tuple(hydrate_goal(conn, row) for row in rows)
+    return hydrate_goals(conn, rows)
 
 
 def count_goals(

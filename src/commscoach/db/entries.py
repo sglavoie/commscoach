@@ -14,7 +14,7 @@ from . import common
 from . import tags as tags_mod
 from .errors import DBError, EntryNotFoundError, PersonNotFoundError, TagNotFoundError
 from .people import get_person_by_handle, resolve_person_handles
-from .rows import hydrate_entry
+from .rows import hydrate_entries, hydrate_entry
 
 _PLAIN_WORDS = re.compile(r"[^\W_]+(?:\s+[^\W_]+)*")
 _FTS_OPERATORS = frozenset({"AND", "OR", "NOT", "NEAR"})
@@ -246,7 +246,7 @@ def list_entries_with_person(
     sql = "SELECT e.* FROM entries e" + where
     sql += " ORDER BY COALESCE(e.occurred_at, e.created_at) DESC, e.id DESC LIMIT ?"
     rows = conn.execute(sql, [*params, limit]).fetchall()
-    return tuple(hydrate_entry(conn, row) for row in rows)
+    return hydrate_entries(conn, rows)
 
 
 def _person_history_filter(
@@ -405,7 +405,7 @@ def search_entries(
         mode=mode,
         oldest_first=oldest_first,
     )
-    return tuple(hydrate_entry(conn, row) for row in rows)
+    return hydrate_entries(conn, rows)
 
 
 def count_search_entries(

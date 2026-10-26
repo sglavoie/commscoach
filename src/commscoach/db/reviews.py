@@ -13,7 +13,7 @@ from .common import validate_range_bounds
 from .entries import get_entry
 from .errors import DBError, EntryNotFoundError, ReviewNotFoundError
 from .people import resolve_person_handles
-from .rows import hydrate_review
+from .rows import hydrate_review, hydrate_reviews
 
 #: Every scope axis a review may cover, mirroring the ``scope_kind`` CHECK in
 #: the ``reviews`` DDL. Re-exported through ``commscoach.db`` so the CLI can use
@@ -185,11 +185,13 @@ def create_review(
     return review
 
 
-def get_review(conn: sqlite3.Connection, review_id: int) -> Review | None:
+def get_review(
+    conn: sqlite3.Connection, review_id: int, *, with_entries: bool = True
+) -> Review | None:
     row = conn.execute("SELECT * FROM reviews WHERE id = ?", (review_id,)).fetchone()
     if row is None:
         return None
-    return hydrate_review(conn, row)
+    return hydrate_review(conn, row, with_entries=with_entries)
 
 
 def list_reviews(
@@ -230,7 +232,7 @@ def list_reviews(
         sql += " LIMIT ?"
         params.append(limit)
     rows = conn.execute(sql, params).fetchall()
-    return tuple(hydrate_review(conn, row) for row in rows)
+    return hydrate_reviews(conn, rows)
 
 
 def count_reviews(
