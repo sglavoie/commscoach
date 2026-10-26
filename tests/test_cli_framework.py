@@ -76,6 +76,22 @@ class HelperTests(unittest.TestCase):
             )
         compose.assert_not_called()
 
+    def test_read_body_arg_non_tty_hint_names_the_flag(self) -> None:
+        with self.assertRaisesRegex(
+            db.DBError,
+            "notes required when stdin is not a terminal:"
+            " pass --notes TEXT, --notes - to read stdin, or --notes @PATH",
+        ):
+            read_body_arg(
+                None,
+                what="notes",
+                template="",
+                preamble="instructions",
+                isatty=lambda: False,
+                compose=mock.Mock(),
+                flag="--notes",
+            )
+
     def test_read_body_arg_composes_on_tty(self) -> None:
         compose = mock.Mock(return_value="composed")
         result = read_body_arg(
@@ -87,7 +103,7 @@ class HelperTests(unittest.TestCase):
             compose=compose,
         )
         self.assertEqual(result, "composed")
-        compose.assert_called_once_with(template="seed", preamble="instructions")
+        compose.assert_called_once_with(template="seed", preamble="instructions", what="body")
 
     def test_confirm_assume_yes_skips_prompt(self) -> None:
         calls: list[str] = []

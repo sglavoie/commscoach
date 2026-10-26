@@ -248,16 +248,23 @@ def read_body_arg(
     preamble: str,
     isatty: Callable[[], bool],
     compose: Callable[..., str],
+    flag: str | None = None,
 ) -> str:
-    """Resolve an optional body argument, composing interactively when omitted."""
+    """Resolve an optional body argument, composing interactively when omitted.
+
+    ``flag`` names the option that takes the text (``--notes``), so the
+    non-interactive hint shows where it goes rather than a bare "the text".
+    """
     if value is not None:
         return read_body_or_raise(value)
     if not isatty():
-        raise db.DBError(
-            f"{what} required when stdin is not a terminal:"
-            " pass the text, '-' to read stdin, or '@PATH'"
+        forms = (
+            f"{flag} TEXT, {flag} - to read stdin, or {flag} @PATH"
+            if flag is not None
+            else "the text, '-' to read stdin, or '@PATH'"
         )
-    return compose(template=template, preamble=preamble)
+        raise db.DBError(f"{what} required when stdin is not a terminal: pass {forms}")
+    return compose(template=template, preamble=preamble, what=what)
 
 
 # ``const`` of the edit commands' ``--body``: a bare flag opens the editor. A

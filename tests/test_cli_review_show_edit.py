@@ -214,7 +214,7 @@ class ReviewEditTests(ReviewTestBase):
         entry = self._seed_entry("entry")
         review = self._seed_review("first draft", [entry.id])
 
-        def compose(*, template: str, preamble: str) -> str:
+        def compose(*, template: str, preamble: str, what: str) -> str:
             self.assertEqual(template, "first draft")
             self.assertIn("#>", preamble)
             return "edited in place"

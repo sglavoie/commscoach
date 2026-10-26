@@ -398,6 +398,7 @@ def cmd_review_edit(args: argparse.Namespace) -> int:
                 preamble=REVIEW_PREAMBLE,
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
+                flag="--body",
             )
         review = db.update_review(conn, args.review_id, body=body)
     emit_review(args, review, human_prefix=edit_verb(current.updated_at, review.updated_at))

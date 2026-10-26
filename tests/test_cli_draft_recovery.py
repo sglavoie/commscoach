@@ -117,7 +117,7 @@ class DraftRecoveryTests(EntryTestBase):
                 with mock.patch.object(editor.subprocess, "call", side_effect=empty_draft):
                     rc, _, err = self._run("goal", command, str(goal.id), f"--{field}")
                 self.assertEqual(rc, 1)
-                self.assertIn("empty body", err)
+                self.assertIn(f"editor produced empty {field}", err)
                 self.assertFalse(self.draft_path.exists())
                 with closing(db.connect(self.db_path)) as conn:
                     self.assertEqual(db.get_goal(conn, goal.id), before)
@@ -139,7 +139,7 @@ class DraftRecoveryTests(EntryTestBase):
         with mock.patch.object(editor.subprocess, "call", side_effect=empty_draft):
             rc, _, err = self._run("goal", "add", "Empty", "--detail")
         self.assertEqual(rc, 1)
-        self.assertIn("empty body", err)
+        self.assertIn("editor produced empty detail", err)
         self.assertFalse(self.draft_path.exists())
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.list_goals(conn), before)
@@ -159,7 +159,7 @@ class DraftRecoveryTests(EntryTestBase):
         with mock.patch.object(editor.subprocess, "call", side_effect=empty_draft):
             rc, _, err = self._run("person", "edit", "alice", "--notes", "--name", "Changed")
         self.assertEqual(rc, 1)
-        self.assertIn("empty body", err)
+        self.assertIn("editor produced empty notes", err)
         self.assertFalse(self.draft_path.exists())
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.get_person_note(conn, person.id).body, "My unsaved text")

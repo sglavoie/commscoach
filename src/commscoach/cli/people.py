@@ -474,6 +474,7 @@ def cmd_person_edit(args: argparse.Namespace) -> int:
                 preamble=NOTES_PREAMBLE,
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
+                flag="--notes",
             )
         updated = db.update_person(conn, person.id, **update_kwargs) if update_kwargs else person
         notes_changed = False

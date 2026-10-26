@@ -261,6 +261,7 @@ def cmd_feedback_edit(args: argparse.Namespace) -> int:
                 preamble=FEEDBACK_PREAMBLE,
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
+                flag="--body",
             )
         feedback = db.update_feedback(conn, args.feedback_id, body=body)
     _emit_feedback(args, feedback, human_prefix=edit_verb(current.updated_at, feedback.updated_at))

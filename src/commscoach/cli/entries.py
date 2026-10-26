@@ -398,6 +398,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
                 preamble=ENTRY_EDIT_PREAMBLE,
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
+                flag="--body",
             )
         with write_transaction(conn):
             create_people(conn, new_people)

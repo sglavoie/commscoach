@@ -323,6 +323,7 @@ def cmd_goal_add(args: argparse.Namespace) -> int:
                 preamble="Write goal detail below. Lines beginning with #> are ignored.",
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
+                flag="--detail",
             )
         else:
             detail = (
@@ -434,6 +435,7 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
                 preamble=DETAIL_PREAMBLE,
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
+                flag="--detail",
             )
         if edit_outcome:
             update_kwargs["outcome"] = read_body_arg(
@@ -443,6 +445,7 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
                 preamble=OUTCOME_PREAMBLE + "\nUse --clear-outcome to remove the outcome.",
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
+                flag="--outcome",
             )
         goal = db.update_goal(conn, args.goal_id, **update_kwargs)
     _emit_goal(args, goal, human_prefix=edit_verb(current.updated_at, goal.updated_at))
@@ -468,6 +471,7 @@ def cmd_goal_close(args: argparse.Namespace) -> int:
                 preamble=OUTCOME_PREAMBLE,
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
+                flag="--outcome",
             )
         goal = db.close_goal(
             conn,

@@ -108,9 +108,13 @@ def compose_in_editor(
     *,
     template: str,
     preamble: str,
+    what: str = "body",
     runner: Callable[[list[str]], int] | None = None,
 ) -> str:
-    """Compose privately; failed drafts survive and CLI drafts await save."""
+    """Compose privately; failed drafts survive and CLI drafts await save.
+
+    ``what`` names the text in the empty-draft error (``notes``, ``outcome``).
+    """
     fd, raw_path = tempfile.mkstemp(prefix="commscoach-", suffix=".md")
     path = Path(raw_path)
     drafts = _drafts.get()
@@ -139,7 +143,7 @@ def compose_in_editor(
 
         body = strip_comment_lines(path.read_text(encoding="utf-8")).strip()
         if not body:
-            raise db.DBError("editor produced an empty body")
+            raise db.DBError(f"editor produced empty {what}")
         succeeded = True
         return body
     except (OSError, UnicodeError) as exc:

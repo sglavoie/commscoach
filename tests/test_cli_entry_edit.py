@@ -56,7 +56,7 @@ class EntryEditTests(EntryTestBase):
     def test_edit_bare_body_opens_editor_seeded_with_current_body(self) -> None:
         entry = self._seed_entry("old body")
 
-        def compose(*, template: str, preamble: str) -> str:
+        def compose(*, template: str, preamble: str, what: str) -> str:
             self.assertEqual(template, "old body")
             self.assertIn("#>", preamble)
             self.assertIn("Edit the entry", preamble)
