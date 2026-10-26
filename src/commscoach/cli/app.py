@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
+import shlex
 import signal
 import sqlite3
 import sys
@@ -35,7 +37,7 @@ from . import (
     stats,
     tags,
 )
-from .common import print_err, print_json, resolve_db_path
+from .common import command_prefix, print_err, print_json, resolve_db_path
 from .editor import recover_editor_drafts
 
 PROG = "commscoach"
@@ -205,6 +207,19 @@ def _terminate_cleanly() -> Iterator[None]:
             signal.signal(signum, handler)
 
 
+def _with_db_flag(message: str, args: argparse.Namespace) -> str:
+    """Point the follow-up commands an error suggests at this run's ``--db``.
+
+    Hints raised below the CLI (``'commscoach tag list' shows existing tags``)
+    cannot know the flag, and copying one without it would act on the default
+    database instead. A hint that already names ``--db`` is left alone.
+    """
+    if not getattr(args, "db", None):
+        return message
+    prefix = shlex.join(command_prefix(args))
+    return re.sub(r"'commscoach (?!--db )", lambda _match: f"'{prefix} ", message)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Console-script entry point. Returns an integer exit code."""
     # Footers and hints go to stderr after the listing they describe; when both
@@ -224,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.flush()
         return code
     except db.DBError as exc:
-        print_err(str(exc))
+        print_err(_with_db_flag(str(exc), args))
         return 1
     except sqlite3.Error as exc:
         print_err(f"database error: {exc}")

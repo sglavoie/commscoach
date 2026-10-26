@@ -354,6 +354,23 @@ class OpenDBTests(unittest.TestCase):
         self.assertIn(f"run 'commscoach --db {db_path} init' first", err_buf.getvalue())
         self.assertFalse(db_path.exists())
 
+    def test_follow_up_hints_name_the_targeted_database(self) -> None:
+        db_path = self.tmpdir / "hints.sqlite3"
+        db.init_db(db_path)
+        for argv, hint in (
+            (["entry", "search", "--tag", "nosuch"], "'commscoach --db {db} tag list'"),
+            (["context", "1"], "'commscoach --db {db} person self HANDLE'"),
+        ):
+            with self.subTest(argv=argv):
+                if argv[0] == "context":
+                    with closing(db.connect(db_path)) as conn:
+                        db.create_entry(conn, "body")
+                err_buf = io.StringIO()
+                with redirect_stderr(err_buf):
+                    rc = cli.main(["--db", str(db_path), *argv])
+                self.assertEqual(rc, 1)
+                self.assertIn(hint.format(db=db_path), err_buf.getvalue())
+
     def test_uninitialized_db_exits_one_with_init_guidance(self) -> None:
         db_path = self.tmpdir / "empty.sqlite3"
         db_path.touch()

@@ -304,7 +304,7 @@ class DoctorCommandTests(unittest.TestCase):
         with redirect_stderr(err):
             list_rc = cli.main(["--db", str(self.db_path), "entry", "list"])
         self.assertEqual(list_rc, 1)
-        self.assertIn("Do NOT run 'commscoach init'", err.getvalue())
+        self.assertIn(f"Do NOT run 'commscoach --db {self.db_path} init'", err.getvalue())
         self.assertFalse(self.db_path.exists())
 
 
