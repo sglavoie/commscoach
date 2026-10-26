@@ -78,8 +78,9 @@ including full-text or literal matching and `--no-feedback`. `--limit 0` still
 reports omitted matches. Complete results have no footer; JSON remains an array
 of entries without extra metadata.
 
-The same omitted-match footer appears for `feedback search`, `review search`,
-`goal search`, and `goal list --limit N`, using each command's active filters.
+The same omitted-match footer appears for `entry list`, `feedback search`,
+`review list`, `review search`, `goal search`, and `goal list` with `--limit N`,
+using each command's active filters.
 For example, `Showing 5 of 23 matching feedback notes.` means you can increase
 `--limit` to see more advice. Counts refer to matching records, so multiple linked
 people or entries do not inflate them. JSON output remains unchanged.

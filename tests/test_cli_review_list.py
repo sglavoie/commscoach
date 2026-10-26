@@ -32,6 +32,10 @@ class ReviewListTests(ReviewTestBase):
         self.assertIn("context-limit:20", out)
         self.assertNotIn(f"[{first.id}]", out)
         self.assertLess(out.find(f"[{third.id}]"), out.find(f"[{second.id}]"))
+        self.assertIn("Showing 2 of 3 matching reviews.", out)
+
+        rc, out, _ = self._run("review", "list", "--limit", "0")
+        self.assertIn("Showing 0 of 3 matching reviews.", out)
 
     def test_list_json_payload(self) -> None:
         first_entry = self._seed_entry("first entry")

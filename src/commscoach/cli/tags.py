@@ -113,5 +113,6 @@ def cmd_tag_rm(args: argparse.Namespace) -> int:
             {"deleted": True, "name": name, "entries_unlinked": unlinked}
         )
     else:
-        print(f"removed tag '{name}' from {unlinked} entries")
+        noun = "entry" if unlinked == 1 else "entries"
+        print(f"removed tag '{name}' from {unlinked} {noun}")
     return 0

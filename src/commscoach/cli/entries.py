@@ -385,11 +385,17 @@ def cmd_entry_list(args: argparse.Namespace) -> int:
             until=until,
             limit=args.limit,
         )
+        total = (
+            db.count_search_entries(conn, since=since, until=until)
+            if not args.json and args.limit is not None else len(entries)
+        )
         coached = (
             db.feedback_entry_ids(conn, (e.id for e in entries))
             if not args.json else set()
         )
     emit_entries(args, entries, coached)
+    if not args.json and total > len(entries):
+        print(f"Showing {len(entries)} of {total} entries.")
     return 0
 
 

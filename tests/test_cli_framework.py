@@ -65,7 +65,8 @@ class HelperTests(unittest.TestCase):
         compose = mock.Mock()
         with self.assertRaisesRegex(
             db.DBError,
-            "body required: pass BODY, '-' for stdin, or '@PATH'",
+            "body required when stdin is not a terminal:"
+            " pass the text, '-' to read stdin, or '@PATH'",
         ):
             read_body_arg(
                 None,

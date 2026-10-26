@@ -71,6 +71,17 @@ class PortingCLITests(unittest.TestCase):
         self.assertEqual(payload["entries"][0]["person_ids"], [1])
         self.assertEqual(payload["entries"][0]["tag_ids"], [1])
 
+    def test_global_json_flag_selects_json_export(self) -> None:
+        rc, out, err = self._run(self.source_path, "export", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["format_version"], 2)
+
+        rc, _, err = self._run(
+            self.source_path, "export", "--json", "--format", "markdown"
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("--json conflicts with --format markdown", err)
+
     def test_json_export_file_has_mode_0600(self) -> None:
         out_path = self.tmpdir / "archive.json"
 

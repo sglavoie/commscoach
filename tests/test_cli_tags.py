@@ -197,7 +197,7 @@ class TagRmTests(EntryTestBase):
             rc, out, _ = self._run("tag", "rm", "conflict")
 
         self.assertEqual(rc, 0)
-        self.assertIn("removed tag 'conflict' from 1 entries", out)
+        self.assertIn("removed tag 'conflict' from 1 entry", out)
 
     def test_rm_confirm_no_aborts_and_keeps_the_tag(self) -> None:
         self._seed_entry("a", tags=("conflict",))

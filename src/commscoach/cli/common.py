@@ -198,7 +198,8 @@ def read_body_arg(
         return read_body_or_raise(value)
     if not isatty():
         raise db.DBError(
-            f"{what} required: pass BODY, '-' for stdin, or '@PATH'"
+            f"{what} required when stdin is not a terminal:"
+            " pass the text, '-' to read stdin, or '@PATH'"
         )
     return compose(template=template, preamble=preamble)
 

@@ -248,7 +248,7 @@ def cmd_review_list(args: argparse.Namespace) -> int:
                 conn, scope_kind=args.scope_kind, person_handle=args.person_handle,
                 tag=args.tag, query=query,
             )
-            if query is not None and not args.json and args.limit is not None
+            if not args.json and args.limit is not None
             else len(reviews)
         )
     emit_reviews(args, reviews, query=query)
