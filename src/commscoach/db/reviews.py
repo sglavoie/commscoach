@@ -117,6 +117,7 @@ def _validate_scope(
     return axes
 
 
+@common.writes
 def create_review(
     conn: sqlite3.Connection,
     body: str,
@@ -153,7 +154,7 @@ def create_review(
         axes["scope_person_handle"] = scope_person.handle
     entries = _resolve_review_entries(conn, entry_ids)
     now = common.utcnow_iso()
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute(
             "INSERT INTO reviews"
             " (body, scope_kind, scope_limit, scope_person_id,"
@@ -272,6 +273,7 @@ def _review_filters(
     return (" WHERE " + " AND ".join(where) if where else ""), params
 
 
+@common.writes
 def update_review(
     conn: sqlite3.Connection,
     review_id: int,
@@ -294,7 +296,7 @@ def update_review(
     if not body or not str(body).strip():
         raise DBError("review body must be a non-empty string")
     now = common.utcnow_iso()
-    with conn:
+    with common.write_transaction(conn):
         conn.execute(
             "UPDATE reviews SET body = ?, updated_at = ? WHERE id = ?",
             (body, now, review_id),
@@ -304,8 +306,9 @@ def update_review(
     return review
 
 
+@common.writes
 def delete_review(conn: sqlite3.Connection, review_id: int) -> bool:
     """Delete a stored review. Returns ``True`` if a row was deleted."""
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute("DELETE FROM reviews WHERE id = ?", (review_id,))
     return cur.rowcount > 0

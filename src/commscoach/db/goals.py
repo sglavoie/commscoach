@@ -42,6 +42,7 @@ def _resolve_review(conn: sqlite3.Connection, review_id: int | None) -> Review |
     return review
 
 
+@common.writes
 def create_goal(
     conn: sqlite3.Connection,
     title: str,
@@ -56,7 +57,7 @@ def create_goal(
     person = _resolve_person(conn, person_handle)
     review = _resolve_review(conn, review_id)
     timestamp = now if now is not None else common.utcnow_iso()
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute(
             "INSERT INTO goals"
             " (title, detail, status, person_id, review_id, outcome, closed_at,"
@@ -76,6 +77,7 @@ def create_goal(
     return goal
 
 
+@common.writes
 def update_goal(
     conn: sqlite3.Connection,
     goal_id: int,
@@ -126,7 +128,7 @@ def update_goal(
     updates.append("updated_at = ?")
     params.append(timestamp)
     params.append(goal_id)
-    with conn:
+    with common.write_transaction(conn):
         conn.execute(
             f"UPDATE goals SET {', '.join(updates)} WHERE id = ?",
             params,
@@ -136,6 +138,7 @@ def update_goal(
     return updated
 
 
+@common.writes
 def close_goal(
     conn: sqlite3.Connection,
     goal_id: int,
@@ -158,7 +161,7 @@ def close_goal(
         return current
     timestamp = now if now is not None else common.utcnow_iso()
     closed_at = current.closed_at if current.status == status else timestamp
-    with conn:
+    with common.write_transaction(conn):
         conn.execute(
             "UPDATE goals SET status = ?, outcome = ?, closed_at = ?, updated_at = ? WHERE id = ?",
             (status, outcome, closed_at, timestamp, goal_id),
@@ -291,7 +294,8 @@ def _goal_filters(
     return (" WHERE " + " AND ".join(where) if where else ""), params
 
 
+@common.writes
 def delete_goal(conn: sqlite3.Connection, goal_id: int) -> bool:
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
     return cur.rowcount > 0

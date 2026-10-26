@@ -30,6 +30,7 @@ def feedback_entry_ids(conn: sqlite3.Connection, entry_ids: Iterable[int]) -> se
     return coached
 
 
+@common.writes
 def create_feedback(
     conn: sqlite3.Connection,
     entry_id: int,
@@ -41,7 +42,7 @@ def create_feedback(
     if get_entry(conn, entry_id) is None:
         raise EntryNotFoundError(entry_id)
     now = common.utcnow_iso()
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute(
             "INSERT INTO feedback (entry_id, body, created_at, updated_at) VALUES (?, ?, ?, ?)",
             (entry_id, body, now, now),
@@ -123,6 +124,7 @@ def _feedback_search_filter(
     return sql, params
 
 
+@common.writes
 def update_feedback(
     conn: sqlite3.Connection,
     feedback_id: int,
@@ -139,7 +141,7 @@ def update_feedback(
     if get_feedback(conn, feedback_id) is None:
         raise FeedbackNotFoundError(feedback_id)
     now = common.utcnow_iso()
-    with conn:
+    with common.write_transaction(conn):
         conn.execute(
             "UPDATE feedback SET body = ?, updated_at = ? WHERE id = ?",
             (body, now, feedback_id),
@@ -149,11 +151,12 @@ def update_feedback(
     return feedback
 
 
+@common.writes
 def delete_feedback(conn: sqlite3.Connection, feedback_id: int) -> bool:
     """Delete a feedback note. Returns ``True`` if a row was deleted.
 
     Nothing references ``feedback``, so there is no orphan collection to run.
     """
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute("DELETE FROM feedback WHERE id = ?", (feedback_id,))
     return cur.rowcount > 0

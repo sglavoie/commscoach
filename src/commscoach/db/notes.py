@@ -20,6 +20,7 @@ def _row_to_person_note(row: sqlite3.Row) -> PersonNote:
     )
 
 
+@common.writes
 def set_person_note(
     conn: sqlite3.Connection,
     person_id: int,
@@ -33,7 +34,7 @@ def set_person_note(
     if get_person(conn, person_id) is None:
         raise PersonNotFoundError(person_id)
     timestamp = now if now is not None else common.utcnow_iso()
-    with conn:
+    with common.write_transaction(conn):
         conn.execute(
             "INSERT INTO person_notes (person_id, body, created_at, updated_at)"
             " VALUES (?, ?, ?, ?)"
@@ -46,9 +47,10 @@ def set_person_note(
     return note
 
 
+@common.writes
 def clear_person_note(conn: sqlite3.Connection, person_id: int) -> bool:
     """Delete a person's note, returning whether a row was removed."""
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute("DELETE FROM person_notes WHERE person_id = ?", (person_id,))
     return cur.rowcount > 0
 

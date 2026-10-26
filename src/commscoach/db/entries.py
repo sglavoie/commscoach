@@ -26,6 +26,7 @@ def _validate_occurred_at(value: Any) -> str | None:
         raise DBError(f"invalid occurred_at: {exc}") from exc
 
 
+@common.writes
 def create_entry(
     conn: sqlite3.Connection,
     body: str,
@@ -47,7 +48,7 @@ def create_entry(
     normalized_tags = tags_mod.normalize_tag_list(tags)
     resolved_people = resolve_person_handles(conn, people)
     now = common.utcnow_iso()
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute(
             "INSERT INTO entries (body, source, occurred_at, created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?)",
@@ -70,6 +71,7 @@ def create_entry(
     return entry
 
 
+@common.writes
 def update_entry(
     conn: sqlite3.Connection,
     entry_id: int,
@@ -106,7 +108,7 @@ def update_entry(
     resolved_people = resolve_person_handles(conn, people) if people is not common.UNSET else None
 
     now = common.utcnow_iso()
-    with conn:
+    with common.write_transaction(conn):
         if column_updates:
             column_updates.append("updated_at = ?")
             params.append(now)
@@ -207,9 +209,10 @@ def count_entries_with_person(
     return conn.execute("SELECT COUNT(*) FROM entries e" + where, params).fetchone()[0]
 
 
+@common.writes
 def delete_entry(conn: sqlite3.Connection, entry_id: int) -> bool:
     """Delete an entry and GC orphan tags. Returns ``True`` if a row was deleted."""
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
         if cur.rowcount == 0:
             return False

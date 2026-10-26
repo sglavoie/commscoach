@@ -7,8 +7,9 @@ The package is split by table:
   :mod:`commscoach.db.feedback`, and :mod:`commscoach.db.reviews` own CRUD.
 - :mod:`commscoach.db.context` aggregates the skill-facing read models.
 
-Each public mutator opens its own transaction via ``with conn:`` so callers do
-not need to manage transactions explicitly.
+Each public mutator runs, lookups included, in one ``BEGIN IMMEDIATE``
+transaction (:func:`commscoach.db.common.write_transaction`) so callers do not
+need to manage transactions explicitly.
 """
 
 from __future__ import annotations

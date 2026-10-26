@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from ..models import Tag
+from . import common
 from .errors import DBError, DuplicateTagError, TagNotFoundError
 
 
@@ -104,6 +105,7 @@ def list_tags(
     )
 
 
+@common.writes
 def rename_tag(conn: sqlite3.Connection, old: str, new: str) -> Tag:
     """Rename a tag in place, keeping every entry link.
 
@@ -128,7 +130,7 @@ def rename_tag(conn: sqlite3.Connection, old: str, new: str) -> Tag:
         # lowercases anyway, so the stored name cannot actually change.
         assert old_name == new_name
         return _get_tag(conn, tag_id)
-    with conn:
+    with common.write_transaction(conn):
         conn.execute("UPDATE tags SET name = ? WHERE id = ?", (new_name, tag_id))
         conn.execute(
             "UPDATE reviews SET scope_tag = ? WHERE scope_tag = ?",
@@ -137,6 +139,7 @@ def rename_tag(conn: sqlite3.Connection, old: str, new: str) -> Tag:
     return _get_tag(conn, tag_id)
 
 
+@common.writes
 def merge_tags(conn: sqlite3.Connection, source: str, dest: str) -> Tag:
     """Fold every ``source`` entry link into ``dest`` and drop ``source``.
 
@@ -160,7 +163,7 @@ def merge_tags(conn: sqlite3.Connection, source: str, dest: str) -> Tag:
             dest_name,
             hint="use 'commscoach tag rename' to rename a tag to a new name",
         )
-    with conn:
+    with common.write_transaction(conn):
         # OR IGNORE is required: an entry carrying both tags already owns the
         # (entry_id, dest_id) primary key, and the re-point would collide.
         conn.execute(
@@ -179,6 +182,7 @@ def merge_tags(conn: sqlite3.Connection, source: str, dest: str) -> Tag:
     return _get_tag(conn, dest_id)
 
 
+@common.writes
 def delete_tag(conn: sqlite3.Connection, name: str) -> int:
     """Unlink a tag from every entry and drop it. Returns the unlink count.
 
@@ -194,7 +198,7 @@ def delete_tag(conn: sqlite3.Connection, name: str) -> int:
     tag_id = _find_tag_id(conn, tag_name)
     if tag_id is None:
         raise TagNotFoundError(tag_name)
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute("DELETE FROM entry_tags WHERE tag_id = ?", (tag_id,))
         unlinked = cur.rowcount
         conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))

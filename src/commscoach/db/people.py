@@ -58,6 +58,7 @@ def _wrap_people_integrity_error(exc: sqlite3.IntegrityError, handle: str | None
     raise exc
 
 
+@common.writes
 def create_person(
     conn: sqlite3.Connection,
     handle: str,
@@ -74,7 +75,7 @@ def create_person(
         raise DBError("handle must be a non-empty string")
     now = common.utcnow_iso()
     try:
-        with conn:
+        with common.write_transaction(conn):
             cur = conn.execute(
                 "INSERT INTO people (handle, name, is_self, created_at, updated_at)"
                 " VALUES (?, ?, ?, ?, ?)",
@@ -87,6 +88,7 @@ def create_person(
     return person
 
 
+@common.writes
 def update_person(
     conn: sqlite3.Connection,
     person_id: int,
@@ -132,7 +134,7 @@ def update_person(
     params.append(common.utcnow_iso())
     params.append(person_id)
     try:
-        with conn:
+        with common.write_transaction(conn):
             conn.execute(
                 f"UPDATE people SET {', '.join(fields)} WHERE id = ?",
                 params,
@@ -187,9 +189,10 @@ def list_people(
     return tuple(row_to_person(row) for row in rows)
 
 
+@common.writes
 def delete_person(conn: sqlite3.Connection, person_id: int) -> bool:
     """Delete a person. Returns ``True`` if a row was deleted, ``False`` otherwise."""
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
     return cur.rowcount > 0
 
@@ -201,18 +204,19 @@ def get_self_person(conn: sqlite3.Connection) -> Person | None:
     return row_to_person(row)
 
 
+@common.writes
 def set_self(conn: sqlite3.Connection, person_id: int) -> Person:
     """Promote ``person_id`` to self, demoting any prior self atomically.
 
     The partial UNIQUE index on ``is_self = 1`` would reject a concurrent two-row
     self state, so the demote-then-promote sequence runs inside a single
-    ``with conn:`` transaction to keep the intermediate state private.
+    write transaction to keep the intermediate state private.
     """
     person = get_person(conn, person_id)
     if person is None:
         raise PersonNotFoundError(person_id)
     now = common.utcnow_iso()
-    with conn:
+    with common.write_transaction(conn):
         conn.execute(
             "UPDATE people SET is_self = 0, updated_at = ? WHERE is_self = 1 AND id != ?",
             (now, person_id),
