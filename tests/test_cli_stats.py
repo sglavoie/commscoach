@@ -120,11 +120,13 @@ class StatsCLITests(unittest.TestCase):
         self.assertEqual(len(payload["top_sources"]), 1)
         self.assertEqual(payload["top_people"], [])
 
-    def test_negative_weeks_is_semantic_error(self) -> None:
-        rc, _, err = self._run("stats", "--weeks", "-1")
-
-        self.assertEqual(rc, 1)
-        self.assertIn("weeks must be non-negative", err)
+    def test_negative_top_or_weeks_is_argparse_error(self) -> None:
+        for flag in ("--top", "--weeks"):
+            with self.subTest(flag=flag), redirect_stderr(io.StringIO()) as err:
+                with self.assertRaises(SystemExit) as ctx:
+                    cli.main(["--db", str(self.db_path), "stats", flag, "-1"])
+            self.assertEqual(ctx.exception.code, 2)
+            self.assertIn("must be non-negative", err.getvalue())
 
     def test_backlog_hint_preserves_database_and_resolved_date_window(self) -> None:
         self.db_path = self.db_path.with_name("journal with spaces.sqlite3")
@@ -137,9 +139,10 @@ class StatsCLITests(unittest.TestCase):
             db.create_feedback(conn, coached.id, "second note")
             db.create_entry(conn, "outside window", occurred_at="2025-01-01T12:00:00Z")
         rc, out, err = self._run("stats", "--since", "2026-01-01", "--until", "2026-01-31")
-        self.assertEqual(rc, 0, err)
+        self.assertEqual(rc, 0)
         self.assertIn("Entries awaiting feedback: 2", out)
-        command = shlex.split(out.split("Coach the oldest first: ")[1].strip())
+        self.assertNotIn("Coach the oldest first", out)
+        command = shlex.split(err.split("Coach the oldest first: ")[1].strip())
         self.assertEqual(command[:3], ["commscoach", "--db", str(self.db_path)])
         stdout = io.StringIO()
         with redirect_stdout(stdout):
@@ -157,7 +160,7 @@ class StatsCLITests(unittest.TestCase):
                 rc, out, err = self._run("stats")
                 self.assertEqual(rc, 0, err)
                 self.assertIn("Entries awaiting feedback: 0", out)
-                self.assertNotIn("Coach the oldest first:", out)
+                self.assertNotIn("Coach the oldest first:", out + err)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from typing import Any, Iterable
 
 from .. import db
 from .common import (
+    command_prefix,
     confirm,
     first_prose_line,
     format_stamp,
@@ -284,9 +285,7 @@ def cmd_person_show(args: argparse.Namespace) -> int:
         print_json(payload)
         return 0
     brief = getattr(args, "brief", False)
-    command = ["commscoach"]
-    if args.db:
-        command.extend(("--db", args.db))
+    command = command_prefix(args)
     _emit_person(args, person, note=note, include_notes=not brief)
     if brief and note is not None:
         print(f"\nNotes:\n{truncate(first_prose_line(note.body), width=180)}")

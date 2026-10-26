@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections import Counter
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from ..models import Stats
@@ -42,21 +42,44 @@ def _ranked_counts(
     return tuple((str(row[0]), int(row[1])) for row in conn.execute(sql, params))
 
 
-def _monday(value: str) -> date:
+def _local_day(value: str) -> date:
+    """Return the system-local calendar day of a stored timestamp.
+
+    Weeks are the user's weeks: a Sunday-evening entry west of UTC belongs to
+    that Sunday's week, not to the following one. Converting each timestamp
+    separately keeps this right across DST changes.
+    """
     try:
-        day = date.fromisoformat(value[:10])
+        stamp = datetime.fromisoformat(value)
     except (TypeError, ValueError) as exc:
         raise DBError(f"invalid effective entry timestamp: {value!r}") from exc
+    if stamp.tzinfo is not None:
+        try:
+            stamp = stamp.astimezone()
+        except (OverflowError, OSError):
+            pass
+    return stamp.date()
+
+
+def _monday(day: date) -> date:
     return day - timedelta(days=day.weekday())
 
 
 def _weekly_metrics(
     timestamps: list[str],
+    *,
+    anchor: date,
 ) -> tuple[float, int, int, tuple[tuple[str, int], ...]]:
+    """Return cadence, current and longest weekly streaks, and week buckets.
+
+    The current streak is the run of consecutive active weeks ending in the
+    ``anchor`` week or the one before it (so a week not yet logged does not
+    break it); a run that ended earlier is no longer current.
+    """
     if not timestamps:
         return 0.0, 0, 0, ()
 
-    counts = Counter(_monday(timestamp) for timestamp in timestamps)
+    counts = Counter(_monday(_local_day(timestamp)) for timestamp in timestamps)
     occupied = sorted(counts)
     first_monday, last_monday = occupied[0], occupied[-1]
     span_weeks = ((last_monday - first_monday).days // 7) + 1
@@ -76,11 +99,13 @@ def _weekly_metrics(
             run = 1
         longest = max(longest, run)
 
-    current_streak = 1
-    for previous, current in zip(reversed(occupied[:-1]), reversed(occupied[1:])):
-        if (current - previous).days != 7:
-            break
-        current_streak += 1
+    current_streak = 0
+    if (_monday(anchor) - last_monday).days <= 7:
+        current_streak = 1
+        for previous, current in zip(reversed(occupied[:-1]), reversed(occupied[1:])):
+            if (current - previous).days != 7:
+                break
+            current_streak += 1
 
     return len(timestamps) / span_weeks, current_streak, longest, tuple(buckets)
 
@@ -91,8 +116,12 @@ def get_stats(
     since: str | None = None,
     until: str | None = None,
     top: int = 5,
+    today: date | None = None,
 ) -> Stats:
     """Return windowed counts, weekly cadence, streaks, and top dimensions.
+
+    Weeks are local Monday-to-Sunday weeks. The current streak is anchored at
+    ``until`` when given, otherwise at ``today`` (default: the local date).
 
     Entry cadence and linked-dimension counts use the entry's effective time,
     ``COALESCE(occurred_at, created_at)``. Feedback coverage is likewise based
@@ -102,6 +131,9 @@ def get_stats(
     if top < 0:
         raise DBError("top must be non-negative")
     validate_range_bounds(since, until, since_name="since", until_name="until")
+    anchor = today if today is not None else date.today()
+    if until is not None:
+        anchor = min(anchor, _local_day(date_bound_timestamp(until, name="until", upper=True)))
     since = date_bound_timestamp(since, name="since") if since is not None else None
     until = (
         date_bound_timestamp(until, name="until", upper=True)
@@ -129,7 +161,7 @@ def get_stats(
     entry_count = len(entry_rows)
     timestamps = [str(row["effective_at"]) for row in entry_rows]
     entries_per_week, current_streak, longest_streak, buckets = _weekly_metrics(
-        timestamps
+        timestamps, anchor=anchor
     )
 
     feedback_count = _count(

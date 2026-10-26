@@ -6,7 +6,15 @@ import argparse
 import shlex
 
 from .. import db
-from .common import add_date_bounds, open_db, parse_date_bounds, print_json
+from .common import (
+    add_date_bounds,
+    command_prefix,
+    non_negative_int,
+    open_db,
+    parse_date_bounds,
+    print_err,
+    print_json,
+)
 from .serializers import stats_to_dict
 
 
@@ -18,14 +26,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add_date_bounds(parser, noun="activity")
     parser.add_argument(
         "--top",
-        type=int,
+        type=non_negative_int,
         default=5,
         metavar="N",
         help="Show at most N tags, sources, and people (default: 5).",
     )
     parser.add_argument(
         "--weeks",
-        type=int,
+        type=non_negative_int,
         default=12,
         metavar="N",
         help="Show at most N recent weekly buckets (default: 12).",
@@ -78,10 +86,6 @@ def _format_human(stats: db.Stats, *, weeks: int) -> str:
 
 
 def cmd_stats(args: argparse.Namespace) -> int:
-    if args.top < 0:
-        raise db.DBError("top must be non-negative")
-    if args.weeks < 0:
-        raise db.DBError("weeks must be non-negative")
     since, until = parse_date_bounds(args)
     with open_db(args) as conn:
         summary = db.get_stats(conn, since=since, until=until, top=args.top)
@@ -90,12 +94,10 @@ def cmd_stats(args: argparse.Namespace) -> int:
     else:
         print(_format_human(summary, weeks=args.weeks))
         if summary.entry_count > summary.entries_with_feedback:
-            command = ["commscoach"]
-            if args.db:
-                command.extend(("--db", args.db))
+            command = command_prefix(args)
             command.extend(("entry", "search", "--no-feedback", "--oldest-first", "--limit", "5"))
             for flag, bound in (("--since", since), ("--until", until)):
                 if bound is not None:
                     command.extend((flag, bound))
-            print(f"\nCoach the oldest first: {shlex.join(command)}")
+            print_err(f"\nCoach the oldest first: {shlex.join(command)}")
     return 0

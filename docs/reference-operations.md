@@ -51,7 +51,7 @@ commscoach stats
 commscoach --json stats --since "30 days ago" --until today --weeks 8
 ```
 
-The summary includes entry, people, tag, feedback, review, and goal counts; feedback coverage; first/last activity; entries per week; current and longest weekly streaks; weekly buckets; and top tags, sources, and people.
+The summary includes entry, people, tag, feedback, review, and goal counts; feedback coverage; first/last activity; entries per week; current and longest weekly streaks; weekly buckets; and top tags, sources, and people. Weeks are local Monday-to-Sunday weeks. The current streak counts consecutive active weeks up to this week (or the `--until` week); it stays alive while the current week has no entries yet, and drops to 0 once a full week is missed. The backlog hint after the human summary is printed to stderr, so it does not mix into piped output.
 
 Human-readable stats also show the number of entries awaiting feedback. When it is nonzero, a copyable command opens the five oldest uncoached entries, carrying over an explicit `--db` and the resolved date bounds. Stats JSON retains its existing fields.
 

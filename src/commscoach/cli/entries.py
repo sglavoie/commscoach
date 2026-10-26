@@ -11,6 +11,7 @@ from .. import db
 from ..db.tags import normalize_tag_list
 from .common import (
     add_date_bounds,
+    command_prefix,
     confirm,
     non_negative_int,
     open_db,
@@ -366,9 +367,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
         )
     emit_entry(args, entry, human_prefix="updated")
     if has_feedback or review_ids:
-        command = ["commscoach"]
-        if args.db:
-            command.extend(("--db", args.db))
+        command = command_prefix(args)
         print("Existing coaching may refer to the previous text.", file=sys.stderr)
         if has_feedback:
             print(shlex.join([*command, "entry", "show", str(entry.id), "--with-feedback"]), file=sys.stderr)

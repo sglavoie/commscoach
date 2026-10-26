@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 
 from commscoach import db
 
 from .db_case import DBTestCase
+from .timezone_case import local_timezone
 
 
 class StatsTests(DBTestCase):
@@ -72,7 +74,8 @@ class StatsTests(DBTestCase):
             self._add_entry(timestamp)
         self.conn.commit()
 
-        stats = db.get_stats(self.conn)
+        with local_timezone("UTC"):
+            stats = db.get_stats(self.conn, today=date(2026, 1, 28))
 
         self.assertEqual(stats.entries_per_week, 0.8)
         self.assertEqual(stats.current_weekly_streak, 2)
@@ -87,6 +90,33 @@ class StatsTests(DBTestCase):
                 ("2026-01-26", 1),
             ),
         )
+
+    def test_streak_that_ended_before_last_week_is_not_current(self) -> None:
+        for timestamp in ("2026-01-05T09:00:00+00:00", "2026-01-12T09:00:00+00:00"):
+            self._add_entry(timestamp)
+        self.conn.commit()
+
+        with local_timezone("UTC"):
+            ongoing = db.get_stats(self.conn, today=date(2026, 1, 21))
+            ended = db.get_stats(self.conn, today=date(2026, 3, 1))
+            windowed = db.get_stats(
+                self.conn, until="2026-01-18", today=date(2026, 3, 1)
+            )
+
+        self.assertEqual(ongoing.current_weekly_streak, 2)
+        self.assertEqual(ended.current_weekly_streak, 0)
+        self.assertEqual(ended.longest_weekly_streak, 2)
+        self.assertEqual(windowed.current_weekly_streak, 2)
+
+    def test_weeks_follow_the_local_calendar(self) -> None:
+        # Sunday 2026-01-11 21:00 in New York is already Monday in UTC.
+        self._add_entry("2026-01-12T02:00:00+00:00")
+        self.conn.commit()
+
+        with local_timezone("America/New_York"):
+            stats = db.get_stats(self.conn, today=date(2026, 1, 11))
+
+        self.assertEqual(stats.weekly_buckets, (("2026-01-05", 1),))
 
     def test_top_dimensions_are_ranked_and_truncated(self) -> None:
         alice = self._add_person("alice")

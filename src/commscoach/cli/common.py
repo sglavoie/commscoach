@@ -29,6 +29,14 @@ from .. import db, paths
 from ..timeparse import TimeParseError, parse_bound, parse_when
 
 
+def command_prefix(args: argparse.Namespace) -> list[str]:
+    """Return ``commscoach [--db PATH]`` for follow-up commands shown to the user."""
+    command = ["commscoach"]
+    if getattr(args, "db", None):
+        command.extend(("--db", args.db))
+    return command
+
+
 def print_err(message: str, *, stream: TextIO | None = None) -> None:
     """Write a single line to stderr (or an injected stream for tests)."""
     out = stream if stream is not None else sys.stderr
