@@ -85,6 +85,31 @@ class UnicodeMatchingTests(EntryTestBase):
         rc, _, _ = self._run("person", "add", "emile")
         self.assertEqual(rc, 0)
 
+    def test_entry_edit_and_add_match_handles_like_the_database(self) -> None:
+        decomposed = "e\u0301mile"
+        self._create_person("Émile")
+        self._create_person("Straße")
+        rc, out, _ = self._run("--json", "entry", "add", "sync", "--person", "Émile,Straße")
+        entry_id = str(json.loads(out)["id"])
+
+        rc, _, err = self._run(
+            "entry", "edit", entry_id, "--add-person", "émile", "--remove-person", decomposed
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("same person", err)
+
+        rc, out, _ = self._run(
+            "--json", "entry", "edit", entry_id, "--remove-person", f"{decomposed},STRASSE"
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["people"], [])
+
+        rc, out, err = self._run(
+            "--yes", "--json", "entry", "add", "new", "--person", "zo\u0308e,z\u00f6e"
+        )
+        self.assertEqual(rc, 0, err)
+        self.assertEqual([p["handle"] for p in json.loads(out)["people"]], ["zöe"])
+
 
 class FilterConsistencyTests(EntryTestBase):
     def test_entry_search_rejects_unknown_person_tag_and_blank_query(self) -> None:

@@ -10,6 +10,7 @@ from dataclasses import asdict
 from typing import Any
 
 from .. import db
+from ..db.common import handle_key
 from .common import (
     command_prefix,
     confirm,
@@ -59,7 +60,7 @@ def confirm_new_people(
     """
     missing: dict[str, str] = {}
     for handle in handles:
-        if handle.casefold() in missing or db.get_person_by_handle(conn, handle) is not None:
+        if handle_key(handle) in missing or db.get_person_by_handle(conn, handle) is not None:
             continue
         db.validate_handle(handle)
         if not confirm(f"Create person @{handle}?", assume_yes=assume_yes):
@@ -68,7 +69,7 @@ def confirm_new_people(
                 f"person @{handle} does not exist; pass --yes to create it, or run "
                 f"{shlex.join([*prefix, 'person', 'add', handle])} first"
             )
-        missing[handle.casefold()] = handle
+        missing[handle_key(handle)] = handle
     return list(missing.values())
 
 

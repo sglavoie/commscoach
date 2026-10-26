@@ -8,7 +8,7 @@ import sys
 from typing import Any
 
 from .. import db
-from ..db.common import write_transaction
+from ..db.common import handle_key, write_transaction
 from ..db.tags import normalize_tag_list
 from .common import (
     EDIT_IN_EDITOR,
@@ -334,8 +334,8 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
     if removed_tags.intersection(added_tags):
         raise UsageError("cannot add and remove the same tag")
     _reject_empty_links(args, clear_hint=True)
-    removed_people = {handle.lower() for handle in args.remove_person}
-    if removed_people.intersection(handle.lower() for handle in args.add_person):
+    removed_people = {handle_key(handle) for handle in args.remove_person}
+    if removed_people.intersection(handle_key(handle) for handle in args.add_person):
         raise UsageError("cannot add and remove the same person")
 
     update_kwargs: dict[str, Any] = {}
@@ -382,7 +382,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
         if args.add_person or args.remove_person:
             handles = [p.handle for p in current.people] + args.add_person
             update_kwargs["people"] = [
-                handle for handle in handles if handle.lower() not in removed_people
+                handle for handle in handles if handle_key(handle) not in removed_people
             ]
         new_people = confirm_new_people(
             conn,
