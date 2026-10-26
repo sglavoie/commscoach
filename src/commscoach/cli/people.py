@@ -471,8 +471,10 @@ def cmd_person_edit(args: argparse.Namespace) -> int:
             notes_changed = note is None or saved.updated_at != note.updated_at
         elif args.clear_notes:
             notes_changed = db.clear_person_note(conn, person.id)
+        note = db.get_person_note(conn, person.id)
     verb = "updated" if notes_changed else edit_verb(person.updated_at, updated.updated_at)
-    _emit_person(args, updated, human_prefix=verb)
+    # JSON carries the saved notes, as person show does; the human line stays one line.
+    _emit_person(args, updated, human_prefix=verb, note=note, include_notes=args.json)
     return 0
 
 

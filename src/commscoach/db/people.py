@@ -77,6 +77,13 @@ def validate_handle(handle: Any) -> str:
     return handle
 
 
+def _normalize_name(name: str | None) -> str | None:
+    """Trim a display name; a blank one means no name, as ``--name ''`` clears it."""
+    if name is None:
+        return None
+    return name.strip() or None
+
+
 @common.writes
 def create_person(
     conn: sqlite3.Connection,
@@ -91,6 +98,7 @@ def create_person(
     ``DuplicateSelfError`` if ``is_self=True`` while another self row exists.
     """
     handle = validate_handle(handle)
+    name = _normalize_name(name)
     now = common.utcnow_iso()
     try:
         with common.write_transaction(conn):
@@ -147,9 +155,11 @@ def update_person(
         else:
             fields.append("handle = ?")
             params.append(handle)
-    if name is not common.UNSET and name != person.name:
-        fields.append("name = ?")
-        params.append(name)
+    if name is not common.UNSET:
+        name = _normalize_name(name)
+        if name != person.name:
+            fields.append("name = ?")
+            params.append(name)
     if not fields:
         return person
 

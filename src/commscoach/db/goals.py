@@ -18,7 +18,7 @@ GOAL_STATUSES = frozenset({"active", "done", "dropped"})
 def _validate_title(title: Any) -> str:
     if not isinstance(title, str) or not title.strip():
         raise DBError("goal title must be a non-empty string")
-    return title
+    return title.strip()
 
 
 def _validate_status(status: Any) -> str:

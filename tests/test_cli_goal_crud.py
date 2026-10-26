@@ -128,6 +128,15 @@ class GoalCrudTests(GoalTestBase):
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out)["detail"], "new detail")
 
+    def test_titles_are_trimmed_on_add_and_edit(self) -> None:
+        rc, out, _ = self._run("--json", "goal", "add", "  Ask first  ")
+        self.assertEqual(rc, 0)
+        goal = json.loads(out)
+        self.assertEqual(goal["title"], "Ask first")
+        rc, out, _ = self._run("goal", "edit", str(goal["id"]), "--title", " Ask first\n")
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("unchanged"), out)
+
     def test_edit_mutual_exclusion_exits_two_and_empty_edit_exits_one(self) -> None:
         goal = self._seed_goal()
         rc, _, err = self._run("goal", "edit", str(goal.id), "--detail", "x", "--clear-detail")

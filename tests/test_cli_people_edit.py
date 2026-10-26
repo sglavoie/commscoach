@@ -75,12 +75,21 @@ class PersonEditTests(PeopleTestBase):
 
     def test_edit_name_empty_string_clears(self) -> None:
         person = self._seed_person("alice", name="Alice")
-        rc, _, _ = self._run("person", "edit", "alice", "--name", "")
+        for blank in ("", "   "):
+            with self.subTest(blank=blank):
+                rc, _, _ = self._run("person", "edit", "alice", "--name", blank)
+                self.assertEqual(rc, 0)
+                with closing(db.connect(self.db_path)) as conn:
+                    updated = db.get_person(conn, person.id)
+                assert updated is not None
+                self.assertIsNone(updated.name)
+
+    def test_names_are_trimmed_on_add_and_edit(self) -> None:
+        rc, out, _ = self._run("--json", "person", "add", "bob", "--name", "  Bob  ")
+        self.assertEqual(json.loads(out)["name"], "Bob")
+        rc, out, _ = self._run("person", "edit", "bob", "--name", " Bob ")
         self.assertEqual(rc, 0)
-        with closing(db.connect(self.db_path)) as conn:
-            updated = db.get_person(conn, person.id)
-        assert updated is not None
-        self.assertIsNone(updated.name)
+        self.assertTrue(out.startswith("unchanged"), out)
 
     def test_edit_handle_collision_exits_one(self) -> None:
         self._seed_person("alice")
@@ -109,6 +118,12 @@ class PersonEditTests(PeopleTestBase):
         payload = json.loads(out)
         self.assertEqual(payload["handle"], "alice")
         self.assertEqual(payload["name"], "Alice")
+        self.assertIsNone(payload["notes"])
+
+        rc, out, _ = self._run("--json", "person", "edit", "alice", "--notes", "saved")
+        self.assertEqual(json.loads(out)["notes"], "saved")
+        rc, out, _ = self._run("--json", "person", "edit", "alice", "--clear-notes")
+        self.assertIsNone(json.loads(out)["notes"])
 
     def test_edit_notes_from_literal_stdin_and_file(self) -> None:
         person = self._seed_person("alice")
