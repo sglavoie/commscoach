@@ -10,15 +10,19 @@ from typing import Any
 from .. import db
 from ..db.tags import normalize_tag_list
 from .common import (
+    EDIT_IN_EDITOR,
     add_date_bounds,
     command_prefix,
     confirm,
+    handle_arg,
+    handle_list_arg,
     non_negative_int,
     open_db,
     parse_date_bounds,
     parse_when_or_raise,
     print_json,
     read_body_arg,
+    row_id,
     search_excerpt,
 )
 from .editor import compose_in_editor
@@ -85,16 +89,17 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     add.add_argument(
         "--person",
-        action="append",
+        action="extend",
         default=[],
         dest="people",
+        type=handle_list_arg,
         metavar="HANDLE",
-        help="Link an existing person by handle (may be repeated).",
+        help="Link a person by handle (repeatable or comma-separated, e.g. --person jdoe,asmith).",
     )
     add.set_defaults(func=cmd_entry_add)
 
     show = entry_sub.add_parser("show", help="Show one entry by id.")
-    show.add_argument("entry_id", type=int, metavar="ENTRY_ID")
+    show.add_argument("entry_id", type=row_id, metavar="ENTRY_ID")
     show.add_argument(
         "--with-feedback",
         action="store_true",
@@ -103,11 +108,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     show.set_defaults(func=cmd_entry_show)
 
     edit = entry_sub.add_parser("edit", help="Update an existing entry.")
-    edit.add_argument("entry_id", type=int, metavar="ENTRY_ID")
+    edit.add_argument("entry_id", type=row_id, metavar="ENTRY_ID")
     edit.add_argument(
         "--body",
         nargs="?",
-        const="",
+        const=EDIT_IN_EDITOR,
         default=None,
         help=(
             "Replace the body (text, '-', or '@PATH'); omit the value to open"
@@ -142,11 +147,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     edit.add_argument(
         "--person",
-        action="append",
+        action="extend",
         default=None,
         dest="people",
+        type=handle_list_arg,
         metavar="HANDLE",
-        help="Replace linked-people list with these handles (may be repeated).",
+        help="Replace linked-people list with these handles (repeatable or comma-separated).",
     )
     edit.add_argument(
         "--clear-people",
@@ -158,12 +164,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         for action in ("add", "remove"):
             edit.add_argument(
                 f"--{action}-{noun}",
-                action="append",
+                action="append" if noun == "tag" else "extend",
                 default=[],
+                type=str if noun == "tag" else handle_list_arg,
                 metavar="TAG" if noun == "tag" else "HANDLE",
                 help=(
                     f"{action.capitalize()} a linked {noun} without replacing "
-                    "the others (repeatable)."
+                    "the others (repeatable or comma-separated)."
                 ),
             )
     edit.set_defaults(func=cmd_entry_edit)
@@ -180,7 +187,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     lst.set_defaults(func=cmd_entry_list)
 
     srch = entry_sub.add_parser(
-        "search", help="Search entries by body substring, tag, and/or person."
+        "search",
+        help="Search entries by word-prefix query (or --exact substring), tag, person, source, or date.",
     )
     srch.add_argument(
         "--query",
@@ -191,7 +199,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     srch.add_argument(
         "--exact",
         action="store_true",
-        help="Force case-insensitive substring matching instead of token search.",
+        help="Force literal substring matching (ignoring case and accents) instead of token search.",
     )
     srch.add_argument(
         "--tag", default=None, metavar="TAG", help="Filter by a single normalized tag."
@@ -205,6 +213,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     srch.add_argument(
         "--person",
         default=None,
+        type=handle_arg,
         metavar="HANDLE",
         help="Filter by linked person handle (case-insensitive).",
     )
@@ -231,7 +240,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     rm = entry_sub.add_parser(
         "rm", help="Delete an entry and its linked tags, people, and feedback."
     )
-    rm.add_argument("entry_id", type=int, metavar="ENTRY_ID")
+    rm.add_argument("entry_id", type=row_id, metavar="ENTRY_ID")
     rm.set_defaults(func=cmd_entry_rm)
 
 
@@ -246,7 +255,7 @@ def cmd_entry_add(args: argparse.Namespace) -> int:
             isatty=sys.stdin.isatty,
             compose=compose_in_editor,
         )
-        ensure_people(conn, args.people, assume_yes=args.yes)
+        ensure_people(conn, args.people, assume_yes=args.yes, command=command_prefix(args))
         entry = db.create_entry(
             conn,
             body,
@@ -300,7 +309,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
         raise db.DBError("cannot add and remove the same person")
 
     update_kwargs: dict[str, Any] = {}
-    if args.body not in (None, ""):
+    if args.body is not None and args.body is not EDIT_IN_EDITOR:
         update_kwargs["body"] = read_body_arg(
             args.body,
             what="body",
@@ -325,7 +334,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
         update_kwargs["people"] = tuple(args.people)
 
     has_link_edits = bool(args.add_tag or args.remove_tag or args.add_person or args.remove_person)
-    if not update_kwargs and args.body != "" and not has_link_edits:
+    if not update_kwargs and args.body is not EDIT_IN_EDITOR and not has_link_edits:
         raise db.DBError(
             "entry edit requires at least one of "
             "--body/--source/--occurred-at/--tag/--clear-tags/--person/--clear-people/"
@@ -345,7 +354,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
             update_kwargs["people"] = [
                 handle for handle in handles if handle.lower() not in removed_people
             ]
-        if args.body == "":
+        if args.body is EDIT_IN_EDITOR:
             update_kwargs["body"] = read_body_arg(
                 None,
                 what="body",
@@ -355,7 +364,12 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
                 compose=compose_in_editor,
             )
         if args.people is not None or args.add_person:
-            ensure_people(conn, args.people or args.add_person, assume_yes=args.yes)
+            ensure_people(
+                conn,
+                args.people or args.add_person,
+                assume_yes=args.yes,
+                command=command_prefix(args),
+            )
         entry = db.update_entry(conn, args.entry_id, **update_kwargs)
         body_changed = entry.body != current.body
         has_feedback = body_changed and bool(db.feedback_entry_ids(conn, (entry.id,)))
@@ -398,12 +412,12 @@ def cmd_entry_list(args: argparse.Namespace) -> int:
         )
         total = (
             db.count_search_entries(conn, since=since, until=until)
-            if not args.json and args.limit is not None
+            if args.limit is not None
             else len(entries)
         )
         coached = db.feedback_entry_ids(conn, (e.id for e in entries)) if not args.json else set()
     emit_entries(args, entries, coached)
-    if not args.json and total > len(entries):
+    if total > len(entries):
         print(f"Showing {len(entries)} of {total} entries.", file=sys.stderr)
     return 0
 
@@ -437,7 +451,7 @@ def cmd_entry_search(args: argparse.Namespace) -> int:
                 without_feedback=args.no_feedback,
                 mode="like" if args.exact else "auto",
             )
-            if not args.json and args.limit is not None
+            if args.limit is not None
             else len(entries)
         )
         if args.query and not args.json:
@@ -456,7 +470,7 @@ def cmd_entry_search(args: argparse.Namespace) -> int:
             }
         coached = db.feedback_entry_ids(conn, (e.id for e in entries)) if not args.json else set()
     emit_entries(args, entries, coached, excerpts=excerpts)
-    if not args.json and total > len(entries):
+    if total > len(entries):
         print(f"Showing {len(entries)} of {total} matching entries.", file=sys.stderr)
     return 0
 
@@ -479,7 +493,7 @@ def cmd_entry_rm(args: argparse.Namespace) -> int:
             f"{'review link' if review_count == 1 else 'review links'}; reviews themselves remain."
         )
         if not confirm(prompt, assume_yes=args.yes):
-            raise db.DBError("aborted")
+            raise db.DBError("aborted; pass --yes to confirm without a prompt")
         deleted = db.delete_entry(conn, args.entry_id)
     if not deleted:
         raise db.EntryNotFoundError(args.entry_id)

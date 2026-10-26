@@ -23,8 +23,9 @@ _DB_CHECKS = (
     "unparsable_occurred_at",
     "row_counts",
     "review_scope",
+    "addressable_names",
 )
-# ``review_scope`` is appended LAST on purpose. ``run_checks`` splices
+# ``review_scope`` and ``addressable_names`` are appended LAST on purpose. ``run_checks`` splices
 # ``sync_artifacts`` in at a hard-coded index 6 on the missing/not-downloaded
 # paths, which is exactly past the fourth DB check; inserting a new name
 # anywhere earlier in this tuple would silently reorder the emitted results
@@ -238,6 +239,38 @@ def _review_scope_check(conn: sqlite3.Connection) -> dict[str, Any]:
     )
 
 
+def _addressable_names_check(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Warn about handles and tags created before the CLI rejected them.
+
+    A handle with '@', a comma, or whitespace, or a tag with a comma, cannot be
+    typed back the way it is displayed (``--person``/``--tag`` split on
+    commas and ``@`` is stripped), so the user should rename it.
+    """
+    try:
+        handles = conn.execute("SELECT handle FROM people ORDER BY id").fetchall()
+        tags = conn.execute("SELECT name FROM tags WHERE name LIKE '%,%' ORDER BY id").fetchall()
+    except sqlite3.Error as exc:
+        return _result("addressable_names", "fail", f"cannot inspect handles and tags: {exc}")
+    details: list[dict[str, Any]] = []
+    for row in handles:
+        try:
+            if db.validate_handle(row["handle"]) == row["handle"]:
+                continue
+        except db.DBError:
+            pass
+        details.append({"handle": row["handle"], "fix": "person edit HANDLE --handle NEW"})
+    details.extend({"tag": row["name"], "fix": "tag rename NAME NEW"} for row in tags)
+    if not details:
+        return _result("addressable_names", "ok", "every handle and tag can be typed back")
+    return _result(
+        "addressable_names",
+        "warn",
+        f"{len(details)} handle(s) or tag(s) contain '@', commas, or whitespace "
+        "and are hard to address; rename them",
+        details=details,
+    )
+
+
 def _row_counts_check(conn: sqlite3.Connection) -> dict[str, Any]:
     counts: dict[str, int] = {}
     try:
@@ -295,6 +328,7 @@ def run_checks(db_path: Path, *, quick: bool = False) -> list[dict[str, Any]]:
         checks.append(_unparsable_occurred_at_check(conn))
         checks.append(_row_counts_check(conn))
         checks.append(_review_scope_check(conn))
+        checks.append(_addressable_names_check(conn))
     return checks
 
 

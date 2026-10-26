@@ -41,6 +41,7 @@ class StatsCLITests(unittest.TestCase):
                 "feedback_count",
                 "review_count",
                 "entries_with_feedback",
+                "entries_awaiting_feedback",
                 "feedback_coverage",
                 "open_goal_count",
                 "closed_goal_count",

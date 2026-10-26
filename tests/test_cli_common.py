@@ -81,9 +81,13 @@ class SearchExcerptTests(unittest.TestCase):
                 body = "Intro. " * 100 + query + " End. " * 100
                 self.assertIn(" ".join(query.split()), search_excerpt(body, query))
 
-    def test_unicode_does_not_shift_offsets_or_match_different_case(self):
-        body = "İ" * 200 + "Ä " + "padding " * 50 + "ä target"
-        self.assertTrue(search_excerpt(body, "ä").endswith("ä target"))
+    def test_unicode_folding_matches_case_and_accents_without_shifting_offsets(self):
+        # "İ" and "ß" fold to two characters each; the excerpt must still be
+        # cut around the match in the original text.
+        body = "İß" * 200 + " padding" * 50 + " ÉCOLE target" + " tail" * 50
+        excerpt = search_excerpt(body, "ecole")
+        self.assertIn("ÉCOLE target", excerpt)
+        self.assertEqual(search_excerpt("Meet at the Straße.", "strasse"), "Meet at the Straße.")
 
     def test_short_body_and_long_query_are_not_truncated(self):
         self.assertEqual(search_excerpt("Ask first.", "ask"), "Ask first.")

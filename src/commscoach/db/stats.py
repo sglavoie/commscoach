@@ -100,10 +100,14 @@ def _weekly_metrics(
             run = 1
         longest = max(longest, run)
 
+    # Future-dated entries (e.g. "tomorrow") must not break the run that ends
+    # at the anchor week, so only weeks up to the anchor count here.
+    anchor_monday = _monday(anchor)
+    up_to_anchor = [week for week in occupied if week <= anchor_monday]
     current_streak = 0
-    if (_monday(anchor) - last_monday).days <= 7:
+    if up_to_anchor and (anchor_monday - up_to_anchor[-1]).days <= 7:
         current_streak = 1
-        for previous, current in reversed(list(pairwise(occupied))):
+        for previous, current in reversed(list(pairwise(up_to_anchor))):
             if (current - previous).days != 7:
                 break
             current_streak += 1
@@ -211,9 +215,11 @@ def _collect_stats(
     )
     top_sources = _ranked_counts(
         conn,
-        "SELECT e.source, COUNT(*) AS uses FROM entries e "
+        # Grouped case-insensitively like ``entry search --source``, so "Slack"
+        # and "slack" are one source, shown by its first spelling in sort order.
+        "SELECT MIN(e.source) AS source, COUNT(*) AS uses FROM entries e "
         f"WHERE {entry_where} AND e.source IS NOT NULL AND e.source != '' "
-        "GROUP BY e.source ORDER BY uses DESC, e.source COLLATE NOCASE ASC LIMIT ?",
+        "GROUP BY e.source COLLATE NOCASE ORDER BY uses DESC, source COLLATE NOCASE ASC LIMIT ?",
         [*entry_params, top],
     )
     top_people = _ranked_counts(

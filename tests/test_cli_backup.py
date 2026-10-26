@@ -12,6 +12,7 @@ from argparse import Namespace
 from contextlib import closing, redirect_stderr, redirect_stdout
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 
 from commscoach import cli, db, paths
 from commscoach.cli import backup as backup_cli
@@ -99,27 +100,44 @@ class BackupCommandTests(unittest.TestCase):
         db.init_db(live)
         unrelated = folder / "commscoach-notes.sqlite3"
         unrelated.touch()
+        older = folder / "commscoach-20250101T000000Z.sqlite3"
+        older.touch()
+        newest = folder / "commscoach-20260101T000000Z.sqlite3"
         out = io.StringIO()
         with redirect_stdout(out):
             rc = cli.main(
-                [
-                    "--json",
-                    "--db",
-                    str(live),
-                    "backup",
-                    "--out",
-                    str(folder / "commscoach-20260101T000000Z.sqlite3"),
-                    "--keep",
-                    "0",
-                ]
+                ["--json", "--db", str(live), "backup", "--out", str(newest), "--keep", "1"]
             )
         self.assertEqual(rc, 0)
         self.assertTrue(live.exists())
         self.assertTrue(unrelated.exists())
-        self.assertEqual(
-            json.loads(out.getvalue())["pruned"],
-            [str(folder / "commscoach-20260101T000000Z.sqlite3")],
-        )
+        self.assertTrue(newest.exists())
+        self.assertEqual(json.loads(out.getvalue())["pruned"], [str(older)])
+
+    def test_keep_zero_is_rejected_so_the_new_backup_survives(self) -> None:
+        err = io.StringIO()
+        with redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            cli.main(["--db", str(self.db_path), "backup", "--keep", "0"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("must be at least 1", err.getvalue())
+
+    def test_out_refuses_to_overwrite_an_existing_file_without_yes(self) -> None:
+        target = Path(self._tmp.name) / "existing.sqlite3"
+        target.write_bytes(b"keep me")
+        err = io.StringIO()
+        with (
+            redirect_stderr(err),
+            mock.patch.object(backup_cli, "confirm", return_value=False),
+        ):
+            rc = cli.main(["--db", str(self.db_path), "backup", "--out", str(target)])
+        self.assertEqual(rc, 1)
+        self.assertIn("pass --yes to overwrite", err.getvalue())
+        self.assertEqual(target.read_bytes(), b"keep me")
+
+        with redirect_stdout(io.StringIO()):
+            rc = cli.main(["--db", str(self.db_path), "--yes", "backup", "--out", str(target)])
+        self.assertEqual(rc, 0)
+        self.assertNotEqual(target.read_bytes(), b"keep me")
 
     def test_same_second_default_backups_do_not_overwrite(self) -> None:
         args = Namespace(db=str(self.db_path), out=None, keep=None, json=True)
@@ -280,7 +298,7 @@ class LegacySchemaBackupTests(unittest.TestCase):
             rc = cli.main(["--db", str(self.db_path), "review", "list"])
 
         self.assertEqual(rc, 1)
-        self.assertIn("run 'commscoach init' first", err_buf.getvalue())
+        self.assertIn("init' first", err_buf.getvalue())
 
     def test_backup_refuses_a_sqlite_file_that_is_not_a_commscoach_database(
         self,
@@ -295,7 +313,7 @@ class LegacySchemaBackupTests(unittest.TestCase):
             rc = cli.main(["--db", str(foreign), "backup", "--out", str(self.destination)])
 
         self.assertEqual(rc, 1)
-        self.assertIn("run 'commscoach init' first", err_buf.getvalue())
+        self.assertIn("init' first", err_buf.getvalue())
         self.assertFalse(self.destination.exists())
 
 

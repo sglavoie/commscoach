@@ -9,6 +9,7 @@ from contextlib import closing, redirect_stderr, redirect_stdout
 from commscoach import cli, db
 
 from .cli_export_case import ExportTestBase
+from .timezone_case import local_timezone
 
 
 class ExportStdoutTests(ExportTestBase):
@@ -266,6 +267,26 @@ class ExportReviewScopeTests(ExportTestBase):
         )
         _, out, _ = self._run("export")
         self.assertEqual(self._scope_line(out), "- **Scope**: range 2026-07-01..2026-09-01")
+
+    def test_range_scope_created_from_cli_dates_shows_those_local_dates(self) -> None:
+        entry = self._seed_entry("note")
+        with local_timezone("America/Chicago"):
+            rc, _, err = self._run(
+                "review",
+                "add",
+                "body",
+                "--since",
+                "2026-07-01",
+                "--until",
+                "2026-09-01",
+                "--entry",
+                str(entry.id),
+            )
+            self.assertEqual(rc, 0, err)
+            _, out, _ = self._run("export")
+        self.assertEqual(
+            self._scope_line(out), "- **Scope**: range 2026-07-01..2026-09-01 (context limit 20)"
+        )
 
     def test_range_scope_leaves_an_open_bound_empty(self) -> None:
         entry = self._seed_entry("note")

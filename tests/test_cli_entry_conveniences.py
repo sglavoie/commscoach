@@ -135,11 +135,11 @@ class EntryConvenienceTests(EntryTestBase):
         rc, out, err = self._run("entry", "search", "--limit", "0")
         self.assertEqual(rc, 0, err)
         self.assertIn("Showing 0 of 2 matching entries.", err)
-        with mock.patch.object(db, "count_search_entries") as count:
-            rc, out, err = self._run("entry", "search", "--limit", "1", "--json")
-            self.assertEqual(rc, 0, err)
-            self.assertEqual(len(json.loads(out)), 1)
-            count.assert_not_called()
+        # JSON stdout stays a plain array; the omitted count goes to stderr.
+        rc, out, err = self._run("entry", "search", "--limit", "1", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(len(json.loads(out)), 1)
+        self.assertIn("Showing 1 of 2 matching entries.", err)
 
     def test_source_filter_survives_fts_fallback_and_is_an_exact_match(self):
         match = self._seed_entry("10% better", source="email")

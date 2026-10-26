@@ -268,16 +268,15 @@ def _goal_filters(
     if query is not None:
         if not query.strip():
             raise DBError("query must be a non-empty string")
-        literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
         where.append(
             "("
             + " OR ".join(
-                f"{column} LIKE ? ESCAPE '!' COLLATE NOCASE"
+                f"search_fold({column}) LIKE ? ESCAPE '!'"
                 for column in ("title", "detail", "outcome")
             )
             + ")"
         )
-        params.extend([f"%{literal}%"] * 3)
+        params.extend([common.contains_pattern(query)] * 3)
     if status is not None:
         where.append("status = ?")
         params.append(status)

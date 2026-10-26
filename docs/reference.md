@@ -34,6 +34,8 @@ The database is created with mode `0600`. Directories commscoach creates for it 
 
 ## Capture and dates
 
+Handles are shown as `@handle`, and every command accepts a handle with or without that `@`. `--person` is repeatable or comma-separated like `--tag` (`--person jdoe,asmith`). Handles are case-insensitive, including accented letters (`Émile` is `émile`), and cannot contain spaces or commas; `doctor` flags any older handle that does.
+
 `entry add` body sources are a literal string, `-` for stdin, or `@PATH` for a UTF-8 file. On an interactive terminal, omitting the body opens `$VISUAL` or `$EDITOR` (falling back to `vi`). The same body-source convention applies to `entry edit --body`, `feedback add`, and `review add`; their omitted-body forms also use the editor where supported.
 
 The entry editor includes optional prompts about what you wanted, what you said, how the other person responded, and what you want feedback on. These are `#>` instruction lines, so they are removed from the saved body; answer whichever help, or simply write your entry. Leaving only the prompts still counts as an empty draft.
@@ -54,7 +56,7 @@ commscoach entry search --since "yesterday 9am" --until "yesterday 5pm"
 Human-readable `entry list` and `entry search` rows show the local occurrence date/time (or creation time), source when present, feedback status, text preview, tags, and people:
 
 ```text
-[42] · 2026-10-02 14:30 · in-person · needs feedback · Quarterly review with John. · @jdoe
+[42] · 2026-10-02 14:30 · in-person · needs feedback · Quarterly review with John. · #1on1,review · @jdoe
 ```
 
 The status becomes `has feedback` when an entry has at least one stored feedback note. Use `entry search --no-feedback` to see only the coaching backlog. Entry JSON output keeps its existing shape.
@@ -70,14 +72,15 @@ commscoach entry search --source email --person jdoe --since "30 days ago"
 
 `entry search --source` matches the complete stored channel or medium case-insensitively (`email` matches `Email`, but not `email-thread`). It combines with the existing query, tag, person, date, and feedback filters, and is applied before ordering and limiting results.
 
-`entry list --limit N` and `review list --limit N` cap the newest results shown. `--oldest-first` applies to `entry search` and orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. By default, when SQLite has FTS5, `entry search --query` matches the start of words, accent-insensitively: `meet` also finds `meeting`, and several words must all appear. Queries using full-text syntax are passed through as written, so quote a phrase (`"lead with the ask"`) for exact words in order, or use `*`, `OR`, and `NOT`. Without FTS5 it falls back to substring matching. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters. Feedback, review, and goal searches always use substring matching.
+`entry list --limit N` and `review list --limit N` cap the newest results shown. `--oldest-first` applies to `entry search` and orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. By default, when SQLite has FTS5, `entry search --query` matches the start of words, accent-insensitively: `meet` also finds `meeting`, and several words must all appear. Queries using full-text syntax are passed through as written, so quote a phrase (`"lead with the ask"`) for exact words in order, or use `*`, `OR`, and `NOT`. Without FTS5 it falls back to substring matching. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters. Feedback, review, goal, and person searches (and `--exact`) always use substring matching, ignoring case and accents the same way the full-text index does, so `cafe` finds `Café`.
 
 When `entry search --limit N` omits matches, human output ends with a count such
 as `Showing 5 of 23 matching entries.`, printed to stderr so piping the results
 (for example to `wc -l`) counts only records. The total respects every search filter,
 including full-text or literal matching and `--no-feedback`. `--limit 0` still
-reports omitted matches. Complete results have no footer; JSON remains an array
-of entries without extra metadata.
+reports omitted matches. Complete results have no footer. With `--json`, stdout
+remains a plain array and the same footer still goes to stderr, so a script can
+tell a complete result from a truncated one.
 
 The same omitted-match footer appears for `entry list`, `feedback search`,
 `review list`, `review search`, `goal search`, and `goal list` with `--limit N`,
@@ -137,7 +140,7 @@ commscoach --yes tag merge conflcit conflict  # fold one tag into another, then 
 commscoach --yes tag rm writing               # unlink from every entry, then drop it
 ```
 
-Tag names are normalized and matched case-insensitively, so `Conflict` and `conflict` are the same tag and a case-only rename returns the tag unchanged.
+Tag names are normalized and matched case-insensitively, so `Conflict` and `conflict` are the same tag and a case-only rename returns the tag unchanged. Because `--tag` splits on commas, `tag rename` rejects a new name containing one; `doctor` flags any such tag created earlier.
 
 `tag rename` onto a name that already exists is an error rather than an implicit merge; the message points at `tag merge`. `tag merge` moves every entry link onto the destination (dropping the duplicate when an entry already carried both tags), deletes the source, and prints the destination with its recomputed entry count.
 
@@ -212,7 +215,7 @@ Either bound alone is enough to select the `range` scope; an unbounded range wou
 - **Prior reviews** are filtered to the same scope under `person` and `tag` only, so a review of @alice is measured against previous reviews of @alice. `latest` and `range` get the unfiltered recent listing instead: a date window is a one-off slice with no natural predecessor.
 - **Goals** are never scope-filtered, only capped by `--goal-limit`. Person-scoped reviews prioritize that person's active goals, then general goals, then other people's goals before applying the limit. Each group is newest-first by creation time, then ID. Other review scopes retain global newest-first ordering.
 
-A scope that matches nothing returns an empty entry list rather than failing — "no entries with @alice yet" is an answer, not an error. An unknown person handle *is* an error, because that is a typo, and so is a reversed date range.
+A scope that matches nothing returns an empty entry list rather than failing — "no entries with @alice yet" is an answer, not an error. An unknown person handle or tag *is* an error, because that is a typo, and so is a reversed date range. `entry search --person`/`--tag` follow the same rule. (Tags exist only while some entry carries them, so `tag list` shows every name that can match.)
 
 `review context` reports the scope in its own JSON block:
 
@@ -231,9 +234,9 @@ The top-level `goal_summary` reports `limit`, `count`, `total_count`, and `trunc
 
 ### Finding stored reviews
 
-`review list` filters over stored rows, so its `--scope`, `--person`, and `--tag` combine with AND rather than deriving a single axis. Human output shows the scope inline as `scope:person:@alice`; Markdown export shows it as `- **Scope**: person @alice (context limit 10)`.
+`review list` filters over stored rows, so its `--scope`, `--person`, and `--tag` combine with AND rather than deriving a single axis. `review list` and `review search` also take `--since`/`--until`, which bound when the review was written (not the date range a `range` review covers): `commscoach review list --since "30 days ago"`. Human output shows the scope inline as `scope:person:@alice`; Markdown export shows it as `- **Scope**: person @alice (context limit 10)`.
 
-A person-scoped review stores the handle alongside the foreign key, so after `commscoach --yes person rm alice` the review is still findable by `review list --person alice` and still prints `@alice`. `doctor`'s `review_scope` check reports those reviews as a warning — retained history, not corruption.
+A person-scoped review stores the handle alongside the foreign key, so after `commscoach --yes person rm alice` the review is still findable by `review list --person alice` and still prints `@alice`. A handle that names neither a person nor any stored review is reported as `person 'x' not found` rather than an empty listing. `doctor`'s `review_scope` check reports those reviews as a warning — retained history, not corruption.
 
 The JSON review shape carries that stored handle as its own `scope_person_handle` key, beside the `scope_person` object: `--json review show`, `--json review list`, and the `prior_reviews` block of `review context` all emit it. `scope_person` is a live lookup and becomes `null` once the person is deleted, so `scope_person_handle` is what still names them.
 

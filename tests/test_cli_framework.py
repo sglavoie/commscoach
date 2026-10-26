@@ -99,6 +99,13 @@ class HelperTests(unittest.TestCase):
         self.assertTrue(cli.confirm("ok?", assume_yes=True, input_fn=fake_input))
         self.assertEqual(calls, [])
 
+    def test_confirm_declines_without_reading_a_non_terminal_stdin(self) -> None:
+        buf = io.StringIO()
+        with mock.patch("builtins.input", side_effect=AssertionError("must not read")):
+            result = cli.confirm("delete?", stream=buf, isatty=lambda: False)
+        self.assertFalse(result)
+        self.assertEqual(buf.getvalue(), "delete? [y/N] \n")
+
     def test_confirm_y_returns_true(self) -> None:
         result = cli.confirm("ok?", stream=io.StringIO(), input_fn=lambda _: "y")
         self.assertTrue(result)
@@ -344,7 +351,7 @@ class OpenDBTests(unittest.TestCase):
         with redirect_stderr(err_buf):
             rc = cli.main(["--db", str(db_path), "entry", "list"])
         self.assertEqual(rc, 1)
-        self.assertIn("run 'commscoach init' first", err_buf.getvalue())
+        self.assertIn(f"run 'commscoach --db {db_path} init' first", err_buf.getvalue())
         self.assertFalse(db_path.exists())
 
     def test_uninitialized_db_exits_one_with_init_guidance(self) -> None:
@@ -354,7 +361,7 @@ class OpenDBTests(unittest.TestCase):
         with redirect_stderr(err_buf):
             rc = cli.main(["--db", str(db_path), "entry", "list"])
         self.assertEqual(rc, 1)
-        self.assertIn("run 'commscoach init' first", err_buf.getvalue())
+        self.assertIn(f"run 'commscoach --db {db_path} init' first", err_buf.getvalue())
 
     def test_v1_db_exits_one_with_init_guidance(self) -> None:
         db_path = self.tmpdir / "v1.sqlite3"
@@ -368,7 +375,7 @@ class OpenDBTests(unittest.TestCase):
         with redirect_stderr(err_buf):
             rc = cli.main(["--db", str(db_path), "entry", "list"])
         self.assertEqual(rc, 1)
-        self.assertIn("run 'commscoach init' first", err_buf.getvalue())
+        self.assertIn(f"run 'commscoach --db {db_path} init' first", err_buf.getvalue())
 
 
 class MainModuleTests(unittest.TestCase):

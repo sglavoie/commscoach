@@ -9,13 +9,15 @@ from typing import Any
 
 from .. import db
 from .common import (
-    ascii_fold,
     confirm,
+    contains_folded,
+    handle_arg,
     non_negative_int,
     open_db,
     print_json,
     read_body_arg,
     read_body_or_raise,
+    row_id,
     search_excerpt,
 )
 from .editor import compose_in_editor
@@ -51,12 +53,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add.add_argument(
         "--person",
         default=None,
+        type=handle_arg,
         metavar="HANDLE",
         help="Tie the goal to an existing person (default: a general goal).",
     )
     add.add_argument(
         "--review",
-        type=int,
+        type=row_id,
         default=None,
         metavar="ID",
         help="Record the review this goal came from.",
@@ -73,6 +76,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     lst.add_argument(
         "--person",
         default=None,
+        type=handle_arg,
         metavar="HANDLE",
         help="Only goals tied to this person.",
     )
@@ -100,7 +104,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--query",
         required=True,
         metavar="TEXT",
-        help="Case-insensitive substring to find in titles, details, and outcomes.",
+        help="Literal substring (ignoring case and accents) to find in titles, details, and outcomes.",
     )
     search.add_argument(
         "--status",
@@ -111,6 +115,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     search.add_argument(
         "--person",
         default=None,
+        type=handle_arg,
         metavar="HANDLE",
         help="Only goals tied to this person.",
     )
@@ -140,11 +145,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         )
 
     show = goal_sub.add_parser("show", help="Show one goal by id.")
-    show.add_argument("goal_id", type=int, metavar="GOAL_ID")
+    show.add_argument("goal_id", type=row_id, metavar="GOAL_ID")
     show.set_defaults(func=cmd_goal_show)
 
     edit = goal_sub.add_parser("edit", help="Update an existing goal.")
-    edit.add_argument("goal_id", type=int, metavar="GOAL_ID")
+    edit.add_argument("goal_id", type=row_id, metavar="GOAL_ID")
     edit.add_argument("--title", default=None, help="Replace the goal title.")
     edit.add_argument(
         "--detail",
@@ -165,6 +170,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     edit.add_argument(
         "--person",
         default=None,
+        type=handle_arg,
         metavar="HANDLE",
         help="Tie the goal to this existing person.",
     )
@@ -182,7 +188,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     edit.set_defaults(func=cmd_goal_edit)
 
     close = goal_sub.add_parser("close", help="Close a goal as done or dropped.")
-    close.add_argument("goal_id", type=int, metavar="GOAL_ID")
+    close.add_argument("goal_id", type=row_id, metavar="GOAL_ID")
     close.add_argument(
         "--outcome",
         nargs="?",
@@ -198,7 +204,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     close.set_defaults(func=cmd_goal_close)
 
     rm = goal_sub.add_parser("rm", help="Delete one goal.")
-    rm.add_argument("goal_id", type=int, metavar="GOAL_ID")
+    rm.add_argument("goal_id", type=row_id, metavar="GOAL_ID")
     rm.set_defaults(func=cmd_goal_rm)
 
 
@@ -285,7 +291,7 @@ def _emit_goals(
             ):
                 if label == "outcome" and with_outcome:
                     continue
-                if body is not None and ascii_fold(query) in ascii_fold(body):
+                if body is not None and contains_folded(body, query):
                     print(f"  {label}: {search_excerpt(body, query)}")
 
 
@@ -348,7 +354,7 @@ def cmd_goal_list(args: argparse.Namespace) -> int:
                 person_handle=args.person,
                 query=getattr(args, "query", None),
             )
-            if not args.json and args.limit is not None
+            if args.limit is not None
             else len(goals)
         )
     _emit_goals(
@@ -358,7 +364,7 @@ def cmd_goal_list(args: argparse.Namespace) -> int:
         with_outcome=args.with_outcome,
         query=getattr(args, "query", None),
     )
-    if not args.json and total > len(goals):
+    if total > len(goals):
         print(f"Showing {len(goals)} of {total} matching goals.", file=sys.stderr)
     return 0
 
@@ -471,7 +477,7 @@ def cmd_goal_rm(args: argparse.Namespace) -> int:
         if db.get_goal(conn, args.goal_id) is None:
             raise db.GoalNotFoundError(args.goal_id)
         if not confirm(f"Delete goal {args.goal_id}?", assume_yes=args.yes):
-            raise db.DBError("aborted")
+            raise db.DBError("aborted; pass --yes to confirm without a prompt")
         deleted = db.delete_goal(conn, args.goal_id)
     if not deleted:
         raise db.GoalNotFoundError(args.goal_id)

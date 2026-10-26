@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 
 from commscoach import db
@@ -182,7 +183,8 @@ class GoalCrudTests(DBTestCase):
         self.assertEqual(goal.status, "active")
         self.assertEqual(goal.created_at, T0)
         self.assertEqual(goal.person, person)
-        self.assertEqual(goal.review, review)
+        # The goal carries its source review without the covered entries.
+        self.assertEqual(goal.review, dataclasses.replace(review, entries=()))
         self.assertEqual(db.get_goal(self.conn, goal.id), goal)
 
     def test_create_rejects_blank_title(self) -> None:

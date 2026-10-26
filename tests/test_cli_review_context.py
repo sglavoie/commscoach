@@ -35,6 +35,7 @@ class ReviewContextTests(ReviewTestBase):
                 self.assertEqual(rc, 0, err)
                 self.assertEqual(json.loads(out)["scope"]["person"]["notes"], expected)
                 self.assertNotIn("Unrelated private notes", out)
+        self._seed_entry("tagged", tags=("conflict",))
         for flags in ((), ("--tag", "conflict"), ("--since", "2026-01-01")):
             rc, out, err = self._run("review", "context", *flags)
             self.assertEqual(rc, 0, err)

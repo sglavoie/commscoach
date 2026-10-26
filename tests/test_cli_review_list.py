@@ -65,6 +65,25 @@ class ReviewListTests(ReviewTestBase):
         self.assertEqual(ctx.exception.code, 2)
 
 
+class ReviewDateBoundTests(ReviewTestBase):
+    def test_since_and_until_bound_when_reviews_were_written(self) -> None:
+        entry = self._seed_entry("seed")
+        stamps = ("2026-01-10T12:00:00+00:00", "2026-02-10T12:00:00+00:00")
+        reviews = [self._seed_review(f"lead with the ask {n}", [entry.id]) for n in (1, 2)]
+        with closing(db.connect(self.db_path)) as conn:
+            for review, stamp in zip(reviews, stamps, strict=True):
+                conn.execute("UPDATE reviews SET created_at = ? WHERE id = ?", (stamp, review.id))
+            conn.commit()
+        for command in (("review", "list"), ("review", "search", "--query", "ask")):
+            with self.subTest(command=command):
+                rc, out, err = self._run("--json", *command, "--since", "2026-02-01")
+                self.assertEqual(rc, 0, err)
+                self.assertEqual([r["id"] for r in json.loads(out)], [reviews[1].id])
+                rc, out, err = self._run("--json", *command, "--until", "2026-01-31")
+                self.assertEqual(rc, 0, err)
+                self.assertEqual([r["id"] for r in json.loads(out)], [reviews[0].id])
+
+
 class ScopedListTests(ReviewTestBase):
     def setUp(self) -> None:
         super().setUp()
@@ -124,9 +143,15 @@ class ScopedListTests(ReviewTestBase):
         self.assertEqual(len(self._ids()), 4)
 
     def test_filter_matching_nothing_prints_the_empty_marker(self) -> None:
-        rc, out, _ = self._run("review", "list", "--person", "nobody")
+        rc, out, _ = self._run("review", "list", "--tag", "nothing")
         self.assertEqual(rc, 0)
         self.assertIn("(no reviews)", out)
+
+    def test_unknown_person_is_an_error_not_an_empty_listing(self) -> None:
+        rc, out, err = self._run("review", "list", "--person", "nobody")
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, "")
+        self.assertIn("person 'nobody' not found", err)
 
     def test_unknown_scope_value_exits_two(self) -> None:
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as ctx:
@@ -249,9 +274,11 @@ class ScopeRenderingTests(ReviewTestBase):
         self.assertEqual(rc, 0, err)
         self.assertIn(f"[{review.id}]", found)
 
+        # The old handle names nobody any more, so it is reported, not listed.
         rc, missing, err = self._run("review", "list", "--person", "alice")
-        self.assertEqual(rc, 0, err)
+        self.assertEqual(rc, 1)
         self.assertNotIn(f"[{review.id}]", missing)
+        self.assertIn("not found", err)
 
     def test_person_handle_rename_then_delete_renders_the_last_known_handle(
         self,

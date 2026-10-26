@@ -1,6 +1,6 @@
 ---
 name: commscoach
-description: Coach a logged commscoach entry, synthesize and persist a review scoped to the latest entries, one person, one tag, or a date range, correct stored feedback and reviews on request, find the uncoached backlog, or report stored communication stats. Fetches CLI context, produces actionable Markdown, and closes the coaching loop through the CLI.
+description: Coach a logged commscoach entry, synthesize and persist a review scoped to the latest entries, one person, one tag, or a date range, prepare for a conversation with someone, find past advice, correct stored feedback and reviews on request, find the uncoached backlog, or report stored communication stats. Fetches CLI context, produces actionable Markdown, and closes the coaching loop through the CLI.
 allowed-tools: Bash, Read
 ---
 
@@ -14,6 +14,7 @@ Choose the flow that matches the request:
 - **Stored review flow**: the user asks for a broader review, such as "review recent comms", "review my recent communication", or "make a communication review". Do not require an entry ID for this flow. The request may also name a person, a tag, or a time window ("how am I doing with @alice?", "how is my conflict tag trending?", "how did last quarter go?"); that selection is the review's **scope** and it must be carried through both the context fetch and the stored record.
 - **Coaching backlog flow**: the user asks to catch up on entries that have not received feedback.
 - **Stats flow**: the user asks "how am I doing?" or requests activity, coaching-coverage, goal, or cadence numbers.
+- **Conversation prep and lookup flow**: the user asks to prepare for an upcoming conversation ("prep me for my 1:1 with John") or to find past advice ("what did I learn about leading with the ask?"). Read-only: never store feedback or a review in this flow.
 - **Correction flow**: the user explicitly asks to fix, reword, or delete a specific stored feedback note or review. Only enter this flow on an explicit request naming a stored record; never on the skill's own initiative and never as cleanup inside another flow.
 
 ## Step 1: Confirm `commscoach` is available
@@ -27,7 +28,11 @@ command -v commscoach >/dev/null || {
 
 If this fails, surface the message and stop.
 
-Global flags `--db`, `--json`, and `--yes` work before or after commands, including nested commands. The examples below place them first.
+Global flags `--db`, `--json`, and `--yes` work before or after commands, including nested commands. The examples below place them first. List and search JSON on stdout is always a plain array; when `--limit` cut results off, stderr says so (`Showing 5 of 23 matching entries.`), so do not describe a limited result as complete.
+
+If the user names a database file ("use ~/journal.sqlite3"), pass `--db PATH` on **every** command in the flow; follow-up commands without it read and write the default database instead.
+
+Handles are written `@alice` in prose and output. The CLI accepts either `@alice` or `alice`; the examples use the bare form.
 
 ## Entry Feedback Flow
 
@@ -47,7 +52,7 @@ Notes:
 Parse stdout as JSON. The payload shape is exactly:
 
 - `self`: `{id, handle, name, is_self, notes}` — the user being coached. `notes` contains durable coaching preferences, or `null`; use them to tailor feedback. The literal key is `self`, not `self_person`.
-- `people`: non-self counterparties for this entry, each enriched as `{id, handle, name, is_self, notes, history, history_summary}`. `notes` is private coaching context or `null`; `history` contains up to `--history` (default 3) interactions with that person strictly before the target entry, oldest-first, as `[{entry, feedback}]`. Chronology uses occurrence time, falling back to creation time; equal-time and later interactions are excluded. Each history item's `feedback` is oldest-first. Feedback, notes, goals, and prior reviews are current coaching context and may have been recorded after the target interaction; do not imply they were known at the time. Use this field for who the user was talking to (`self` is already filtered out), relationship context, and repeated patterns. `history_summary` is `{limit, count, total_count, truncated}`: when `truncated` is true, only `count` of `total_count` earlier interactions are shown, so qualify claims about the whole relationship or rerun with a larger `--history`.
+- `people`: non-self counterparties for this entry, each enriched as `{id, handle, name, is_self, notes, history, history_summary}`. `notes` is private coaching context or `null`; `history` contains up to `--history` (default 3) interactions with that person before the target entry, oldest-first, as `[{entry, feedback}]`. Chronology uses occurrence time, falling back to creation time; later interactions are excluded, and an equal-time interaction counts as earlier only if it was logged first (lower id). Each history item's `feedback` is oldest-first. Feedback, notes, goals, and prior reviews are current coaching context and may have been recorded after the target interaction; do not imply they were known at the time. Use this field for who the user was talking to (`self` is already filtered out), relationship context, and repeated patterns. `history_summary` is `{limit, count, total_count, truncated}`: when `truncated` is true, only `count` of `total_count` earlier interactions are shown, so qualify claims about the whole relationship or rerun with a larger `--history`.
 - `entry`: `{id, body, source, occurred_at, created_at, updated_at, tags, people}` — the logged interaction. `tags` is a list of strings, `people` is the faithful link list (includes `self` if linked).
 - `prior_feedback`: previously stored feedback for this entry, ordered oldest-first — `[{id, entry_id, body, created_at, updated_at}]`.
 - `goals`: active goals capped by `--goal-limit` (default 10, zero omits goals). Goals for the entry's non-self participants come first, then general goals, then other goals; each group is newest-first. Without non-self participants, all goals are newest-first. Each goal has `{id, title, detail, status, person, review_id, outcome, closed_at, created_at, updated_at, is_open}`. Treat a goal as relevant when its scope or linked person bears on this interaction; do not force every goal into the feedback.
@@ -138,7 +143,7 @@ Scope rules:
 
 Scope failures, which mean opposite things:
 
-- **Unknown person handle** — exits 1. That is a typo, not a finding. Surface stderr and stop.
+- **Unknown person handle or tag** — exits 1 (`person 'x' not found`, `tag 'x' not found`). That is a typo, not a finding. Check `commscoach --json person list` or `commscoach --json tag list` for the intended name, or surface stderr and stop.
 - **Reversed range** (`--since` after `--until`) — exits 1 on both `review context` and `review add`. Surface stderr and stop.
 - **Scope matched nothing** — succeeds with an empty `entries` list and `scope.total_entry_count` of zero. That is a valid answer. Tell the user there are no entries in that scope yet (e.g. "no entries with @alice yet") and stop without generating or storing a review.
 
@@ -224,12 +229,12 @@ __COMMSCOACH_REVIEW_EOF__
 commscoach --json review add - --limit 20 --entry 1 2 3                            # latest
 commscoach --json review add - --person alice --limit 10 --entry 1 2               # person
 commscoach --json review add - --tag conflict --limit 10 --entry 1 2               # tag
-commscoach --json review add - --since 2026-06-01 --until 2026-09-01 --entry 4 5   # range
+commscoach --json review add - --since 2026-06-01 --until 2026-09-01 --limit 20 --entry 4 5   # range
 ```
 
 Notes:
 
-- `--entry` accepts one or more IDs; repeating `--entry` is also valid.
+- `--entry` accepts one or more IDs; repeating `--entry` is also valid. It consumes every following word, so keep the body (`-`) before `--entry` as in the template.
 - For a `range` scope, use the resolved ISO timestamps from `scope.since` / `scope.until` over re-sending a relative phrase, so the stored bounds match the context exactly.
 - Stdout is JSON: `{id, body, scope_kind, scope_limit, scope_person, scope_person_handle, scope_tag, scope_since, scope_until, created_at, updated_at, entry_ids, entries}`. Check that `scope_kind` is the kind you intended.
 - A non-zero exit means the body was empty, an entry id was invalid, or the scope arguments were invalid. Surface stderr and stop.
@@ -287,6 +292,28 @@ Render `<scope detail>` from the stored axis: nothing for `latest`, ` @<scope_pe
 Then display the generated review Markdown below that line so the user can read the synthesis without re-fetching it.
 
 Also report the IDs and titles of goals created, and the IDs of goals closed as done or dropped. If none were created or closed, say so explicitly.
+
+## Conversation Prep and Lookup Flow
+
+This flow only reads. Never store feedback, reviews, or goals here; if the user then asks for coaching on a specific entry or a broader review, switch to that flow.
+
+**Preparing for a conversation** ("prep me for my 1:1 with John"): resolve the person (run `commscoach --json person list --query "John"` if the user gave a name rather than a handle), then:
+
+```bash
+commscoach --json person prep jdoe
+```
+
+The JSON has the person's `notes`, `recent_entries` (each with its `feedback`), `recent_reviews` scoped to that person, and `active_goals` linked to them. Add `--recent N` or `--reviews N` when the user wants more or less history, and `--include-general-goals` to include goals not tied to anyone. Turn it into a short brief: what to remember about the person, the open goals to practice, and the most relevant past advice. Quote stored advice rather than inventing new advice; label any suggestion of your own as yours.
+
+**Finding past advice** ("what did I learn about leading with the ask?"):
+
+```bash
+commscoach --json feedback search --query "lead with the ask"
+commscoach --json review search --query "lead with the ask"
+commscoach --json goal search --query "lead with the ask"
+```
+
+These are literal substring searches that ignore case and accents. Add `--person HANDLE` to narrow feedback or review searches to one person. If nothing matches, try a shorter or different phrase once before reporting that nothing was found.
 
 ## Correcting stored coaching
 
@@ -351,4 +378,4 @@ When the user asks "how am I doing?" or requests journal activity, feedback cove
 commscoach --json stats
 ```
 
-Add `--since`, `--until`, `--top`, or `--weeks` after `stats` when the user specifies a window or output limit. Resolve named calendar periods to explicit dates using the review scope rules above and state the interpreted window. Parse the JSON and report the actual numbers, including zero values; do not estimate or recompute them from other payloads.
+Add `--since`, `--until`, `--top`, or `--weeks` after `stats` when the user specifies a window or output limit. Resolve named calendar periods to explicit dates using the review scope rules above and state the interpreted window. Parse the JSON and report the actual numbers, including zero values; do not estimate or recompute them from other payloads. The coaching backlog is `entries_awaiting_feedback`.

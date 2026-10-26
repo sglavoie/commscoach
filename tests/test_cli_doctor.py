@@ -31,6 +31,7 @@ _EXPECTED_CHECK_ORDER = [
     "unparsable_occurred_at",
     "row_counts",
     "review_scope",
+    "addressable_names",
 ]
 
 
@@ -87,6 +88,7 @@ class DoctorCommandTests(unittest.TestCase):
                 "unparsable_occurred_at",
                 "row_counts",
                 "review_scope",
+                "addressable_names",
             },
         )
         self.assertTrue(all(item["status"] == "ok" for item in checks.values()))
@@ -184,6 +186,26 @@ class DoctorCommandTests(unittest.TestCase):
         paths.icloud_placeholder_for(self.db_path).touch()
         _, payload = self.run_doctor()
         self.assertEqual(self.check_names(payload), _EXPECTED_CHECK_ORDER)
+
+    def test_addressable_names_warns_about_legacy_handles_and_tags(self) -> None:
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_person(conn, "fine")
+            # Rows the CLI used to accept but now rejects.
+            conn.execute(
+                "INSERT INTO people (handle, is_self, created_at, updated_at)"
+                " VALUES ('bob,carol', 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
+            )
+            conn.execute("INSERT INTO tags (name) VALUES ('a,b')")
+            conn.commit()
+        rc, payload = self.run_doctor()
+        self.assertEqual(rc, 0)
+        check = self.checks_by_name(payload)["addressable_names"]
+        self.assertEqual(check["status"], "warn")
+        self.assertEqual(
+            [item.get("handle") or item.get("tag") for item in check["details"]],
+            ["bob,carol", "a,b"],
+        )
 
     def test_review_scope_ok_without_person_scoped_reviews(self) -> None:
         db.init_db(self.db_path)

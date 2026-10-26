@@ -109,9 +109,8 @@ def _feedback_search_filter(
 ) -> tuple[str, list[object]]:
     if not query or not query.strip():
         raise DBError("query must be a non-empty string")
-    literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
-    sql = " FROM feedback f WHERE f.body LIKE ? ESCAPE '!' COLLATE NOCASE"
-    params: list[object] = [f"%{literal}%"]
+    sql = " FROM feedback f WHERE search_fold(f.body) LIKE ? ESCAPE '!'"
+    params: list[object] = [common.contains_pattern(query)]
     if person_handle is not None:
         person = get_person_by_handle(conn, person_handle)
         if person is None:

@@ -59,7 +59,7 @@ commscoach stats --top 10                       # longer top tags/sources/people
 
 The summary includes entry, people, tag, feedback, review, and goal counts; feedback coverage; first/last activity; entries per week; current and longest weekly streaks; weekly buckets; and top tags, sources, and people. Weeks are local Monday-to-Sunday weeks. The current streak counts consecutive active weeks up to this week (or the `--until` week); it stays alive while the current week has no entries yet, and drops to 0 once a full week is missed. The backlog hint after the human summary is printed to stderr, so it does not mix into piped output.
 
-Human-readable stats also show the number of entries awaiting feedback. When it is nonzero, a copyable command opens the five oldest uncoached entries, carrying over an explicit `--db` and the resolved date bounds. Stats JSON retains its existing fields.
+Human-readable stats also show the number of entries awaiting feedback. When it is nonzero, a copyable command opens the five oldest uncoached entries, carrying over an explicit `--db` and the resolved date bounds. Stats JSON reports the same number as `entries_awaiting_feedback`.
 
 Show the full experiment beneath each goal title with `goal list --with-detail`.
 JSON already contains goal details and is unchanged by this flag.
@@ -104,13 +104,17 @@ commscoach --json init            # {"db_path": "...", "schema_version": 4}
 commscoach doctor
 ```
 
+`init` also cleans up occurrence times stored as free text by early versions, once: relative text such as `yesterday` is read against the entry's creation time, and text that still cannot be parsed is appended to the entry body as `(Originally recorded occurrence time: ...)` while the entry falls back to its creation time. Nothing is lost, and stats, date filters, and export/import keep working.
+
 `backup` is the one command that runs on a database of any schema version, which is what makes that first line work: the snapshot it writes is still stamped at the old version, with the old `reviews` shape and rows intact, so it restores to the state you had before migrating. Every other command still requires the current schema and answers `run 'commscoach init' first` until you migrate.
 
 ## Diagnostics and backups
 
-`doctor` opens the store read-only and checks schema version, SQLite integrity, foreign keys, journal mode, permissions, unparsable timestamps, row counts, sync artifacts, and review scopes. A failing check exits 1; warnings are reported without treating the whole run as failed.
+`doctor` opens the store read-only and checks schema version, SQLite integrity, foreign keys, journal mode, permissions, unparsable timestamps, row counts, sync artifacts, review scopes, and addressable names. A failing check exits 1; warnings are reported without treating the whole run as failed.
 
 The `review_scope` check warns when a person-scoped review names a person who has since been deleted. That is expected history rather than corruption: the denormalized handle is kept so the review still records who it was about.
+
+The `addressable_names` check warns about handles containing `@`, commas, or whitespace and tags containing commas. Older versions allowed them, but they cannot be typed back the way they are displayed; rename them with `person edit` (type the handle as displayed, e.g. `@@x` for `@x`) or `tag rename`.
 
 ```sh
 commscoach doctor
@@ -118,7 +122,7 @@ commscoach doctor --quick              # PRAGMA quick_check instead of integrity
 commscoach --json doctor
 ```
 
-`backup` uses SQLite's online backup API to create a consistent `0600` copy. Without `--out`, it writes a timestamped file under the database's `backups/` directory. `--keep N` prunes older standard timestamped backups (`commscoach-YYYYMMDDTHHMMSSZ.sqlite3`) in that output directory; other files, including the live database, are never pruned. Two backups in the same second get a `-2` suffix instead of overwriting each other. It accepts any schema version so it can snapshot a database before [migrating](#schema-version-and-migration) it; it still refuses a file that is not a commscoach database.
+`backup` uses SQLite's online backup API to create a consistent `0600` copy. Without `--out`, it writes a timestamped file under the database's `backups/` directory. `--keep N` (at least 1; the new backup counts as one) prunes older standard timestamped backups (`commscoach-YYYYMMDDTHHMMSSZ.sqlite3`) in that output directory; other files, including the live database, are never pruned. Two backups in the same second get a `-2` suffix instead of overwriting each other. `--out` never replaces an existing file without confirmation or `--yes`. It accepts any schema version so it can snapshot a database before [migrating](#schema-version-and-migration) it; it still refuses a file that is not a commscoach database.
 
 ```sh
 commscoach backup
@@ -128,7 +132,7 @@ commscoach backup --keep 7
 
 ## Export
 
-Markdown export is human-readable and lossy. JSON export is complete and restorable. Both write to stdout by default; pass `--out PATH` to create a mode-`0600` file.
+Markdown export is human-readable and lossy. JSON export is complete and restorable. Both write to stdout by default; pass `--out PATH` to create a mode-`0600` file. With `--out`, `--json` prints `{"format", "path"}` to stdout instead of the stderr note, like `backup`.
 
 File exports are written to a private temporary file beside the destination and
 replace it atomically after writing succeeds. A failed write leaves an existing
@@ -156,7 +160,7 @@ Each exported review names its scope axis, so a synthesis stays self-describing 
 
 `latest`, `tag conflict`, and `range 2026-07-01..2026-09-01` are the other three shapes. A review whose scoped person was deleted still renders `person @alice` from the stored handle, and the JSON archive round-trips that handle through `import`.
 
-Import restores a complete JSON export into an empty initialized database. It never merges with or replaces existing records. Timestamps must be timezone-aware ISO-8601 values and are stored normalized to UTC, as the CLI stores them; IDs of rows deleted before the export are not handed out again. Validate the whole restore, including constraints, with `--dry-run` before writing:
+Import restores a complete JSON export into an empty initialized database. Besides timestamps, it checks that ids are integers, handles are non-empty and trimmed, and tag names are normalized (trimmed, lowercase), so a hand-edited archive cannot restore rows no command can address. It never merges with or replaces existing records. Timestamps must be timezone-aware ISO-8601 values and are stored normalized to UTC, as the CLI stores them; IDs of rows deleted before the export are not handed out again. Both the human and `--json` output report how many rows of each table were (or, with `--dry-run`, would be) restored as `counts`. Validate the whole restore, including constraints, with `--dry-run` before writing:
 
 ```sh
 commscoach --db /path/to/empty.sqlite3 init

@@ -90,7 +90,7 @@ def cmd_tag_rename(args: argparse.Namespace) -> int:
 def cmd_tag_merge(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         if not confirm(f"Merge tag '{args.source}' into '{args.dest}'?", assume_yes=args.yes):
-            raise db.DBError("aborted")
+            raise db.DBError("aborted; pass --yes to confirm without a prompt")
         tag = db.merge_tags(conn, args.source, args.dest)
     _emit_tag(args, tag, human_line=f"merged tag '{args.source}' into '{tag.name}'")
     return 0
@@ -99,7 +99,7 @@ def cmd_tag_merge(args: argparse.Namespace) -> int:
 def cmd_tag_rm(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         if not confirm(f"Delete tag '{args.name}'?", assume_yes=args.yes):
-            raise db.DBError("aborted")
+            raise db.DBError("aborted; pass --yes to confirm without a prompt")
         unlinked = db.delete_tag(conn, args.name)
     name = normalize_tag(args.name)
     if args.json:

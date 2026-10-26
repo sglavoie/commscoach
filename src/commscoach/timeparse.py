@@ -142,6 +142,12 @@ def _parse_when(text: str, *, now: datetime | None) -> str:
             "d": timedelta(days=amount),
             "w": timedelta(weeks=amount),
         }[unit]
+        if unit in "mh":
+            # Elapsed time: subtract from the absolute instant so a DST change
+            # in between does not shift the result by an hour. Days and weeks
+            # stay wall-clock ("2 days ago" keeps the time of day).
+            instant = _canonical(reference, reference)
+            return (datetime.fromisoformat(instant) - delta).isoformat()
         return _canonical(reference - delta, reference)
 
     raise _error(text)

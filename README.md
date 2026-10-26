@@ -76,6 +76,8 @@ commscoach context 42 --json
 commscoach entry list --db ~/journal.sqlite3 --json
 ```
 
+Confirmation prompts only read answers from a terminal; when stdin is a pipe or file they decline, so scripts and agents pass `--yes`.
+
 Use `commscoach --help` for top-level help and `commscoach <command> --help`
 for subcommand-specific options.
 

@@ -111,6 +111,7 @@ def stats_to_dict(stats: db.Stats, *, weeks: int | None = None) -> dict[str, Any
         "feedback_count": stats.feedback_count,
         "review_count": stats.review_count,
         "entries_with_feedback": stats.entries_with_feedback,
+        "entries_awaiting_feedback": stats.entry_count - stats.entries_with_feedback,
         "feedback_coverage": coverage,
         "open_goal_count": stats.open_goal_count,
         "closed_goal_count": stats.closed_goal_count,

@@ -6,7 +6,7 @@ import argparse
 from typing import Any
 
 from .. import db
-from .common import non_negative_int, open_db, print_json
+from .common import non_negative_int, open_db, print_json, row_id
 from .serializers import (
     entry_to_dict,
     feedback_to_dict,
@@ -21,7 +21,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "context",
         help="Emit the skill-facing JSON context for one entry (requires self).",
     )
-    context_parser.add_argument("entry_id", type=int, metavar="ENTRY_ID")
+    context_parser.add_argument("entry_id", type=row_id, metavar="ENTRY_ID")
     context_parser.add_argument(
         "--history",
         type=non_negative_int,

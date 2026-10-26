@@ -226,7 +226,8 @@ def get_entry_context(
     if the entry is missing and ``MissingSelfError`` if no global self person
     is configured. Self is excluded from the returned ``people`` field;
     ``prior_feedback`` is oldest-first. Person history includes only entries
-    strictly before the target's occurrence time (falling back to creation time).
+    before the target's occurrence time (falling back to creation time); entries
+    at the same instant count as earlier when they have a lower id.
     Goals and prior reviews remain current coaching context, not historical snapshots.
     """
     if history_limit < 0:

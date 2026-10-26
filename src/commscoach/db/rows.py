@@ -74,7 +74,9 @@ def load_review_entries(conn: sqlite3.Connection, review_id: int) -> tuple[Entry
     return tuple(hydrate_entry(conn, row) for row in rows)
 
 
-def hydrate_review(conn: sqlite3.Connection, row: sqlite3.Row) -> Review:
+def hydrate_review(
+    conn: sqlite3.Connection, row: sqlite3.Row, *, with_entries: bool = True
+) -> Review:
     """Build a ``Review``, resolving ``scope_person`` lazily like ``hydrate_goal``.
 
     ``scope_person`` is ``None`` both when the scope is not person-kind and when
@@ -99,11 +101,17 @@ def hydrate_review(conn: sqlite3.Connection, row: sqlite3.Row) -> Review:
         scope_tag=row["scope_tag"],
         scope_since=row["scope_since"],
         scope_until=row["scope_until"],
-        entries=load_review_entries(conn, row["id"]),
+        entries=load_review_entries(conn, row["id"]) if with_entries else (),
     )
 
 
 def hydrate_goal(conn: sqlite3.Connection, row: sqlite3.Row) -> Goal:
+    """Build a ``Goal``; its ``review`` is the source review without covered entries.
+
+    Goals only reference their review, and loading every covered entry (with
+    tags and people) for each goal made goal listings and contexts cost
+    O(goals x review size) queries. Use ``get_review`` for the full review.
+    """
     person_row = None
     if row["person_id"] is not None:
         person_row = conn.execute(
@@ -120,7 +128,9 @@ def hydrate_goal(conn: sqlite3.Connection, row: sqlite3.Row) -> Goal:
         detail=row["detail"],
         status=row["status"],
         person=row_to_person(person_row) if person_row is not None else None,
-        review=hydrate_review(conn, review_row) if review_row is not None else None,
+        review=(
+            hydrate_review(conn, review_row, with_entries=False) if review_row is not None else None
+        ),
         outcome=row["outcome"],
         closed_at=row["closed_at"],
         created_at=row["created_at"],

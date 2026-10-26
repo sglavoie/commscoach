@@ -8,14 +8,17 @@ import textwrap
 
 from .. import db
 from .common import (
+    EDIT_IN_EDITOR,
     confirm,
     format_stamp,
+    handle_arg,
     non_negative_int,
     open_db,
     print_json,
     prose_lines,
     read_body_arg,
     read_replacement_body,
+    row_id,
     search_excerpt,
 )
 from .editor import compose_in_editor
@@ -38,7 +41,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     feedback_parser.set_defaults(func=_show_feedback_help)
 
     add = feedback_sub.add_parser("add", help="Attach a feedback note to an existing entry.")
-    add.add_argument("entry_id", type=int, metavar="ENTRY_ID")
+    add.add_argument("entry_id", type=row_id, metavar="ENTRY_ID")
     add.add_argument(
         "body",
         nargs="?",
@@ -51,7 +54,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add.set_defaults(func=cmd_feedback_add)
 
     lst = feedback_sub.add_parser("list", help="List feedback notes for an entry, oldest first.")
-    lst.add_argument("entry_id", type=int, metavar="ENTRY_ID")
+    lst.add_argument("entry_id", type=row_id, metavar="ENTRY_ID")
     lst.set_defaults(func=cmd_feedback_list)
 
     search = feedback_sub.add_parser("search", help="Search stored coaching text.")
@@ -59,11 +62,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--query",
         required=True,
         metavar="TEXT",
-        help="Literal case-insensitive substring to find in feedback bodies.",
+        help="Literal substring (ignoring case and accents) to find in feedback bodies.",
     )
     search.add_argument(
         "--person",
         default=None,
+        type=handle_arg,
         metavar="HANDLE",
         help="Only feedback on entries linked to this person.",
     )
@@ -77,7 +81,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     search.set_defaults(func=cmd_feedback_search)
 
     show = feedback_sub.add_parser("show", help="Show one feedback note by id.")
-    show.add_argument("feedback_id", type=int, metavar="FEEDBACK_ID")
+    show.add_argument("feedback_id", type=row_id, metavar="FEEDBACK_ID")
     show.add_argument(
         "--with-entry",
         action="store_true",
@@ -86,11 +90,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     show.set_defaults(func=cmd_feedback_show)
 
     edit = feedback_sub.add_parser("edit", help="Rewrite a feedback note body.")
-    edit.add_argument("feedback_id", type=int, metavar="FEEDBACK_ID")
+    edit.add_argument("feedback_id", type=row_id, metavar="FEEDBACK_ID")
     edit.add_argument(
         "--body",
         nargs="?",
-        const="",
+        const=EDIT_IN_EDITOR,
         default=None,
         help=(
             "Replace the body (text, '-', or '@PATH'); omit the value to open"
@@ -100,7 +104,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     edit.set_defaults(func=cmd_feedback_edit)
 
     rm = feedback_sub.add_parser("rm", help="Delete one feedback note.")
-    rm.add_argument("feedback_id", type=int, metavar="FEEDBACK_ID")
+    rm.add_argument("feedback_id", type=row_id, metavar="FEEDBACK_ID")
     rm.set_defaults(func=cmd_feedback_rm)
 
 
@@ -216,13 +220,9 @@ def cmd_feedback_search(args: argparse.Namespace) -> int:
             person_handle=args.person,
             limit=args.limit,
         )
-        total = (
-            db.count_search_feedback(conn, query=args.query, person_handle=args.person)
-            if not args.json
-            else len(items)
-        )
+        total = db.count_search_feedback(conn, query=args.query, person_handle=args.person)
     _emit_feedback_list(args, items, query=args.query)
-    if not args.json and total > len(items):
+    if total > len(items):
         print(f"Showing {len(items)} of {total} matching feedback notes.", file=sys.stderr)
     return 0
 
@@ -252,7 +252,7 @@ def cmd_feedback_rm(args: argparse.Namespace) -> int:
         if db.get_feedback(conn, args.feedback_id) is None:
             raise db.FeedbackNotFoundError(args.feedback_id)
         if not confirm(f"Delete feedback {args.feedback_id}?", assume_yes=args.yes):
-            raise db.DBError("aborted")
+            raise db.DBError("aborted; pass --yes to confirm without a prompt")
         deleted = db.delete_feedback(conn, args.feedback_id)
     if not deleted:
         raise db.FeedbackNotFoundError(args.feedback_id)

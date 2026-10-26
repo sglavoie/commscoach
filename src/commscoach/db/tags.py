@@ -118,6 +118,9 @@ def rename_tag(conn: sqlite3.Connection, old: str, new: str) -> Tag:
     """
     old_name = _require_name(old)
     new_name = _require_name(new, what="new tag name")
+    if "," in new_name:
+        # --tag splits on commas, so such a name could never be attached again.
+        raise DBError(f"new tag name {new_name!r} must not contain a comma")
     tag_id = _find_tag_id(conn, old_name)
     if tag_id is None:
         raise TagNotFoundError(old_name)

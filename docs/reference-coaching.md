@@ -14,7 +14,7 @@ commscoach feedback search --query "ask" --person jdoe --limit 5
 commscoach --json feedback search --query "10%"
 ```
 
-Feedback search uses literal, case-insensitive substring matching, including literal `%` and `_` characters. It returns the newest feedback first (creation time, then ID), with a default limit of 20. `--person` matches people linked to the feedback's entry, case-insensitively; an unknown handle is an error. The query must contain non-whitespace text. `--limit 0` returns an empty result. Human output shows feedback and entry IDs plus a preview; JSON returns the existing feedback objects.
+Feedback search uses literal substring matching that ignores case and accents, including literal `%` and `_` characters. It returns the newest feedback first (creation time, then ID), with a default limit of 20. `--person` matches people linked to the feedback's entry, case-insensitively; an unknown handle is an error. The query must contain non-whitespace text. `--limit 0` returns an empty result. Human output shows feedback and entry IDs plus a preview; JSON returns the existing feedback objects.
 
 Search previews show an excerpt around the first matching passage, including matches in headings or late in a long note. Ellipses mark omitted text; JSON always contains the full body.
 
@@ -26,7 +26,7 @@ commscoach review search --query "ask" --person jdoe --limit 5
 commscoach review search --query "conflict" --tag work --json
 ```
 
-Review search returns newest-first results (creation time, then ID), with a default limit of 20 and matching excerpts in human output. `--scope`, `--person`, and `--tag` combine with AND and have the same meaning as `review list`: they filter the review's stored scope, not the people or tags on its covered entries. Reviews about a deleted person remain searchable by their preserved handle; an unmatched handle returns no reviews. Empty queries are rejected, `--limit 0` returns an empty result, and JSON returns complete review objects.
+Review search returns newest-first results (creation time, then ID), with a default limit of 20 and matching excerpts in human output. `--scope`, `--person`, and `--tag` combine with AND and have the same meaning as `review list`: they filter the review's stored scope, not the people or tags on its covered entries. Reviews about a deleted person remain searchable by their preserved handle; a handle that names neither a person nor any stored review is an error. Empty queries are rejected, `--limit 0` returns an empty result, and JSON returns complete review objects.
 
 Revisit the experiments that came from a review:
 
@@ -97,7 +97,7 @@ Every interaction has a copyable `entry show ID --with-feedback` command,
 including interactions that have no feedback yet.
 
 Find a person's handle with `person list --query "John"`. This filters names and
-handles using literal, case-insensitive substring matching, retaining self-first,
+handles using literal substring matching that ignores case and accents, retaining self-first,
 then handle-alphabetical order. `%`, `_`, and `!` are literal characters; blank
 queries are rejected. An unmatched query returns an empty list.
 
@@ -166,9 +166,9 @@ commscoach person edit me --clear-notes
 
 Replace `me` with your self profile's handle. These notes are included even when the self profile is not linked to the entry.
 
-Entry coaching history includes only interactions strictly before the target entry's occurrence time, falling back to creation time for entries without an occurrence date. Interactions at the same instant are excluded. The newest matching interactions are selected before applying `--history`, then returned oldest-first. Notes, feedback, active goals, and prior reviews remain current coaching context, not snapshots of what was known at the time.
+Entry coaching history includes only interactions strictly before the target entry's occurrence time, falling back to creation time for entries without an occurrence date. Interactions at the same instant count as earlier when they were logged first (lower id), so two date-only entries from the same day still see each other in order. The newest matching interactions are selected before applying `--history`, then returned oldest-first. Notes, feedback, active goals, and prior reviews remain current coaching context, not snapshots of what was known at the time.
 
-Each person in entry context also has a `history_summary` with `limit`, `count`, `total_count`, and `truncated`. The total counts only eligible interactions strictly before the target, so the coach can distinguish "three prior interactions exist" from "three of 27 were included." `--history 0` still reports these totals, and a person with no eligible history has `total_count: 0` and `truncated: false`.
+Each person in entry context also has a `history_summary` with `limit`, `count`, `total_count`, and `truncated`. The total counts only eligible interactions before the target, so the coach can distinguish "three prior interactions exist" from "three of 27 were included." `--history 0` still reports these totals, and a person with no eligible history has `total_count: 0` and `truncated: false`.
 
 Like review context, `context ENTRY_ID` accepts `--goal-limit N` (default 10).
 Before applying the limit, goals for the entry's non-self participants come first,

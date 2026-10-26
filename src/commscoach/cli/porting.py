@@ -59,14 +59,19 @@ def cmd_import(args: argparse.Namespace) -> int:
         db.load_from_dict(conn, payload, dry_run=args.dry_run)
 
     result = {
+        "counts": db.dump_row_counts(payload),
         "dry_run": bool(args.dry_run),
         "imported": not args.dry_run,
         "source": "stdin" if args.path == "-" else str(Path(args.path).expanduser()),
     }
     if args.json:
         print_json(result)
-    elif args.dry_run:
-        print("import validated; no data written")
     else:
-        print(f"imported from {result['source']}")
+        summary = ", ".join(
+            f"{count} {table.replace('_', ' ')}" for table, count in result["counts"].items()
+        )
+        if args.dry_run:
+            print(f"import validated ({summary}); no data written")
+        else:
+            print(f"imported {summary} from {result['source']}")
     return 0

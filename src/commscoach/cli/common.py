@@ -18,15 +18,17 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import sqlite3
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 from typing import Any, TextIO
 
 from .. import db, paths
+from ..db.common import search_fold
 from ..timeparse import TimeParseError, parse_bound, parse_when
 
 
@@ -47,7 +49,8 @@ def print_err(message: str, *, stream: TextIO | None = None) -> None:
 def print_json(obj: Any, *, stream: TextIO | None = None) -> None:
     """Serialize ``obj`` as a pretty, sorted JSON document with a trailing newline."""
     out = stream if stream is not None else sys.stdout
-    json.dump(obj, out, indent=2, sort_keys=True, default=str)
+    # Unescaped like the JSON export, so names and notes stay readable.
+    json.dump(obj, out, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     out.write("\n")
 
 
@@ -91,23 +94,34 @@ def first_prose_line(body: str) -> str:
     return lines[0] if lines else ""
 
 
-_ASCII_FOLD = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+def _fold_with_offsets(text: str) -> tuple[str, list[int]]:
+    """Fold ``text`` for search, remembering each folded character's source index."""
+    folded: list[str] = []
+    offsets: list[int] = []
+    for index, char in enumerate(text):
+        piece = search_fold(char)
+        folded.append(piece)
+        offsets.extend([index] * len(piece))
+    return "".join(folded), offsets
 
 
-def ascii_fold(text: str) -> str:
-    """Lowercase ASCII letters only, matching SQLite's ``LIKE`` case folding."""
-    return text.translate(_ASCII_FOLD)
+def contains_folded(text: str, query: str) -> bool:
+    """Report whether ``query`` occurs in ``text`` under the substring searches' folding."""
+    return search_fold(query) in search_fold(text)
 
 
 def search_excerpt(body: str, query: str, *, width: int = 180) -> str:
     """Show context around the first literal match, preserving matched headings.
 
-    Fold ASCII only, like SQLite LIKE, so Unicode characters do not shift the
-    match offsets. Long queries remain whole even when they exceed the budget.
+    Matching folds case and accents like the database searches do; offsets are
+    mapped back to ``body`` so the excerpt is cut from the original text. Long
+    queries remain whole even when they exceed the budget.
     """
-    match = ascii_fold(body).find(ascii_fold(query))
-    if not query or match < 0:
+    folded, offsets = _fold_with_offsets(body)
+    position = folded.find(search_fold(query)) if query else -1
+    if position < 0:
         return truncate(first_prose_line(body), width=width)
+    match = offsets[position]
     budget = max(width, len(query))
     start = max(0, match - (budget - len(query)) // 2)
     end = min(len(body), start + budget)
@@ -127,6 +141,27 @@ def format_stamp(iso: str) -> str:
     except ValueError:
         return iso
     return parsed.astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def _format_bound(value: str | None) -> str:
+    """Render a stored range bound as the local day or time the user typed.
+
+    Bounds are stored as UTC instants, so ``--until 2026-09-01`` is kept as the
+    last microsecond of that local day, which in UTC can fall on 09-02. Whole
+    local days render as a bare date; legacy date-only bounds pass through.
+    """
+    if not value:
+        return ""
+    try:
+        stamp = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if stamp.tzinfo is None:
+        return value
+    local = stamp.astimezone()
+    if local.time() in (time.min, time.max):
+        return local.date().isoformat()
+    return local.strftime("%Y-%m-%d %H:%M")
 
 
 def format_scope(review: db.Review, *, separator: str = ":") -> str:
@@ -159,7 +194,8 @@ def format_scope(review: db.Review, *, separator: str = ":") -> str:
     if kind == "tag" and review.scope_tag:
         return f"{kind}{separator}{review.scope_tag}"
     if kind == "range" and (review.scope_since or review.scope_until):
-        return f"{kind}{separator}{review.scope_since or ''}..{review.scope_until or ''}"
+        since, until = _format_bound(review.scope_since), _format_bound(review.scope_until)
+        return f"{kind}{separator}{since}..{until}"
     return kind
 
 
@@ -209,7 +245,13 @@ def read_body_arg(
     return compose(template=template, preamble=preamble)
 
 
-def read_replacement_body(value: str | None, *, command: str) -> str | None:
+# ``const`` of the edit commands' ``--body``: a bare flag opens the editor. A
+# sentinel rather than "" so an explicit ``--body ""`` is rejected as empty
+# instead of silently opening the editor.
+EDIT_IN_EDITOR: Any = object()
+
+
+def read_replacement_body(value: Any, *, command: str) -> str | None:
     """Read an edit command's ``--body`` before the database is opened.
 
     Returns the given text (literal, ``-`` or ``@PATH``), or ``None`` for a bare
@@ -217,7 +259,9 @@ def read_replacement_body(value: str | None, *, command: str) -> str | None:
     """
     if value is None:
         raise db.DBError(f"{command} requires --body")
-    return read_body_or_raise(value) if value != "" else None
+    if value is EDIT_IN_EDITOR:
+        return None
+    return read_body_or_raise(value)
 
 
 def parse_when_or_raise(value: str, *, now: datetime | None = None) -> str:
@@ -280,18 +324,31 @@ def confirm(
     *,
     assume_yes: bool = False,
     stream: TextIO | None = None,
-    input_fn: Callable[[str], str] = input,
+    input_fn: Callable[[str], str] | None = None,
+    isatty: Callable[[], bool] | None = None,
 ) -> bool:
     """Prompt the user for a y/N confirmation.
 
     Returns ``True`` only when the user types ``y`` or ``yes`` (case-insensitive).
     EOF and any other input return ``False``. ``assume_yes`` skips the prompt
     entirely so ``--yes`` callers do not block on stdin.
+
+    When the default (``input``) would read a stdin that is not a terminal, the
+    answer is "no" without reading: a pipe that stays open (an agent harness,
+    a background job) would otherwise block forever on a prompt nobody sees.
+    ``isatty`` defaults to ``sys.stdin.isatty`` and is injectable for tests.
     """
     if assume_yes:
         return True
     out = stream if stream is not None else sys.stderr
     out.write(f"{prompt} [y/N] ")
+    if input_fn is None:
+        if not (isatty or _stdin_isatty)():
+            # Same output as EOF: callers say how to proceed (``--yes``).
+            out.write("\n")
+            out.flush()
+            return False
+        input_fn = input
     out.flush()
     try:
         answer = input_fn("")
@@ -303,6 +360,13 @@ def confirm(
     return answer.strip().lower() in {"y", "yes"}
 
 
+def _stdin_isatty() -> bool:
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):  # replaced or closed stdin
+        return False
+
+
 def resolve_db_path(args: argparse.Namespace) -> Path:
     """Apply ``--db`` then ``$COMMSCOACH_DB`` then the built-in default."""
     try:
@@ -311,15 +375,63 @@ def resolve_db_path(args: argparse.Namespace) -> Path:
         raise db.DBError(str(exc)) from exc
 
 
-def non_negative_int(value: str) -> int:
-    """Parse an argparse integer that cannot be negative."""
+# SQLite stores integers as signed 64-bit values; anything larger would
+# surface as an OverflowError traceback instead of a usage error.
+_SQLITE_INT_MAX = 2**63 - 1
+
+
+def _bounded_int(value: str, *, minimum: int, below: str) -> int:
     try:
         parsed = int(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("must be an integer") from exc
-    if parsed < 0:
-        raise argparse.ArgumentTypeError("must be non-negative")
+        raise argparse.ArgumentTypeError(f"invalid integer: {value!r}") from exc
+    if parsed < minimum:
+        raise argparse.ArgumentTypeError(below)
+    if parsed > _SQLITE_INT_MAX:
+        raise argparse.ArgumentTypeError(f"must be at most {_SQLITE_INT_MAX}")
     return parsed
+
+
+def non_negative_int(value: str) -> int:
+    """Parse an argparse integer that cannot be negative."""
+    return _bounded_int(value, minimum=0, below="must be non-negative")
+
+
+def positive_int(value: str) -> int:
+    """Parse an argparse integer that must be at least 1."""
+    return _bounded_int(value, minimum=1, below="must be at least 1")
+
+
+def row_id(value: str) -> int:
+    """Parse a row id argument; ids are positive and fit in SQLite's INTEGER."""
+    return _bounded_int(value, minimum=1, below="ids are positive integers")
+
+
+def handle_arg(value: str) -> str:
+    """Accept a person handle as typed, including the ``@handle`` form shown in output."""
+    value = value.strip()
+    return value[1:] if value.startswith("@") else value
+
+
+def handle_list_arg(value: str) -> list[str]:
+    """Split a comma-separated ``--person`` value like ``--tag`` does."""
+    return [handle_arg(part) for part in value.split(",") if part.strip()]
+
+
+def covered_entry_id(value: str) -> int:
+    """Parse one ``--entry`` value, explaining the usual ordering mistake.
+
+    ``--entry`` takes every following word, so a body written after it is
+    read as an id; say how to fix that instead of a bare "invalid int".
+    """
+    try:
+        return row_id(value)
+    except argparse.ArgumentTypeError as exc:
+        if value.lstrip("-").isdigit():
+            raise
+        raise argparse.ArgumentTypeError(
+            f"invalid entry id {value!r} (put the body before --entry, or after '--')"
+        ) from exc
 
 
 @contextmanager
@@ -346,14 +458,22 @@ def open_db(
                 "Open its folder in Finder or run 'brctl download', then retry. "
                 "Do NOT run 'commscoach init' — it would create an empty database here."
             )
-        raise db.DBError("run 'commscoach init' first")
+        raise db.InitRequiredError(_init_command(args))
     try:
         conn = db.connect(db_path)
     except sqlite3.Error as exc:
         raise db.DBError(f"cannot open database {db_path}: {exc}") from exc
     with closing(conn) as conn:
-        if allow_legacy_schema:
-            db.validate_backup_source(conn)
-        else:
-            db.validate_schema(conn)
+        try:
+            if allow_legacy_schema:
+                db.validate_backup_source(conn)
+            else:
+                db.validate_schema(conn)
+        except db.InitRequiredError as exc:
+            raise db.InitRequiredError(_init_command(args), reason=exc.reason) from exc
         yield conn
+
+
+def _init_command(args: argparse.Namespace) -> str:
+    """Return the ``init`` command for the database this invocation targets."""
+    return shlex.join([*command_prefix(args), "init"])

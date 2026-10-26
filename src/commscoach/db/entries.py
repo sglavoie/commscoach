@@ -11,8 +11,8 @@ from ..models import Entry
 from ..timeparse import TimeParseError, parse_when
 from . import common
 from . import tags as tags_mod
-from .errors import DBError, EntryNotFoundError
-from .people import resolve_person_handles
+from .errors import DBError, EntryNotFoundError, PersonNotFoundError, TagNotFoundError
+from .people import get_person_by_handle, resolve_person_handles
 from .rows import hydrate_entry
 
 _PLAIN_WORDS = re.compile(r"[^\W_]+(?:\s+[^\W_]+)*")
@@ -191,7 +191,7 @@ def list_entries_with_person(
     limit: int,
     before: str | None = None,
 ) -> tuple[Entry, ...]:
-    """Return other entries newest-first, optionally strictly before an instant."""
+    """Return other entries newest-first, optionally before an instant (ties by id)."""
     if limit < 0:
         raise DBError("limit must be non-negative")
     where, params = _person_history_filter(person_id, exclude_entry_id, before)
@@ -209,8 +209,15 @@ def _person_history_filter(
     sql = " JOIN entry_people ep ON ep.entry_id = e.id WHERE ep.person_id = ? AND e.id != ?"
     params: list[Any] = [person_id, exclude_entry_id]
     if before is not None:
-        sql += " AND COALESCE(e.occurred_at, e.created_at) < ?"
-        params.append(common.date_bound_timestamp(before, name="before"))
+        # Entries at the very same instant (common with date-only "yesterday")
+        # are ordered by id, matching the newest-first listing order, so an
+        # earlier-logged tie still counts as history instead of vanishing.
+        bound = common.date_bound_timestamp(before, name="before")
+        sql += (
+            " AND (COALESCE(e.occurred_at, e.created_at) < ?"
+            " OR (COALESCE(e.occurred_at, e.created_at) = ? AND e.id < ?))"
+        )
+        params.extend((bound, bound, exclude_entry_id))
     return sql, params
 
 
@@ -238,17 +245,26 @@ def delete_entry(conn: sqlite3.Connection, entry_id: int) -> bool:
 
 
 def _scope_filters(
+    conn: sqlite3.Connection,
     *,
     tag: str | None,
     person_handle: str | None,
     since: str | None,
     until: str | None,
 ) -> tuple[list[str], list[Any]]:
-    """Share scope predicates between entry retrieval and completeness counts."""
+    """Share scope predicates between entry retrieval and completeness counts.
+
+    An unknown tag or person raises instead of matching nothing, so a typo is
+    never mistaken for "no entries in that scope yet".
+    """
     common.validate_range_bounds(since, until, since_name="since", until_name="until")
     where: list[str] = []
     params: list[Any] = []
     if tag:
+        if tags_mod._find_tag_id(conn, tags_mod.normalize_tag(tag)) is None:
+            raise TagNotFoundError(
+                tags_mod.normalize_tag(tag), hint="'commscoach tag list' shows existing tags"
+            )
         where.append(
             "EXISTS ("
             "SELECT 1 FROM entry_tags et"
@@ -257,11 +273,13 @@ def _scope_filters(
         )
         params.append(tags_mod.normalize_tag(tag))
     if person_handle:
+        if get_person_by_handle(conn, person_handle) is None:
+            raise PersonNotFoundError(person_handle)
         where.append(
             "EXISTS ("
             "SELECT 1 FROM entry_people ep"
             " JOIN people p ON p.id = ep.person_id"
-            " WHERE ep.entry_id = e.id AND LOWER(p.handle) = LOWER(?))"
+            " WHERE ep.entry_id = e.id AND handle_key(p.handle) = handle_key(?))"
         )
         params.append(person_handle)
     if since is not None:
@@ -283,6 +301,7 @@ def count_scoped_entries(
 ) -> int:
     """Count a review's matching entries without hydrating the omitted rows."""
     where, params = _scope_filters(
+        conn,
         tag=tag,
         person_handle=person_handle,
         since=since,
@@ -385,6 +404,7 @@ def _search_entry_rows(
     if mode not in {"auto", "like", "fts"}:
         raise DBError("mode must be one of: auto, like, fts")
     where, params = _scope_filters(
+        conn,
         tag=tag,
         person_handle=person_handle,
         since=since,
@@ -394,6 +414,9 @@ def _search_entry_rows(
         where.append("e.source = ? COLLATE NOCASE")
         params.append(source)
     use_fts = False
+    if query is not None and not query.strip():
+        # Same rule as feedback, review, and goal search.
+        raise DBError("query must be a non-empty string")
     if query:
         fts_row = conn.execute("SELECT value FROM _meta WHERE key = 'fts5'").fetchone()
         fts_enabled = fts_row is not None and fts_row[0] == "1"
@@ -404,9 +427,8 @@ def _search_entry_rows(
             where.append("entries_fts MATCH ?")
             params.append(_fts_match_query(query) if mode == "auto" else query)
         else:
-            where.append("e.body LIKE ? ESCAPE '!' COLLATE NOCASE")
-            literal_query = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
-            params.append(f"%{literal_query}%")
+            where.append("search_fold(e.body) LIKE ? ESCAPE '!'")
+            params.append(common.contains_pattern(query))
     if without_feedback:
         where.append("NOT EXISTS (SELECT 1 FROM feedback f WHERE f.entry_id = e.id)")
     sql = "SELECT " + ("COUNT(*)" if count_only else "e.*") + " FROM entries e"

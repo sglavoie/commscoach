@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 from .. import db, paths
-from .common import format_scope, open_db, print_err, resolve_db_path
+from .common import format_scope, open_db, print_err, print_json, resolve_db_path
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -220,5 +220,9 @@ def cmd_export(args: argparse.Namespace) -> int:
         _write_export_file(out_path, rendered)
     except OSError as exc:
         raise db.DBError(f"cannot write export to {out_path}: {exc}") from exc
-    print_err(f"exported to {out_path}")
+    if args.json:
+        # stdout carries no export here, so report the write like backup does.
+        print_json({"format": export_format, "path": str(out_path)})
+    else:
+        print_err(f"exported to {out_path}")
     return 0

@@ -80,6 +80,23 @@ class DumpRoundTripTests(DBTestCase):
 
         self.assertEqual(db.dump_to_dict(restored), original)
 
+    def test_unaddressable_handles_tags_and_string_ids_are_rejected(self) -> None:
+        cases = {
+            "blank handle": lambda d: d["people"][0].update(handle="  "),
+            "untrimmed handle": lambda d: d["people"][0].update(handle=" me"),
+            "uppercase tag": lambda d: d["tags"][0].update(name="UPPER"),
+            "untrimmed tag": lambda d: d["tags"][0].update(name="upper "),
+            "string id": lambda d: d["entries"][0].update(id="7"),
+            "string goal person": lambda d: d["goals"][0].update(person_id="1"),
+        }
+        for label, mutate in cases.items():
+            with self.subTest(label):
+                payload = db.dump_to_dict(self.conn)
+                mutate(payload)
+                restored = self._fresh_connection()
+                with self.assertRaises(db.DumpFormatError):
+                    db.load_from_dict(restored, payload)
+
     def test_review_entry_positions_survive(self) -> None:
         original = db.dump_to_dict(self.conn)
         restored = self._fresh_connection()

@@ -113,6 +113,29 @@ class StatsTests(DBTestCase):
         self.assertEqual(ended.longest_weekly_streak, 2)
         self.assertEqual(windowed.current_weekly_streak, 2)
 
+    def test_top_sources_group_case_insensitively(self) -> None:
+        for source in ("Slack", "slack", "SLACK", "email"):
+            self._add_entry("2026-01-05T09:00:00+00:00", source=source)
+        self.conn.commit()
+        stats = db.get_stats(self.conn)
+        self.assertEqual(stats.top_sources, (("SLACK", 3), ("email", 1)))
+
+    def test_future_dated_entry_does_not_reset_current_streak(self) -> None:
+        for timestamp in (
+            "2026-01-05T09:00:00+00:00",
+            "2026-01-12T09:00:00+00:00",
+            "2026-01-19T09:00:00+00:00",
+            "2026-02-09T09:00:00+00:00",  # three weeks ahead of "today"
+        ):
+            self._add_entry(timestamp)
+        self.conn.commit()
+
+        with local_timezone("UTC"):
+            stats = db.get_stats(self.conn, today=date(2026, 1, 21))
+
+        self.assertEqual(stats.current_weekly_streak, 3)
+        self.assertEqual(stats.longest_weekly_streak, 3)
+
     def test_weeks_follow_the_local_calendar(self) -> None:
         # Sunday 2026-01-11 21:00 in New York is already Monday in UTC.
         self._add_entry("2026-01-12T02:00:00+00:00")

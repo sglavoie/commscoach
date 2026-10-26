@@ -200,6 +200,8 @@ def list_reviews(
     person_handle: str | None = None,
     tag: str | None = None,
     query: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> tuple[Review, ...]:
     """Return stored reviews newest-first by creation time.
 
@@ -208,7 +210,8 @@ def list_reviews(
     ``scope_person_handle`` case-insensitively rather than the ``scope_person_id``
     FK, so reviews about a since-deleted person are still findable. ``tag``
     matches the normalized ``scope_tag``. ``query`` searches literal body
-    substrings, using the same matching rules as feedback search.
+    substrings, using the same matching rules as feedback search. ``since`` and
+    ``until`` bound when the review was written (``created_at``), inclusively.
     """
     if limit is not None and limit < 0:
         raise DBError("limit must be non-negative")
@@ -217,6 +220,8 @@ def list_reviews(
         person_handle=person_handle,
         tag=tag,
         query=query,
+        since=since,
+        until=until,
     )
     sql = "SELECT * FROM reviews" + filters + " ORDER BY created_at DESC, id DESC"
     if limit is not None:
@@ -233,6 +238,8 @@ def count_reviews(
     person_handle: str | None = None,
     tag: str | None = None,
     query: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> int:
     """Count stored reviews using the same filters as list_reviews."""
     filters, params = _review_filters(
@@ -240,6 +247,8 @@ def count_reviews(
         person_handle=person_handle,
         tag=tag,
         query=query,
+        since=since,
+        until=until,
     )
     return conn.execute("SELECT COUNT(*) FROM reviews" + filters, params).fetchone()[0]
 
@@ -250,22 +259,30 @@ def _review_filters(
     person_handle: str | None,
     tag: str | None,
     query: str | None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> tuple[str, list[Any]]:
     where: list[str] = []
     params: list[Any] = []
+    common.validate_range_bounds(since, until, since_name="since", until_name="until")
+    if since is not None:
+        where.append("created_at >= ?")
+        params.append(common.date_bound_timestamp(since, name="since"))
+    if until is not None:
+        where.append("created_at <= ?")
+        params.append(common.date_bound_timestamp(until, name="until", upper=True))
     if query is not None:
         if not query.strip():
             raise DBError("query must be a non-empty string")
-        literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
-        where.append("body LIKE ? ESCAPE '!' COLLATE NOCASE")
-        params.append(f"%{literal}%")
+        where.append("search_fold(body) LIKE ? ESCAPE '!'")
+        params.append(common.contains_pattern(query))
     if scope_kind is not None:
         if scope_kind not in SCOPE_KINDS:
             raise DBError("review scope_kind must be one of: " + ", ".join(SCOPE_KINDS))
         where.append("scope_kind = ?")
         params.append(scope_kind)
     if person_handle is not None:
-        where.append("LOWER(scope_person_handle) = LOWER(?)")
+        where.append("handle_key(scope_person_handle) = handle_key(?)")
         params.append(person_handle)
     if tag is not None:
         where.append("scope_tag = ?")

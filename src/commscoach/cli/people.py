@@ -15,6 +15,7 @@ from .common import (
     confirm,
     first_prose_line,
     format_stamp,
+    handle_arg,
     non_negative_int,
     open_db,
     print_json,
@@ -45,15 +46,21 @@ def ensure_people(
     handles: Iterable[str],
     *,
     assume_yes: bool,
+    command: list[str] | None = None,
 ) -> None:
-    """Confirm and create any people handles that do not already exist."""
+    """Confirm and create any people handles that do not already exist.
+
+    ``command`` is the ``command_prefix`` used in the follow-up hint, so it
+    names the same ``--db`` the user is working with.
+    """
     for handle in handles:
         if db.get_person_by_handle(conn, handle) is not None:
             continue
         if not confirm(f"Create person @{handle}?", assume_yes=assume_yes):
+            prefix = command if command is not None else ["commscoach"]
             raise db.DBError(
                 f"person @{handle} does not exist; pass --yes to create it, or run "
-                f"{shlex.join(['commscoach', 'person', 'add', handle])} first"
+                f"{shlex.join([*prefix, 'person', 'add', handle])} first"
             )
         db.create_person(conn, handle, name=None)
 
@@ -72,7 +79,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     person_parser.set_defaults(func=_show_person_help)
 
     add = person_sub.add_parser("add", help="Create a new person.")
-    add.add_argument("handle", help="Unique handle (case-insensitive).")
+    add.add_argument(
+        "handle",
+        type=handle_arg,
+        help="Unique handle (case-insensitive; a leading @ is dropped; no spaces or commas).",
+    )
     add.add_argument("--name", default=None, help="Optional human-readable display name.")
     add.add_argument(
         "--self",
@@ -83,7 +94,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add.set_defaults(func=cmd_person_add)
 
     show = person_sub.add_parser("show", help="Show one person by handle.")
-    show.add_argument("handle", metavar="HANDLE")
+    show.add_argument("handle", type=handle_arg, metavar="HANDLE")
     show.add_argument(
         "--recent",
         type=non_negative_int,
@@ -109,7 +120,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "prep",
         help="Prepare for a conversation with notes, goals, feedback, and reviews.",
     )
-    prep.add_argument("handle", metavar="HANDLE")
+    prep.add_argument("handle", type=handle_arg, metavar="HANDLE")
     prep.add_argument(
         "--brief",
         action="store_true",
@@ -137,10 +148,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     prep.set_defaults(func=cmd_person_show, with_feedback=True)
 
     edit = person_sub.add_parser("edit", help="Update handle, name, or private notes for a person.")
-    edit.add_argument("handle", metavar="HANDLE", help="Existing handle to update.")
+    edit.add_argument(
+        "handle", type=handle_arg, metavar="HANDLE", help="Existing handle to update."
+    )
     edit.add_argument(
         "--handle",
         dest="new_handle",
+        type=handle_arg,
         default=None,
         metavar="NEW_HANDLE",
         help="Rename the person's handle.",
@@ -179,13 +193,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "rm",
         help="Delete a person and their entry links (entries themselves remain).",
     )
-    rm.add_argument("handle", metavar="HANDLE")
+    rm.add_argument("handle", type=handle_arg, metavar="HANDLE")
     rm.set_defaults(func=cmd_person_rm)
 
     self_cmd = person_sub.add_parser(
         "self", help="Promote a person to global self (atomically demotes any prior self)."
     )
-    self_cmd.add_argument("handle", metavar="HANDLE")
+    self_cmd.add_argument("handle", type=handle_arg, metavar="HANDLE")
     self_cmd.set_defaults(func=cmd_person_self)
 
 
@@ -497,7 +511,7 @@ def cmd_person_rm(args: argparse.Namespace) -> int:
                 " This removes your self profile; coaching context requires a new self profile."
             )
         if not confirm(prompt, assume_yes=args.yes):
-            raise db.DBError("aborted")
+            raise db.DBError("aborted; pass --yes to confirm without a prompt")
         deleted = db.delete_person(conn, person.id)
     if not deleted:
         raise db.PersonNotFoundError(args.handle)

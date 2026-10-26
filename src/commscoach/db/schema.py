@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import closing
+from datetime import datetime
 from pathlib import Path
 
 from .. import paths
 from ..timeparse import TimeParseError, parse_when
-from .errors import DBError
+from . import common
+from .errors import DBError, InitRequiredError
 from .schema_sql import (
     _FTS5_DROP_TRIGGER_SQL,
     _FTS5_TABLE_SQL,
@@ -62,7 +64,7 @@ EXPECTED_TABLES = frozenset(
 # commscoach database" independently of which version it was stamped at.
 _BASELINE_TABLES = frozenset({"_meta", "people", "entries"})
 
-_OCCURRED_AT_BACKFILL_KEY = "occurred_at_utc_backfill_v1"
+_OCCURRED_AT_BACKFILL_KEY = "occurred_at_utc_backfill_v2"
 _FTS5_META_KEY = "fts5"
 
 
@@ -76,6 +78,7 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
         db_path = paths.resolve_db_path()
     conn = sqlite3.connect(str(Path(db_path).expanduser()))
     conn.row_factory = sqlite3.Row
+    common.register_functions(conn)
     conn.execute("PRAGMA foreign_keys = ON")
     # DELETE leaves exactly one database file at rest. WAL's persistent -wal
     # and -shm files can be replicated independently by whole-file syncers,
@@ -114,9 +117,31 @@ def validate_schema(conn: sqlite3.Connection) -> None:
         tables = {row[0] for row in rows}
         version = get_schema_version(conn) if "_meta" in tables else None
     except (sqlite3.Error, ValueError) as exc:
-        raise DBError("run 'commscoach init' first") from exc
+        raise InitRequiredError() from exc
     if version != SCHEMA_VERSION or not EXPECTED_TABLES.issubset(tables):
-        raise DBError("run 'commscoach init' first")
+        raise InitRequiredError()
+    if not _fts5_usable(conn):
+        raise InitRequiredError(
+            reason="this database uses full-text search, which this SQLite build lacks"
+            " (init switches it to substring search)"
+        )
+
+
+def _fts5_usable(conn: sqlite3.Connection) -> bool:
+    """Report whether entry writes can run here, without writing anything.
+
+    A database initialized where FTS5 exists keeps triggers that write to
+    ``entries_fts``; on a build without FTS5 every entry write would fail with
+    "no such module: fts5" until ``init`` drops them.
+    """
+    row = conn.execute("SELECT value FROM _meta WHERE key = ?", (_FTS5_META_KEY,)).fetchone()
+    if row is None or row[0] != "1":
+        return True
+    try:
+        conn.execute("SELECT 1 FROM entries_fts LIMIT 0").fetchall()
+    except sqlite3.OperationalError:
+        return False
+    return True
 
 
 def validate_backup_source(conn: sqlite3.Connection) -> int:
@@ -145,9 +170,9 @@ def validate_backup_source(conn: sqlite3.Connection) -> int:
         tables = {row[0] for row in rows}
         version = get_schema_version(conn) if "_meta" in tables else None
     except (sqlite3.Error, ValueError) as exc:
-        raise DBError("run 'commscoach init' first") from exc
+        raise InitRequiredError() from exc
     if version is None or version < 1 or not _BASELINE_TABLES.issubset(tables):
-        raise DBError("run 'commscoach init' first")
+        raise InitRequiredError()
     return version
 
 
@@ -168,35 +193,60 @@ def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
 
 
 def _normalize_occurred_at_once(conn: sqlite3.Connection) -> None:
-    """Normalize parseable legacy occurrence timestamps once per database."""
+    """Turn every legacy occurrence value into a canonical UTC timestamp, once.
+
+    Before occurrence times were parsed at input, ``--occurred-at`` stored raw
+    text. Relative text ("yesterday") is read against the entry's own creation
+    time, which is when it was written, rather than the time of the upgrade.
+    Text that still cannot be parsed would break stats, date filters, and
+    re-importing an export, so it moves into the end of the body (nothing is
+    lost) and the entry falls back to its creation time.
+
+    The v1 pass resolved relative text against the upgrade time and left
+    unparsable text in place; v2 re-runs over any database, which is safe
+    because canonical values are left untouched.
+    """
     already_done = conn.execute(
         "SELECT 1 FROM _meta WHERE key = ?", (_OCCURRED_AT_BACKFILL_KEY,)
     ).fetchone()
     if already_done is not None:
         return
 
-    has_values = conn.execute(
-        "SELECT 1 FROM entries WHERE occurred_at IS NOT NULL LIMIT 1"
-    ).fetchone()
-    if has_values is not None:
-        rows = conn.execute(
-            "SELECT id, occurred_at FROM entries WHERE occurred_at IS NOT NULL"
-        ).fetchall()
-        for row in rows:
-            try:
-                normalized = parse_when(row["occurred_at"])
-            except TimeParseError:
-                continue
-            if normalized != row["occurred_at"]:
-                conn.execute(
-                    "UPDATE entries SET occurred_at = ? WHERE id = ?",
-                    (normalized, row["id"]),
-                )
+    rows = conn.execute(
+        "SELECT id, body, occurred_at, created_at FROM entries WHERE occurred_at IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        raw = row["occurred_at"]
+        try:
+            normalized = parse_when(raw, now=_local_reference(row["created_at"]))
+        except TimeParseError:
+            body = f"{row['body'].rstrip()}\n\n(Originally recorded occurrence time: {raw})"
+            conn.execute(
+                "UPDATE entries SET body = ?, occurred_at = NULL WHERE id = ?",
+                (body, row["id"]),
+            )
+            continue
+        if normalized != raw:
+            conn.execute(
+                "UPDATE entries SET occurred_at = ? WHERE id = ?",
+                (normalized, row["id"]),
+            )
 
     conn.execute(
         "INSERT INTO _meta (key, value) VALUES (?, '1')",
         (_OCCURRED_AT_BACKFILL_KEY,),
     )
+
+
+def _local_reference(created_at: str) -> datetime | None:
+    """Return ``created_at`` as naive system-local time, the parser's "now"."""
+    try:
+        stamp = datetime.fromisoformat(created_at)
+    except (TypeError, ValueError):
+        return None
+    if stamp.tzinfo is not None:
+        stamp = stamp.astimezone().replace(tzinfo=None)
+    return stamp
 
 
 def _reviews_need_scope_columns(conn: sqlite3.Connection) -> bool:

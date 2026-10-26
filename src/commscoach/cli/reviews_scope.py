@@ -9,6 +9,7 @@ from .. import db
 from ..db.tags import normalize_tag
 from .common import (
     add_date_bounds,
+    handle_arg,
     parse_date_bounds,
 )
 
@@ -70,6 +71,7 @@ def add_scope_flags(parser: argparse.ArgumentParser) -> None:
         "--person",
         default=None,
         dest="scope_person",
+        type=handle_arg,
         metavar="HANDLE",
         help="Scope to entries involving HANDLE (scope kind 'person').",
     )

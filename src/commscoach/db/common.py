@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import sqlite3
+import unicodedata
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, time
@@ -15,6 +16,45 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 # Connections (by id) currently inside a write_transaction, so nested
 # mutators join the outer transaction instead of committing it early.
 _ACTIVE_WRITES: set[int] = set()
+
+
+def search_fold(text: str) -> str:
+    """Fold case and accents for substring search, as the FTS5 index does.
+
+    SQLite's own ``LIKE``/``NOCASE`` fold ASCII only, so without this ``école``
+    would miss ``ÉCOLE`` and ``cafe`` would miss ``café`` in every search that
+    does not go through FTS5. Registered on each connection by ``connect``.
+    """
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(char for char in decomposed if not unicodedata.combining(char)).casefold()
+
+
+def _search_fold_sql(text: Any) -> Any:
+    return search_fold(text) if isinstance(text, str) else text
+
+
+def _handle_key_sql(text: Any) -> Any:
+    return text.casefold() if isinstance(text, str) else text
+
+
+def register_functions(conn: sqlite3.Connection) -> None:
+    """Make ``search_fold(text)`` and ``handle_key(text)`` available to SQL on ``conn``.
+
+    ``handle_key`` is Unicode case-insensitive identity for handles (``Émile``
+    is ``émile``) without folding accents, which ``LOWER`` cannot do.
+    """
+    conn.create_function("search_fold", 1, _search_fold_sql, deterministic=True)
+    conn.create_function("handle_key", 1, _handle_key_sql, deterministic=True)
+
+
+def contains_pattern(query: str) -> str:
+    """Return a folded ``LIKE ... ESCAPE '!'`` pattern matching ``query`` anywhere.
+
+    Pair it with ``search_fold(column) LIKE ? ESCAPE '!'``; ``%`` and ``_`` in
+    the query match literally.
+    """
+    literal = search_fold(query).replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    return f"%{literal}%"
 
 
 @contextmanager

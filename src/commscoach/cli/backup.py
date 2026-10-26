@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .. import db
 from ..db.backup import BACKUP_PREFIX, BACKUP_SUFFIX
-from .common import non_negative_int, open_db, print_json, resolve_db_path
+from .common import confirm, open_db, positive_int, print_json, resolve_db_path
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -26,14 +26,20 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--out",
         default=None,
         metavar="PATH",
-        help="Write to PATH (default: a timestamped file under backups/).",
+        help=(
+            "Write to PATH (default: a timestamped file under backups/). An existing"
+            " file is only replaced after confirmation or with --yes."
+        ),
     )
     parser.add_argument(
         "--keep",
-        type=non_negative_int,
+        type=positive_int,
         default=None,
         metavar="N",
-        help="Keep only the newest N timestamped backups in the output directory.",
+        help=(
+            "Keep only the newest N (at least 1) timestamped backups in the output"
+            " directory; the backup just taken always counts as one of them."
+        ),
     )
     parser.set_defaults(func=cmd_backup)
 
@@ -63,6 +69,12 @@ def cmd_backup(args: argparse.Namespace, *, now: datetime | None = None) -> int:
     )
     if destination.resolve() == source_path.resolve():
         raise db.DBError("backup destination must differ from the source database")
+    if (
+        args.out is not None
+        and destination.exists()
+        and not confirm(f"Overwrite existing file {destination}?", assume_yes=args.yes)
+    ):
+        raise db.DBError(f"{destination} already exists; pass --yes to overwrite it")
     # Legacy schemas are accepted on purpose: the documented way to survive a
     # migration is to back up first, so refusing a pre-migration database
     # would make this command useless at the one moment it matters most.

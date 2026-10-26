@@ -73,6 +73,15 @@ class ParseWhenTests(unittest.TestCase):
             "2026-03-07T17:00:00+00:00",
         )
 
+    def test_hour_and_minute_arithmetic_is_elapsed_time_across_dst(self) -> None:
+        # 03:30 EST, 2.5 hours after clocks fell back from 02:00 EDT.
+        fall = datetime(2026, 11, 1, 3, 30, tzinfo=ZoneInfo("America/New_York"))
+        self.assertEqual(parse_when("3 hours ago", now=fall), "2026-11-01T05:30:00+00:00")
+        # 04:00 EDT, one hour after clocks sprang forward from 02:00 EST.
+        spring = datetime(2026, 3, 8, 4, 0, tzinfo=ZoneInfo("America/New_York"))
+        self.assertEqual(parse_when("2 hours ago", now=spring), "2026-03-08T06:00:00+00:00")
+        self.assertEqual(parse_when("90 minutes ago", now=spring), "2026-03-08T06:30:00+00:00")
+
     def test_rejected_forms_name_the_grammar(self) -> None:
         for value in (
             "yesterdya",

@@ -102,12 +102,14 @@ class ReviewSearchTests(ReviewTestBase):
             (("--person", "ALICE", "--scope", "person"), [scoped.id]),
             (("--tag", "CONFLICT", "--scope", "tag"), [tagged.id]),
             (("--person", "alice", "--tag", "conflict"), []),
-            (("--person", "unknown"), []),
         ):
             with self.subTest(flags=flags):
                 rc, out, err = self._run("review", "search", "--query", "ask", *flags, "--json")
                 self.assertEqual(rc, 0, err)
                 self.assertEqual([r["id"] for r in json.loads(out)], expected)
+        rc, _, err = self._run("review", "search", "--query", "ask", "--person", "unknown")
+        self.assertEqual(rc, 1)
+        self.assertIn("person 'unknown' not found", err)
 
     def test_empty_results_zero_limit_and_invalid_queries(self):
         entry = self._seed_entry()

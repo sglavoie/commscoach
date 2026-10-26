@@ -21,7 +21,6 @@ class ScopeDerivationTests(ScopedContextBase):
             (("--since", "2026-07-01T00:00:00+00:00"), 2),
             (("--until", self.first.occurred_at), 2),
             (("--since", self.first.occurred_at, "--until", self.second.occurred_at), 2),
-            (("--tag", "missing"), 0),
         ]
         for flags, total in cases:
             for limit in (0, 1, total, total + 1):
@@ -125,12 +124,13 @@ class ScopeDerivationTests(ScopedContextBase):
             [self.unrelated.id],
         )
 
-    def test_tag_scope_matching_nothing_returns_empty_entries(self) -> None:
-        payload = self._scope("--tag", "nosuchtag")
-        self.assertEqual(payload["scope"]["kind"], "tag")
-        self.assertEqual(payload["scope"]["tag"], "nosuchtag")
-        self.assertEqual(payload["entries"], [])
-        self.assertEqual(payload["scope"]["entry_count"], 0)
+    def test_unknown_tag_is_an_error_not_an_empty_scope(self) -> None:
+        # A typo must not read as "no entries in that scope yet".
+        rc, out, err = self._run("review", "context", "--tag", "nosuchtag")
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, "")
+        self.assertIn("tag 'nosuchtag' not found", err)
+        self.assertIn("tag list", err)
 
 
 class ScopeConflictTests(ScopedContextBase):

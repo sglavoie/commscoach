@@ -20,7 +20,9 @@ class ReviewContextTests(DBTestCase):
     def test_person_goal_priority_precedes_limit_without_filtering_other_goals(self) -> None:
         for handle in ("alice", "bob", "carol"):
             db.create_person(self.conn, handle)
-        entry = db.create_entry(self.conn, "Conversation", people=["alice", "bob", "me"])
+        entry = db.create_entry(
+            self.conn, "Conversation", people=["alice", "bob", "me"], tags=["sync"]
+        )
         alice = db.create_goal(
             self.conn, "Alice", person_handle="alice", now="2026-01-01T00:00:00+00:00"
         )
@@ -52,7 +54,7 @@ class ReviewContextTests(DBTestCase):
                 self.assertEqual(review_context.total_goal_count, 4)
         for scope in (
             {},
-            {"scope_kind": "tag", "tag": "missing"},
+            {"scope_kind": "tag", "tag": "sync"},
             {"scope_kind": "range", "since": "2026-01-01"},
         ):
             self.assertEqual(
@@ -286,19 +288,24 @@ class EntryContextTests(DBTestCase):
         context = db.get_entry_context(self.conn, current.id, history_limit=1)
         self.assertEqual([item.entry.id for item in context.people[0].history], [prior.id])
 
-    def test_history_falls_back_to_creation_time_and_excludes_equal_timestamps(self) -> None:
+    def test_history_falls_back_to_creation_time_and_orders_equal_timestamps_by_id(self) -> None:
         with patch_timestamps(
             "2026-01-01T09:00:00+00:00",
+            "2026-01-02T09:00:00+00:00",
             "2026-01-02T09:00:00+00:00",
             "2026-01-02T09:00:00+00:00",
             "2026-01-03T09:00:00+00:00",
         ):
             prior = db.create_entry(self.conn, "prior", people=["alice"])
+            same_before = db.create_entry(self.conn, "same instant, logged first", people=["alice"])
             current = db.create_entry(self.conn, "target", people=["alice"])
-            db.create_entry(self.conn, "same instant", people=["alice"])
+            db.create_entry(self.conn, "same instant, logged after", people=["alice"])
             db.create_entry(self.conn, "later", people=["alice"])
         context = db.get_entry_context(self.conn, current.id)
-        self.assertEqual([item.entry.id for item in context.people[0].history], [prior.id])
+        self.assertEqual(
+            [item.entry.id for item in context.people[0].history], [prior.id, same_before.id]
+        )
+        self.assertEqual(context.people[0].total_history_count, 2)
 
     def test_context_includes_open_goals_and_prior_reviews(self) -> None:
         prior_entry = db.create_entry(self.conn, "prior")

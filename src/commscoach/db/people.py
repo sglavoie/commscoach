@@ -58,6 +58,23 @@ def _wrap_people_integrity_error(exc: sqlite3.IntegrityError, handle: str | None
     raise exc
 
 
+def validate_handle(handle: Any) -> str:
+    """Return ``handle`` stripped, or raise ``DBError`` if it cannot be a handle.
+
+    Handles are shown as ``@handle`` and ``--person`` splits on commas, so a
+    leading ``@``, a comma, or whitespace would create a person that can never
+    be typed back exactly as it is displayed.
+    """
+    if not isinstance(handle, str) or not handle.strip():
+        raise DBError("handle must be a non-empty string")
+    handle = handle.strip()
+    if handle.startswith("@"):
+        raise DBError(f"handle {handle!r} must not start with '@'")
+    if "," in handle or any(char.isspace() for char in handle):
+        raise DBError(f"handle {handle!r} must not contain commas or whitespace")
+    return handle
+
+
 @common.writes
 def create_person(
     conn: sqlite3.Connection,
@@ -71,11 +88,13 @@ def create_person(
     Raises ``DuplicateHandleError`` on case-insensitive handle collision and
     ``DuplicateSelfError`` if ``is_self=True`` while another self row exists.
     """
-    if not handle or not handle.strip():
-        raise DBError("handle must be a non-empty string")
+    handle = validate_handle(handle)
     now = common.utcnow_iso()
     try:
         with common.write_transaction(conn):
+            # The UNIQUE index folds ASCII only; this also catches "Émile" vs "émile".
+            if get_person_by_handle(conn, handle) is not None:
+                raise DuplicateHandleError(handle)
             cur = conn.execute(
                 "INSERT INTO people (handle, name, is_self, created_at, updated_at)"
                 " VALUES (?, ?, ?, ?, ?)",
@@ -120,8 +139,7 @@ def update_person(
     fields: list[str] = []
     params: list[Any] = []
     if handle is not common.UNSET:
-        if not handle or not str(handle).strip():
-            raise DBError("handle must be a non-empty string")
+        handle = validate_handle(handle)
         fields.append("handle = ?")
         params.append(handle)
     if name is not common.UNSET:
@@ -135,6 +153,10 @@ def update_person(
     params.append(person_id)
     try:
         with common.write_transaction(conn):
+            if handle is not common.UNSET:
+                clash = get_person_by_handle(conn, handle)
+                if clash is not None and clash.id != person_id:
+                    raise DuplicateHandleError(handle)
             conn.execute(
                 f"UPDATE people SET {', '.join(fields)} WHERE id = ?",
                 params,
@@ -160,7 +182,7 @@ def get_person(conn: sqlite3.Connection, person_id: int) -> Person | None:
 
 def get_person_by_handle(conn: sqlite3.Connection, handle: str) -> Person | None:
     row = conn.execute(
-        "SELECT * FROM people WHERE LOWER(handle) = LOWER(?)",
+        "SELECT * FROM people WHERE handle_key(handle) = handle_key(?)",
         (handle,),
     ).fetchone()
     if row is None:
@@ -179,9 +201,10 @@ def list_people(
     if query is not None:
         if not query.strip():
             raise DBError("query must be a non-empty string")
-        literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
-        sql += " WHERE (handle LIKE ? ESCAPE '!' OR name LIKE ? ESCAPE '!')"
-        params = [f"%{literal}%"] * 2
+        sql += (
+            " WHERE (search_fold(handle) LIKE ? ESCAPE '!' OR search_fold(name) LIKE ? ESCAPE '!')"
+        )
+        params = [common.contains_pattern(query)] * 2
     rows = conn.execute(
         sql + " ORDER BY is_self DESC, handle COLLATE NOCASE",
         params,

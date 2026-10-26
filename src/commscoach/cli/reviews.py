@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 
 from .. import db
 from .common import (
+    EDIT_IN_EDITOR,
+    add_date_bounds,
     confirm,
+    covered_entry_id,
+    handle_arg,
     non_negative_int,
     open_db,
+    parse_date_bounds,
     print_json,
     read_body_arg,
     read_replacement_body,
+    row_id,
 )
 from .editor import compose_in_editor
 from .reviews_format import emit_review, emit_reviews, review_context_to_dict
@@ -79,7 +86,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--entry",
         action="extend",
         nargs="+",
-        type=int,
+        type=covered_entry_id,
         required=True,
         default=[],
         dest="entry_ids",
@@ -120,6 +127,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--person",
         default=None,
         dest="person_handle",
+        type=handle_arg,
         metavar="HANDLE",
         help="Only list reviews scoped to HANDLE.",
     )
@@ -129,6 +137,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="NAME",
         help="Only list reviews scoped to tag NAME.",
     )
+    add_date_bounds(lst, noun="reviews written")
     lst.set_defaults(func=cmd_review_list)
 
     search = review_sub.add_parser("search", help="Search stored review bodies.")
@@ -136,7 +145,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--query",
         required=True,
         metavar="TEXT",
-        help="Literal case-insensitive substring to find in review bodies.",
+        help="Literal substring (ignoring case and accents) to find in review bodies.",
     )
     search.add_argument(
         "--limit",
@@ -156,6 +165,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--person",
         default=None,
         dest="person_handle",
+        type=handle_arg,
         metavar="HANDLE",
         help="Only search reviews scoped to HANDLE, including deleted people.",
     )
@@ -165,10 +175,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="NAME",
         help="Only search reviews scoped to tag NAME.",
     )
+    add_date_bounds(search, noun="reviews written")
     search.set_defaults(func=cmd_review_list)
 
     show = review_sub.add_parser("show", help="Show one review by id.")
-    show.add_argument("review_id", type=int, metavar="REVIEW_ID")
+    show.add_argument("review_id", type=row_id, metavar="REVIEW_ID")
     show.add_argument(
         "--with-goals",
         action="store_true",
@@ -182,11 +193,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
 
     edit = review_sub.add_parser("edit", help="Rewrite a stored review body.")
-    edit.add_argument("review_id", type=int, metavar="REVIEW_ID")
+    edit.add_argument("review_id", type=row_id, metavar="REVIEW_ID")
     edit.add_argument(
         "--body",
         nargs="?",
-        const="",
+        const=EDIT_IN_EDITOR,
         default=None,
         help=(
             "Replace the body (text, '-', or '@PATH'); omit the value to open"
@@ -196,7 +207,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     edit.set_defaults(func=cmd_review_edit)
 
     rm = review_sub.add_parser("rm", help="Delete one review.")
-    rm.add_argument("review_id", type=int, metavar="REVIEW_ID")
+    rm.add_argument("review_id", type=row_id, metavar="REVIEW_ID")
     rm.set_defaults(func=cmd_review_rm)
 
 
@@ -250,9 +261,25 @@ def cmd_review_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def _require_known_review_person(conn: sqlite3.Connection, handle: str) -> None:
+    """Reject a handle that names neither a person nor any stored review.
+
+    A deleted person's handle stays valid (their scoped reviews keep it), but a
+    typo should not look like "no reviews about this person".
+    """
+    if db.get_person_by_handle(conn, handle) is not None:
+        return
+    if db.count_reviews(conn, person_handle=handle):
+        return
+    raise db.PersonNotFoundError(handle)
+
+
 def cmd_review_list(args: argparse.Namespace) -> int:
     query = getattr(args, "query", None)
+    since, until = parse_date_bounds(args)
     with open_db(args) as conn:
+        if args.person_handle is not None:
+            _require_known_review_person(conn, args.person_handle)
         reviews = db.list_reviews(
             conn,
             limit=args.limit,
@@ -260,6 +287,8 @@ def cmd_review_list(args: argparse.Namespace) -> int:
             person_handle=args.person_handle,
             tag=args.tag,
             query=query,
+            since=since,
+            until=until,
         )
         total = (
             db.count_reviews(
@@ -268,12 +297,14 @@ def cmd_review_list(args: argparse.Namespace) -> int:
                 person_handle=args.person_handle,
                 tag=args.tag,
                 query=query,
+                since=since,
+                until=until,
             )
-            if not args.json and args.limit is not None
+            if args.limit is not None
             else len(reviews)
         )
     emit_reviews(args, reviews, query=query)
-    if not args.json and total > len(reviews):
+    if total > len(reviews):
         print(f"Showing {len(reviews)} of {total} matching reviews.", file=sys.stderr)
     return 0
 
@@ -334,7 +365,7 @@ def cmd_review_rm(args: argparse.Namespace) -> int:
         if db.get_review(conn, args.review_id) is None:
             raise db.ReviewNotFoundError(args.review_id)
         if not confirm(f"Delete review {args.review_id}?", assume_yes=args.yes):
-            raise db.DBError("aborted")
+            raise db.DBError("aborted; pass --yes to confirm without a prompt")
         deleted = db.delete_review(conn, args.review_id)
     if not deleted:
         raise db.ReviewNotFoundError(args.review_id)

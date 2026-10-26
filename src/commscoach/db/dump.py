@@ -24,6 +24,7 @@ from typing import Any
 from .common import normalize_date_bound, read_snapshot
 from .errors import DBError
 from .schema import get_schema_version
+from .tags import normalize_tag
 
 FORMAT = "commscoach-dump"
 FORMAT_VERSION = 2
@@ -96,6 +97,22 @@ _OPTIONAL_TABLE_COLUMNS: dict[str, frozenset[str]] = {
 # review scope bounds, which may also be bare legacy UTC dates.
 _TIMESTAMP_COLUMNS = frozenset({"created_at", "updated_at", "occurred_at", "closed_at"})
 _DATE_BOUND_COLUMNS = frozenset({"scope_since", "scope_until"})
+
+# Integer columns checked before insert, so a stringly typed id fails with its
+# location instead of a bare constraint error. Nullable ones may also be null.
+_INTEGER_COLUMNS: dict[str, tuple[str, ...]] = {
+    "people": ("id",),
+    "entries": ("id",),
+    "tags": ("id",),
+    "feedback": ("id", "entry_id"),
+    "reviews": ("id",),
+    "goals": ("id",),
+    "person_notes": ("person_id",),
+}
+_NULLABLE_INTEGER_COLUMNS: dict[str, tuple[str, ...]] = {
+    "reviews": ("scope_limit", "scope_person_id"),
+    "goals": ("person_id", "review_id"),
+}
 
 _AUTOINCREMENT_TABLES = ("people", "entries", "tags", "feedback", "reviews", "goals")
 _ALL_DATA_TABLES = (*_TABLE_COLUMNS, "entry_tags", "entry_people", "review_entries")
@@ -231,6 +248,26 @@ def _validate_row(table: str, index: int, row: Any) -> None:
     if missing:
         raise DumpFormatError(f"{location} is missing column {missing[0]!r}")
     _row_values(table, row, location)
+    for column in _INTEGER_COLUMNS[table]:
+        _require_int(row[column], f"{location}.{column}")
+    for column in _NULLABLE_INTEGER_COLUMNS.get(table, ()):
+        if row.get(column) is not None:
+            _require_int(row[column], f"{location}.{column}")
+
+    # Mirror the write paths' own normalization so a hand-edited archive
+    # cannot restore a person or tag that no command can address afterwards.
+    # Older handles with '@', commas, or spaces are still accepted: the CLI
+    # used to allow them, and a database must re-import its own export.
+    if table == "people":
+        handle = row["handle"]
+        if not isinstance(handle, str) or not handle.strip() or handle != handle.strip():
+            raise DumpFormatError(f"{location}.handle must be a non-empty, trimmed string")
+    elif table == "tags":
+        name = row["name"]
+        if not isinstance(name, str) or not name or normalize_tag(name) != name:
+            raise DumpFormatError(
+                f"{location}.name must be a non-empty, trimmed, lowercase tag name"
+            )
 
     if table == "entries":
         for key in ("tag_ids", "person_ids"):
@@ -251,6 +288,11 @@ def _validate_row(table: str, index: int, row: Any) -> None:
                 if key not in linked_entry:
                     raise DumpFormatError(f"{entry_location} is missing column {key!r}")
                 _require_int(linked_entry[key], f"{entry_location}.{key}")
+
+
+def dump_row_counts(data: Mapping[str, Any]) -> dict[str, int]:
+    """Return the number of rows per table in a validated dump."""
+    return {table: len(data.get(table) or ()) for table in _TABLE_COLUMNS}
 
 
 def validate_dump(data: Any) -> None:

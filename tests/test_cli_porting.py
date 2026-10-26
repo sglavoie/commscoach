@@ -98,6 +98,31 @@ class PortingCLITests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(out_path.stat().st_mode), 0o600)
         self.assertEqual(json.loads(out_path.read_text())["format_version"], 2)
 
+    def test_json_export_to_file_and_import_report_what_happened(self) -> None:
+        archive = self.tmpdir / "archive.json"
+        rc, out, err = self._run(self.source_path, "--json", "export", "--out", str(archive))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out), {"format": "json", "path": str(archive)})
+
+        target = self.tmpdir / "target.sqlite3"
+        db.init_db(target)
+        rc, out, err = self._run(target, "--json", "import", str(archive), "--dry-run")
+        self.assertEqual(rc, 0, err)
+        counts = json.loads(out)["counts"]
+        self.assertEqual(counts["entries"], 1)
+        self.assertEqual(
+            set(counts),
+            {
+                "people",
+                "entries",
+                "tags",
+                "feedback",
+                "reviews",
+                "goals",
+                "person_notes",
+            },
+        )
+
     def test_import_from_path_round_trips(self) -> None:
         archive = self.tmpdir / "archive.json"
         self._run(
@@ -112,7 +137,7 @@ class PortingCLITests(unittest.TestCase):
         rc, stdout, _ = self._run(self.target_path, "import", str(archive))
 
         self.assertEqual(rc, 0)
-        self.assertIn("imported from", stdout)
+        self.assertRegex(stdout, r"^imported 1 people, 1 entries, .* from ")
         with (
             closing(db.connect(self.source_path)) as source,
             closing(db.connect(self.target_path)) as target,

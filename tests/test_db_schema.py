@@ -24,6 +24,7 @@ from tests.db_schema_case import (
     index_names,
     table_names,
 )
+from tests.timezone_case import local_timezone
 
 
 class InitDbSchemaTests(unittest.TestCase):
@@ -290,10 +291,37 @@ class InitDbSchemaTests(unittest.TestCase):
                     "occurred_at": "2026-06-20T18:00:00+00:00",
                 },
             )
-            self.assertEqual(entries[1]["occurred_at"], "legacy-value")
+            # Unparsable text moves into the body so stats, filters, and
+            # export/import keep working, and nothing is lost.
+            self.assertIsNone(entries[1]["occurred_at"])
+            self.assertEqual(
+                entries[1]["body"],
+                "unparseable entry\n\n(Originally recorded occurrence time: legacy-value)",
+            )
             indexes = index_names(conn)
             self.assertIn("idx_entries_effective_at", indexes)
             self.assertNotIn("idx_entries_occurred_at", indexes)
+
+    def test_init_reads_legacy_relative_occurrence_against_creation_time(self) -> None:
+        paths.ensure_data_dir(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            conn.executescript(db_schema.SCHEMA_V1_SQL)
+            conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', '1')")
+            conn.execute(
+                "INSERT INTO entries (body, source, occurred_at, created_at, updated_at)"
+                " VALUES ('legacy', NULL, 'yesterday 9am', ?, ?)",
+                ("2026-06-20T16:00:00+00:00", "2026-06-20T16:00:00+00:00"),
+            )
+            conn.commit()
+
+        with local_timezone("UTC"):
+            db.init_db(self.db_path)
+
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(
+                conn.execute("SELECT occurred_at FROM entries").fetchone()[0],
+                "2026-06-19T09:00:00+00:00",
+            )
 
     def test_init_migrates_v2_database_without_data_loss(self) -> None:
         paths.ensure_data_dir(self.db_path)
@@ -440,3 +468,23 @@ class ValidateBackupSourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Fts5PortabilityTests(unittest.TestCase):
+    def test_validate_schema_asks_for_init_when_fts5_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "commscoach.sqlite3"
+            db.init_db(db_path)
+            with closing(db.connect(db_path)) as conn:
+                conn.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('fts5', '1')")
+                conn.commit()
+                # On this build the FTS table is readable, so validation passes.
+                self.assertTrue(db_schema._fts5_usable(conn))
+                db.validate_schema(conn)
+                with (
+                    mock.patch.object(db_schema, "_fts5_usable", return_value=False),
+                    self.assertRaises(db.InitRequiredError) as raised,
+                ):
+                    db.validate_schema(conn)
+        self.assertIn("full-text search", str(raised.exception))
+        self.assertIn("run 'commscoach init' first", str(raised.exception))

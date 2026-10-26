@@ -75,7 +75,7 @@ class EntryAddTests(EntryTestBase):
         self.assertEqual(rc, 1)
         self.assertIn("Create person @newbie? [y/N] \n", err)
         self.assertIn("person @newbie does not exist; pass --yes to create it", err)
-        self.assertIn("commscoach person add newbie", err)
+        self.assertIn(f"commscoach --db {self.db_path} person add newbie", err)
 
     def test_add_unknown_person_with_yes_creates_and_links(self) -> None:
         rc, _, _ = self._run(
