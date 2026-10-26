@@ -85,8 +85,15 @@ def cmd_tag_list(args: argparse.Namespace) -> int:
 
 def cmd_tag_rename(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
+        old_name = normalize_tag(args.old)
         tag = db.rename_tag(conn, args.old, args.new)
-    _emit_tag(args, tag, human_line=f"renamed tag '{args.old}' to '{tag.name}'")
+    # Same wording as a no-op edit: only the case of the given name differed.
+    human_line = (
+        f"unchanged tag '{tag.name}'"
+        if tag.name == old_name
+        else f"renamed tag '{old_name}' to '{tag.name}'"
+    )
+    _emit_tag(args, tag, human_line=human_line)
     return 0
 
 

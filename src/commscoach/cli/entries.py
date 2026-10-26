@@ -43,6 +43,8 @@ ENTRY_PREAMBLE = (
     "How did they respond?\n"
     "What would you like feedback on?"
 )
+# Editing reopens text already written, so the add-time prompts would only clutter it.
+ENTRY_EDIT_PREAMBLE = "Edit the entry body below. Lines beginning with #> are ignored."
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -179,7 +181,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
             )
     edit.set_defaults(func=cmd_entry_edit)
 
-    lst = entry_sub.add_parser("list", help="List entries newest-first.")
+    lst = entry_sub.add_parser(
+        "list",
+        help="List entries newest-first (use 'entry search' to filter by tag, person, or source).",
+    )
     lst.add_argument(
         "--limit",
         type=non_negative_int,
@@ -231,9 +236,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     srch.add_argument(
         "--limit",
         type=non_negative_int,
-        default=None,
+        default=20,
         metavar="N",
-        help="Maximum results (default: all); text output reports omitted matches.",
+        help="Maximum results (default: 20, like the other searches); text output reports omitted matches.",
     )
     add_oldest_first(srch, noun="matching entries")
     srch.set_defaults(func=cmd_entry_search)
@@ -390,7 +395,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
                 None,
                 what="body",
                 template=current.body,
-                preamble=ENTRY_PREAMBLE,
+                preamble=ENTRY_EDIT_PREAMBLE,
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
             )

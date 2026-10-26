@@ -59,6 +59,8 @@ class EntryEditTests(EntryTestBase):
         def compose(*, template: str, preamble: str) -> str:
             self.assertEqual(template, "old body")
             self.assertIn("#>", preamble)
+            self.assertIn("Edit the entry", preamble)
+            self.assertNotIn("What did you want?", preamble)
             return "edited body"
 
         tty = mock.Mock()

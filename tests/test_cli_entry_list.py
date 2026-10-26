@@ -116,6 +116,14 @@ class EntryListTests(EntryTestBase):
         self.assertEqual(rc, 0)
         self.assertIn("· #ops, #work · @alice, @bob", out)
 
+    def test_search_defaults_to_twenty_results_like_other_searches(self) -> None:
+        for index in range(21):
+            self._seed_entry(f"body {index}")
+        rc, out, err = self._run("entry", "search", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(len(json.loads(out)), 20)
+        self.assertIn("Showing 20 of 21 matching entries.", err)
+
     def test_list_empty(self) -> None:
         rc, out, _ = self._run("entry", "list")
         self.assertEqual(rc, 0)

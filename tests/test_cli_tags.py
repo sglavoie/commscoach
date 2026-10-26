@@ -84,6 +84,13 @@ class TagRenameTests(EntryTestBase):
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.get_entry(conn, entry.id).tags, ("pushback",))
 
+    def test_case_only_rename_reports_unchanged(self) -> None:
+        self._seed_entry("a", tags=("review",))
+        rc, out, _ = self._run("tag", "rename", "review", "REVIEW")
+        self.assertEqual(rc, 0)
+        self.assertIn("unchanged tag 'review'", out)
+        self.assertNotIn("renamed", out)
+
     def test_rename_json_emits_the_tag_shape(self) -> None:
         self._seed_entry("a", tags=("conflict",))
 
