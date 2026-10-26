@@ -9,15 +9,20 @@ newer ``format_version`` is rejected because its representation may no longer
 be safe to interpret, while a ``schema_version`` mismatch emits a warning: a
 dump from one schema version restored into another is the normal migration
 path. Restores preserve IDs and run atomically with foreign-key enforcement on.
+Timestamps are validated on restore and normalized to UTC, matching what the
+CLI itself stores, so range filters and stats work on imported rows.
 """
 
 from __future__ import annotations
 
 import sqlite3
 import warnings
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Any
 
+from .common import normalize_date_bound
 from .errors import DBError
 from .schema import get_schema_version
 
@@ -88,6 +93,11 @@ _OPTIONAL_TABLE_COLUMNS: dict[str, frozenset[str]] = {
     ),
 }
 
+# Timestamp columns restored as timezone-aware UTC ISO-8601 strings, and the
+# review scope bounds, which may also be bare legacy UTC dates.
+_TIMESTAMP_COLUMNS = frozenset({"created_at", "updated_at", "occurred_at", "closed_at"})
+_DATE_BOUND_COLUMNS = frozenset({"scope_since", "scope_until"})
+
 _AUTOINCREMENT_TABLES = ("people", "entries", "tags", "feedback", "reviews", "goals")
 _ALL_DATA_TABLES = (*_TABLE_COLUMNS, "entry_tags", "entry_people", "review_entries")
 
@@ -107,8 +117,27 @@ def _dump_rows(
     return [_row_dict(row, columns) for row in rows]
 
 
+@contextmanager
+def _read_snapshot(conn: sqlite3.Connection) -> Iterator[None]:
+    """Read every table from one snapshot, so a concurrent write cannot leave
+    the archive with links to rows it does not contain."""
+    if conn.in_transaction:
+        yield
+        return
+    conn.execute("BEGIN")
+    try:
+        yield
+    finally:
+        conn.rollback()
+
+
 def dump_to_dict(conn: sqlite3.Connection) -> dict[str, Any]:
     """Return a deterministic, lossless JSON-compatible representation."""
+    with _read_snapshot(conn):
+        return _dump_snapshot(conn)
+
+
+def _dump_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
     people = _dump_rows(conn, "people")
     entries = _dump_rows(conn, "entries")
     for entry in entries:
@@ -151,12 +180,62 @@ def dump_to_dict(conn: sqlite3.Connection) -> dict[str, Any]:
         "reviews": reviews,
         "goals": _dump_rows(conn, "goals"),
         "person_notes": _dump_rows(conn, "person_notes"),
+        # Optional: lets a restore keep handing out fresh IDs instead of
+        # reusing those of rows deleted before the dump.
+        "sequences": {
+            row["name"]: row["seq"]
+            for row in conn.execute(
+                "SELECT name, seq FROM sqlite_sequence ORDER BY name"
+            ).fetchall()
+            if row["name"] in _AUTOINCREMENT_TABLES
+        },
     }
 
 
 def _require_int(value: Any, location: str) -> None:
     if not isinstance(value, int) or isinstance(value, bool):
         raise DumpFormatError(f"{location} must be an integer")
+
+
+def _normalize_timestamp(value: Any, location: str) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            stamp = datetime.fromisoformat(value)
+        except ValueError:
+            pass
+        else:
+            if stamp.tzinfo is not None:
+                try:
+                    return stamp.astimezone(timezone.utc).isoformat()
+                except OverflowError:
+                    pass
+    raise DumpFormatError(f"{location} must be a timezone-aware ISO-8601 timestamp")
+
+
+def _normalize_bound(value: Any, location: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise DumpFormatError(f"{location} must be an ISO date or timestamp")
+    try:
+        return normalize_date_bound(value, name=location)
+    except DBError as exc:
+        raise DumpFormatError(str(exc)) from exc
+
+
+def _row_values(table: str, row: Mapping[str, Any], location: str) -> tuple[Any, ...]:
+    optional = _OPTIONAL_TABLE_COLUMNS.get(table, frozenset())
+    values = []
+    for column in _TABLE_COLUMNS[table]:
+        value = row.get(column) if column in optional else row[column]
+        if column in _TIMESTAMP_COLUMNS:
+            value = _normalize_timestamp(value, f"{location}.{column}")
+        elif column in _DATE_BOUND_COLUMNS:
+            value = _normalize_bound(value, f"{location}.{column}")
+        values.append(value)
+    return tuple(values)
 
 
 def _validate_row(table: str, index: int, row: Any) -> None:
@@ -171,6 +250,7 @@ def _validate_row(table: str, index: int, row: Any) -> None:
     ]
     if missing:
         raise DumpFormatError(f"{location} is missing column {missing[0]!r}")
+    _row_values(table, row, location)
 
     if table == "entries":
         for key in ("tag_ids", "person_ids"):
@@ -215,6 +295,11 @@ def validate_dump(data: Any) -> None:
     if version < 1:
         raise DumpFormatError(f"unsupported dump format version {version}")
     _require_int(data.get("schema_version"), "schema_version")
+    sequences = data.get("sequences", {})
+    if not isinstance(sequences, Mapping):
+        raise DumpFormatError("sequences must be an object")
+    for name, seq in sequences.items():
+        _require_int(seq, f"sequences.{name}")
 
     for table in _TABLE_COLUMNS:
         rows = data.get(table, [])
@@ -237,15 +322,26 @@ def _insert_row(
     row: Mapping[str, Any],
 ) -> None:
     columns = _TABLE_COLUMNS[table]
-    optional = _OPTIONAL_TABLE_COLUMNS.get(table, frozenset())
     placeholders = ", ".join("?" for _ in columns)
     conn.execute(
         f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
-        tuple(
-            row.get(column) if column in optional else row[column]
-            for column in columns
-        ),
+        _row_values(table, row, table),
     )
+
+
+def _restore_sequences(conn: sqlite3.Connection, sequences: Mapping[str, int]) -> None:
+    for table in _AUTOINCREMENT_TABLES:
+        seq = sequences.get(table)
+        if seq is None:
+            continue
+        updated = conn.execute(
+            "UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?",
+            (seq, table),
+        )
+        if updated.rowcount == 0:
+            conn.execute(
+                "INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", (table, seq)
+            )
 
 
 def _restore_rows(conn: sqlite3.Connection, data: Mapping[str, Any]) -> None:
@@ -279,6 +375,7 @@ def _restore_rows(conn: sqlite3.Connection, data: Mapping[str, Any]) -> None:
         _insert_row(conn, "person_notes", row)
     for row in data.get("goals", []):
         _insert_row(conn, "goals", row)
+    _restore_sequences(conn, data.get("sequences", {}))
 
 
 def load_from_dict(
@@ -321,10 +418,16 @@ def load_from_dict(
         for table in _AUTOINCREMENT_TABLES:
             conn.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table,))
         _restore_rows(conn, data)
-    except (sqlite3.Error, KeyError, TypeError) as exc:
+    except BaseException as exc:
         conn.execute(f"ROLLBACK TO {savepoint}")
         conn.execute(f"RELEASE {savepoint}")
-        raise DumpFormatError(f"cannot import dump: {exc}") from exc
+        if isinstance(exc, DBError):
+            raise
+        if isinstance(
+            exc, (sqlite3.Error, KeyError, TypeError, ValueError, OverflowError)
+        ):
+            raise DumpFormatError(f"cannot import dump: {exc}") from exc
+        raise
     if dry_run:
         conn.execute(f"ROLLBACK TO {savepoint}")
     conn.execute(f"RELEASE {savepoint}")

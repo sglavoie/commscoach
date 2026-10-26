@@ -13,6 +13,9 @@ from commscoach import db
 from .db_case import DBTestCase
 from .db_schema_case import NOW
 
+# The canonical UTC form the CLI writes; restore normalizes to it.
+STAMP = "2026-06-20T00:00:00+00:00"
+
 
 def seed_complete_store(conn: object) -> None:
     me = db.create_person(conn, "me", name="Me", is_self=True)
@@ -134,19 +137,19 @@ class DumpRoundTripTests(DBTestCase):
             "INSERT INTO reviews (body, scope_kind, scope_limit,"
             " scope_person_id, scope_person_handle, created_at, updated_at)"
             " VALUES ('about alex', 'person', NULL, ?, 'alex', ?, ?)",
-            (person_id, NOW, NOW),
+            (person_id, STAMP, STAMP),
         )
         self.conn.execute(
             "INSERT INTO reviews (body, scope_kind, scope_tag,"
             " created_at, updated_at)"
             " VALUES ('conflict theme', 'tag', 'conflict', ?, ?)",
-            (NOW, NOW),
+            (STAMP, STAMP),
         )
         self.conn.execute(
             "INSERT INTO reviews (body, scope_kind, scope_since, scope_until,"
             " created_at, updated_at)"
             " VALUES ('june', 'range', '2026-06-01', '2026-06-30', ?, ?)",
-            (NOW, NOW),
+            (STAMP, STAMP),
         )
         self.conn.commit()
         original = db.dump_to_dict(self.conn)
@@ -300,6 +303,64 @@ class SequenceResetTests(unittest.TestCase):
                 created = db.create_entry(target, "new")
 
                 self.assertEqual(created.id, first.id + 1)
+
+    def test_ids_of_rows_deleted_before_the_dump_are_not_reused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source_path = Path(tmp) / "source.sqlite3"
+            target_path = Path(tmp) / "target.sqlite3"
+            db.init_db(source_path)
+            db.init_db(target_path)
+            with closing(db.connect(source_path)) as source, closing(
+                db.connect(target_path)
+            ) as target:
+                db.create_entry(source, "kept")
+                deleted = db.create_entry(source, "deleted later")
+                source.execute("DELETE FROM entries WHERE id = ?", (deleted.id,))
+                source.commit()
+
+                db.load_from_dict(target, db.dump_to_dict(source))
+                created = db.create_entry(target, "new")
+
+                self.assertEqual(created.id, deleted.id + 1)
+
+
+class RestoreValidationTests(DBTestCase):
+    def _restore(self, payload: dict) -> object:
+        restored_path = Path(self._tmp.name) / "restored" / "commscoach.sqlite3"
+        db.init_db(restored_path)
+        restored = db.connect(restored_path)
+        self.addCleanup(restored.close)
+        db.load_from_dict(restored, payload)
+        return restored
+
+    def _payload_with_entry(self, **overrides: object) -> dict:
+        db.create_entry(self.conn, "body")
+        payload = db.dump_to_dict(self.conn)
+        payload["entries"][0].update(overrides)
+        return payload
+
+    def test_offset_timestamps_are_normalized_to_utc(self) -> None:
+        payload = self._payload_with_entry(occurred_at="2026-03-01T21:00:00-05:00")
+        restored = self._restore(payload)
+        (occurred_at,) = restored.execute("SELECT occurred_at FROM entries").fetchone()
+        self.assertEqual(occurred_at, "2026-03-02T02:00:00+00:00")
+
+    def test_unparseable_or_naive_timestamps_are_rejected(self) -> None:
+        for value in ("last tuesday", "2026-03-01T21:00:00", 42):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                db.DumpFormatError, r"entries\[0\]\.occurred_at"
+            ):
+                db.validate_dump(self._payload_with_entry(occurred_at=value))
+
+    def test_out_of_range_id_is_a_clean_error_and_rolls_back(self) -> None:
+        payload = self._payload_with_entry(id=2**70)
+        restored_path = Path(self._tmp.name) / "restored" / "commscoach.sqlite3"
+        db.init_db(restored_path)
+        with closing(db.connect(restored_path)) as restored:
+            with self.assertRaises(db.DumpFormatError):
+                db.load_from_dict(restored, payload)
+            self.assertFalse(restored.in_transaction)
+            self.assertEqual(db.dump_to_dict(restored)["entries"], [])
 
 
 if __name__ == "__main__":

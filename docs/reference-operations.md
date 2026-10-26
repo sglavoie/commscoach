@@ -150,7 +150,7 @@ Each exported review names its scope axis, so a synthesis stays self-describing 
 
 `latest`, `tag conflict`, and `range 2026-07-01..2026-09-01` are the other three shapes. A review whose scoped person was deleted still renders `person @alice` from the stored handle, and the JSON archive round-trips that handle through `import`.
 
-Import restores a complete JSON export into an empty initialized database. It never merges with or replaces existing records. Validate the whole restore, including constraints, with `--dry-run` before writing:
+Import restores a complete JSON export into an empty initialized database. It never merges with or replaces existing records. Timestamps must be timezone-aware ISO-8601 values and are stored normalized to UTC, as the CLI stores them; IDs of rows deleted before the export are not handed out again. Validate the whole restore, including constraints, with `--dry-run` before writing:
 
 ```sh
 commscoach --db /path/to/empty.sqlite3 init
