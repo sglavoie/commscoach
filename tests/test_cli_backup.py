@@ -156,6 +156,30 @@ class BackupCommandTests(unittest.TestCase):
         self.assertTrue(created.name.startswith("commscoach-"))
         self.assertTrue(created.is_file())
 
+    def test_out_with_trailing_slash_creates_that_directory(self) -> None:
+        target = Path(self._tmp.name) / "new-folder"
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = cli.main(["--db", str(self.db_path), "--json", "backup", "--out", f"{target}/"])
+        self.assertEqual(rc, 0)
+        created = Path(json.loads(out.getvalue())["backup_path"])
+        self.assertTrue(target.is_dir())
+        self.assertEqual(created.parent, target)
+        self.assertTrue(created.name.startswith("commscoach-"))
+
+    def test_refuses_sqlite_sidecars_even_when_absent(self) -> None:
+        for suffix in ("-wal", "-shm", "-journal"):
+            with self.subTest(suffix=suffix):
+                destination = Path(f"{self.db_path}{suffix}")
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    rc = cli.main(
+                        ["--yes", "--db", str(self.db_path), "backup", "--out", str(destination)]
+                    )
+                self.assertEqual(rc, 1)
+                self.assertIn("SQLite sidecars", err.getvalue())
+                self.assertFalse(destination.exists())
+
     def test_same_second_default_backups_do_not_overwrite(self) -> None:
         args = Namespace(db=str(self.db_path), out=None, keep=None, json=True)
         now = datetime(2026, 8, 25, 12, 0, 0, tzinfo=UTC)

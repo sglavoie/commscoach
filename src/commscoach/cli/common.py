@@ -399,6 +399,22 @@ def resolve_db_path(args: argparse.Namespace) -> Path:
         raise db.DBError(str(exc)) from exc
 
 
+def reject_store_destination(destination: Path, source_path: Path, *, what: str) -> None:
+    """Refuse to write over the active store or its SQLite sidecars, including aliases.
+
+    A sidecar is protected even when absent: SQLite creates and deletes them on
+    the next write, which would silently destroy or corrupt anything put there.
+    """
+    source = source_path.resolve()
+    for path in (source, *paths.sidecar_paths(source)):
+        if destination.resolve() == path or (
+            destination.exists() and path.exists() and destination.samefile(path)
+        ):
+            raise db.DBError(
+                f"{what} destination must differ from the source database and its SQLite sidecars"
+            )
+
+
 # SQLite stores integers as signed 64-bit values; anything larger would
 # surface as an OverflowError traceback instead of a usage error.
 _SQLITE_INT_MAX = 2**63 - 1

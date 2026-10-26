@@ -51,6 +51,14 @@ class ExportFileTests(ExportTestBase):
         self.assertEqual(out, "")
         self.assertIn("is a directory; give a file path", err)
 
+    def test_rejects_a_missing_parent_directory_without_naming_a_temp_file(self) -> None:
+        destination = self.tmpdir / "missing" / "export.md"
+        rc, out, err = self._run("export", "--out", str(destination))
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, "")
+        self.assertIn("is not a directory", err)
+        self.assertNotIn(".tmp", err)
+
     def test_failed_write_or_replace_preserves_existing_export_and_cleans_temp(self) -> None:
         destination = self.tmpdir / "existing.md"
         destination.write_text("previous export", encoding="utf-8")

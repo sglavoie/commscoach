@@ -11,7 +11,15 @@ from pathlib import Path
 
 from .. import db, paths
 from ..db.common import read_snapshot
-from .common import format_scope, open_db, print_err, print_json, resolve_db_path
+from .common import (
+    UsageError,
+    format_scope,
+    open_db,
+    print_err,
+    print_json,
+    reject_store_destination,
+    resolve_db_path,
+)
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -179,21 +187,15 @@ def _validate_export_destination(out_path: Path, source_path: Path) -> None:
     """Protect the active store and SQLite sidecars, including filesystem aliases."""
     if out_path.is_dir():
         raise db.DBError(f"export destination {out_path} is a directory; give a file path")
-    source = source_path.resolve()
-    protected = [source, *(Path(f"{source}{suffix}") for suffix in ("-wal", "-shm", "-journal"))]
-    for path in protected:
-        if out_path.resolve() == path or (
-            out_path.exists() and path.exists() and out_path.samefile(path)
-        ):
-            raise db.DBError(
-                "export destination must differ from the source database and its SQLite sidecars"
-            )
+    if not out_path.parent.is_dir():
+        raise db.DBError(f"cannot write export to {out_path}: {out_path.parent} is not a directory")
+    reject_store_destination(out_path, source_path, what="export")
 
 
 def cmd_export(args: argparse.Namespace) -> int:
     # With --out, --json only shapes the status line, so any --format can be written.
     if args.json and args.format == "markdown" and args.out is None:
-        raise db.DBError("--json conflicts with --format markdown unless --out is given")
+        raise UsageError("--json conflicts with --format markdown unless --out is given")
     export_format = args.format or ("json" if args.json else "markdown")
     out_path = Path(args.out).expanduser() if args.out is not None else None
     if out_path is not None:

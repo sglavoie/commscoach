@@ -9,12 +9,21 @@ take one *before* ``init`` upgrades the database.
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
 from .. import db
 from ..db.backup import BACKUP_PREFIX, BACKUP_SUFFIX
-from .common import confirm, open_db, plural, positive_int, print_json, resolve_db_path
+from .common import (
+    confirm,
+    open_db,
+    plural,
+    positive_int,
+    print_json,
+    reject_store_destination,
+    resolve_db_path,
+)
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -68,13 +77,14 @@ def default_backup_path(
 def cmd_backup(args: argparse.Namespace, *, now: datetime | None = None) -> int:
     source_path = resolve_db_path(args)
     out = Path(args.out).expanduser() if args.out is not None else None
-    custom_name = out is not None and not out.is_dir()
+    # Path() drops a trailing separator, so "newdir/" would otherwise name a file.
+    wants_directory = args.out is not None and args.out.endswith(("/", os.sep))
+    custom_name = out is not None and not wants_directory and not out.is_dir()
     if custom_name:
         destination = out
     else:
         destination = default_backup_path(source_path, now=now, directory=out)
-    if destination.resolve() == source_path.resolve():
-        raise db.DBError("backup destination must differ from the source database")
+    reject_store_destination(destination, source_path, what="backup")
     if (
         custom_name
         and destination.exists()

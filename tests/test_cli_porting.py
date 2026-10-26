@@ -77,7 +77,7 @@ class PortingCLITests(unittest.TestCase):
         self.assertEqual(json.loads(out)["format_version"], 2)
 
         rc, _, err = self._run(self.source_path, "export", "--json", "--format", "markdown")
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--json conflicts with --format markdown", err)
 
         out_path = self.tmpdir / "export.md"
