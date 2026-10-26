@@ -87,7 +87,8 @@ class GoalOutcomeSearchTests(GoalTestBase):
                         self.assertEqual(raised.exception.code, 2)
                     else:
                         rc, _, _ = self._run("goal", "edit", str(goal.id), field, *flags)
-                        self.assertEqual(rc, 1)
+                        # Conflicting flags are usage errors, like argparse's own.
+                        self.assertEqual(rc, 2 if "--clear-outcome" in flags else 1)
                     compose.assert_not_called()
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.get_goal(conn, goal.id), goal)
@@ -337,7 +338,7 @@ class GoalOutcomeSearchTests(GoalTestBase):
                 "--detail",
                 "--clear-detail",
             )
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("cannot be combined", err)
         compose.assert_not_called()
 

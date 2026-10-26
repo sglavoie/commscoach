@@ -37,7 +37,7 @@ from . import (
     stats,
     tags,
 )
-from .common import command_prefix, print_err, print_json, resolve_db_path
+from .common import UsageError, command_prefix, print_err, print_json, resolve_db_path
 from .editor import recover_editor_drafts
 
 PROG = "commscoach"
@@ -238,6 +238,9 @@ def main(argv: list[str] | None = None) -> int:
             code = int(func(args) or 0)
         sys.stdout.flush()
         return code
+    except UsageError as exc:
+        print_err(str(exc))
+        return 2
     except db.DBError as exc:
         print_err(_with_db_flag(str(exc), args))
         return 1

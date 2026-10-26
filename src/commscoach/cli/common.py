@@ -32,6 +32,10 @@ from ..db.common import search_fold
 from ..timeparse import TimeParseError, parse_bound, parse_when
 
 
+class UsageError(db.DBError):
+    """A flag combination argparse cannot express; exits 2 like argparse's own errors."""
+
+
 def command_prefix(args: argparse.Namespace) -> list[str]:
     """Return ``commscoach [--db PATH]`` for follow-up commands shown to the user."""
     command = ["commscoach"]

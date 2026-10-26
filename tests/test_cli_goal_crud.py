@@ -128,10 +128,10 @@ class GoalCrudTests(GoalTestBase):
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out)["detail"], "new detail")
 
-    def test_edit_mutual_exclusion_and_empty_edit_exit_one(self) -> None:
+    def test_edit_mutual_exclusion_exits_two_and_empty_edit_exits_one(self) -> None:
         goal = self._seed_goal()
         rc, _, err = self._run("goal", "edit", str(goal.id), "--detail", "x", "--clear-detail")
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("cannot be combined", err)
         rc, _, err = self._run("goal", "edit", str(goal.id))
         self.assertEqual(rc, 1)

@@ -338,7 +338,7 @@ class ScopedAddTests(ReviewTestBase):
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.list_reviews(conn), ())
 
-    def test_conflicting_axis_flags_exit_one_without_writing(self) -> None:
+    def test_conflicting_axis_flags_exit_two_without_writing(self) -> None:
         rc, _, err = self._run(
             "review",
             "add",
@@ -350,7 +350,7 @@ class ScopedAddTests(ReviewTestBase):
             "--tag",
             "conflict",
         )
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--person", err)
         self.assertIn("--tag", err)
         with closing(db.connect(self.db_path)) as conn:
@@ -374,7 +374,7 @@ class ScopedAddTests(ReviewTestBase):
                 "--tag",
                 "conflict",
             )
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--person", err)
         composed.assert_not_called()
 

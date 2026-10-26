@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from .. import db
 from ..db.tags import normalize_tag
 from .common import (
+    UsageError,
     add_date_bounds,
     handle_arg,
     parse_date_bounds,
@@ -104,7 +105,7 @@ def resolve_scope(args: argparse.Namespace) -> Scope:
     flags = [flag for flag, _ in supplied]
     kinds = {kind for _, kind in supplied}
     if len(kinds) > 1:
-        raise db.DBError(f"{flags[0]} cannot be combined with {', '.join(flags[1:])}")
+        raise UsageError(f"{flags[0]} cannot be combined with {', '.join(flags[1:])}")
     derived = next(iter(kinds), "latest")
 
     requested = getattr(args, "scope_kind", None)

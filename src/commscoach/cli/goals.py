@@ -9,6 +9,7 @@ from typing import Any
 
 from .. import db
 from .common import (
+    UsageError,
     confirm,
     contains_folded,
     edit_verb,
@@ -382,11 +383,11 @@ def cmd_goal_show(args: argparse.Namespace) -> int:
 
 def cmd_goal_edit(args: argparse.Namespace) -> int:
     if args.clear_detail and args.detail is not None:
-        raise db.DBError("--clear-detail cannot be combined with --detail")
+        raise UsageError("--clear-detail cannot be combined with --detail")
     if args.clear_person and args.person is not None:
-        raise db.DBError("--clear-person cannot be combined with --person")
+        raise UsageError("--clear-person cannot be combined with --person")
     if args.clear_outcome and args.outcome is not None:
-        raise db.DBError("--clear-outcome cannot be combined with --outcome")
+        raise UsageError("--clear-outcome cannot be combined with --outcome")
 
     edit_detail = args.detail is _EDIT_TEXT
     edit_outcome = args.outcome is _EDIT_TEXT

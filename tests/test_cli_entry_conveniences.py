@@ -203,7 +203,7 @@ class EntryConvenienceTests(EntryTestBase):
         for flags in conflicts:
             with self.subTest(flags=flags), mock.patch.object(entries, "read_body_arg") as read:
                 rc, _, _ = self._run("entry", "edit", str(entry.id), "--body", *flags)
-                self.assertEqual(rc, 1)
+                self.assertEqual(rc, 2)
                 read.assert_not_called()
                 with closing(db.connect(self.db_path)) as conn:
                     self.assertEqual(db.get_entry(conn, entry.id), entry)

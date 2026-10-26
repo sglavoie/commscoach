@@ -136,7 +136,7 @@ class ScopeDerivationTests(ScopedContextBase):
 class ScopeConflictTests(ScopedContextBase):
     def _expect_conflict(self, *args: str) -> str:
         rc, out, err = self._run("review", "context", *args)
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertEqual(out, "")
         return err
 

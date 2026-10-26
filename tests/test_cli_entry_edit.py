@@ -201,7 +201,7 @@ class EntryEditTests(EntryTestBase):
             "x",
             "--clear-tags",
         )
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--clear-tags", err)
 
     def test_edit_person_and_clear_people_conflict(self) -> None:
@@ -215,7 +215,7 @@ class EntryEditTests(EntryTestBase):
             "alice",
             "--clear-people",
         )
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--clear-people", err)
 
     def test_edit_without_any_field_exits_one(self) -> None:

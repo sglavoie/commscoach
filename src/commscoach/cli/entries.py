@@ -12,6 +12,7 @@ from ..db.common import write_transaction
 from ..db.tags import normalize_tag_list
 from .common import (
     EDIT_IN_EDITOR,
+    UsageError,
     add_date_bounds,
     add_oldest_first,
     command_prefix,
@@ -314,23 +315,23 @@ def cmd_entry_show(args: argparse.Namespace) -> int:
 
 def cmd_entry_edit(args: argparse.Namespace) -> int:
     if args.clear_tags and args.tags is not None:
-        raise db.DBError("--clear-tags cannot be combined with --tag")
+        raise UsageError("--clear-tags cannot be combined with --tag")
     if args.clear_people and args.people is not None:
-        raise db.DBError("--clear-people cannot be combined with --person")
+        raise UsageError("--clear-people cannot be combined with --person")
     if (args.add_tag or args.remove_tag) and (args.tags is not None or args.clear_tags):
-        raise db.DBError("--add-tag/--remove-tag cannot be combined with --tag/--clear-tags")
+        raise UsageError("--add-tag/--remove-tag cannot be combined with --tag/--clear-tags")
     if (args.add_person or args.remove_person) and (args.people is not None or args.clear_people):
-        raise db.DBError(
+        raise UsageError(
             "--add-person/--remove-person cannot be combined with --person/--clear-people"
         )
     added_tags = normalize_tag_list(args.add_tag)
     removed_tags = set(normalize_tag_list(args.remove_tag))
     if removed_tags.intersection(added_tags):
-        raise db.DBError("cannot add and remove the same tag")
+        raise UsageError("cannot add and remove the same tag")
     _reject_empty_links(args, clear_hint=True)
     removed_people = {handle.lower() for handle in args.remove_person}
     if removed_people.intersection(handle.lower() for handle in args.add_person):
-        raise db.DBError("cannot add and remove the same person")
+        raise UsageError("cannot add and remove the same person")
 
     update_kwargs: dict[str, Any] = {}
     if args.body is not None and args.body is not EDIT_IN_EDITOR:
