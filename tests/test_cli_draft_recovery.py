@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import sqlite3
 import stat
 from contextlib import closing
@@ -210,6 +211,33 @@ class DraftRecoveryTests(EntryTestBase):
         self.assertNotIn("Draft saved", err)
         assert self.draft_path is not None
         self.assertFalse(self.draft_path.exists())
+
+    def test_sigterm_during_editor_keeps_new_text_and_removes_untouched_drafts(
+        self,
+    ) -> None:
+        before = signal.getsignal(signal.SIGTERM)
+        for wrote_text in (True, False):
+            with self.subTest(wrote_text=wrote_text):
+
+                def run(command, wrote_text=wrote_text):
+                    if wrote_text:
+                        self._write_draft(command)
+                    else:
+                        self.draft_path = Path(command[-1])
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    return 0
+
+                with mock.patch.object(editor.subprocess, "call", side_effect=run):
+                    rc, _, err = self._run("entry", "add")
+                self.assertEqual(rc, 128 + signal.SIGTERM)
+                self.assertIn("terminated", err)
+                assert self.draft_path is not None
+                if wrote_text:
+                    self._assert_recovered(err)
+                else:
+                    self.assertFalse(self.draft_path.exists())
+        # The previous handler is restored once the command finishes.
+        self.assertIs(signal.getsignal(signal.SIGTERM), before)
 
     def test_invalid_utf8_draft_is_retained(self) -> None:
         def run(command):

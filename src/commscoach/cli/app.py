@@ -7,15 +7,19 @@ Exit codes follow the project contract:
   confirmation, or ``KeyboardInterrupt``), an unexpected SQLite error, or a
   closed output pipe.
 - ``2`` argparse syntax error (raised by ``argparse`` itself).
+- ``128 + N`` terminated by signal ``N`` (SIGTERM or SIGHUP), after the usual
+  editor-draft cleanup or recovery has run.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import signal
 import sqlite3
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 from .. import __version__, db
 from . import (
@@ -137,6 +141,41 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+class _Terminated(BaseException):
+    """Raised from a SIGTERM/SIGHUP handler so ``finally`` blocks still run."""
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(signum)
+        self.signum = signum
+
+
+def _raise_terminated(signum: int, _frame: object) -> None:
+    raise _Terminated(signum)
+
+
+@contextmanager
+def _terminate_cleanly() -> Iterator[None]:
+    """Turn SIGTERM/SIGHUP into an exception for the duration of a command.
+
+    Without this, a killed process (or a closed terminal) skips editor-draft
+    cleanup and leaves private text in the temporary directory.
+    """
+    signums = [signal.SIGTERM]
+    if hasattr(signal, "SIGHUP"):
+        signums.append(signal.SIGHUP)
+    previous = {}
+    try:
+        for signum in signums:
+            previous[signum] = signal.signal(signum, _raise_terminated)
+    except ValueError:  # not the main thread; keep default handling
+        pass
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Console-script entry point. Returns an integer exit code."""
     parser = build_parser()
@@ -146,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     try:
-        with recover_editor_drafts():
+        with _terminate_cleanly(), recover_editor_drafts():
             code = int(func(args) or 0)
         sys.stdout.flush()
         return code
@@ -164,6 +203,9 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print_err("interrupted")
         return 1
+    except _Terminated as exc:
+        print_err("terminated")
+        return 128 + exc.signum
 
 
 def _silence_stdout() -> None:
