@@ -214,6 +214,28 @@ class DoctorCommandTests(unittest.TestCase):
             ["bob,carol", "a,b"],
         )
 
+    def test_addressable_names_warns_about_handles_sharing_an_identity(self) -> None:
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            # Older releases allowed this: LOWER(handle) only folds ASCII.
+            for handle in ("Émile", "émile"):
+                conn.execute(
+                    "INSERT INTO people (handle, is_self, created_at, updated_at)"
+                    " VALUES (?, 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+                    (handle,),
+                )
+            conn.commit()
+            # The exact spelling reaches each one, so either can be renamed.
+            self.assertEqual(db.get_person_by_handle(conn, "émile").handle, "émile")
+            self.assertEqual(db.get_person_by_handle(conn, "Émile").handle, "Émile")
+        _, payload = self.run_doctor()
+        check = self.checks_by_name(payload)["addressable_names"]
+        self.assertEqual(check["status"], "warn")
+        self.assertEqual(
+            check["details"],
+            [{"handle": "émile", "same_as": "Émile", "fix": "person edit HANDLE --handle NEW"}],
+        )
+
     def test_review_scope_ok_without_person_scoped_reviews(self) -> None:
         db.init_db(self.db_path)
         with closing(db.connect(self.db_path)) as conn:

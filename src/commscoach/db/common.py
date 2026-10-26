@@ -62,8 +62,12 @@ def _search_fold_sql(text: Any) -> Any:
 
 
 def handle_key(text: str) -> str:
-    """Return the identity of a handle: Unicode case-insensitive, accents kept."""
-    return text.casefold()
+    """Return the identity of a handle: Unicode case-insensitive, accents kept.
+
+    NFC first, so a precomposed ``é`` and ``e`` plus a combining accent, which
+    look identical, are the same handle.
+    """
+    return unicodedata.normalize("NFC", text).casefold()
 
 
 def _handle_key_sql(text: Any) -> Any:

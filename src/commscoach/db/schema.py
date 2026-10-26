@@ -30,6 +30,7 @@ from .. import paths
 from ..timeparse import TimeParseError, parse_when
 from . import common
 from .errors import DBError, InitRequiredError
+from .people import renormalize_handles
 from .schema_sql import (
     _FTS5_DROP_TRIGGER_SQL,
     _FTS5_TABLE_SQL,
@@ -40,6 +41,7 @@ from .schema_sql import (
     SCHEMA_V2_SQL,
     SCHEMA_V3_SQL,
 )
+from .tags import renormalize_tag_names
 
 SCHEMA_VERSION = 4
 
@@ -65,6 +67,7 @@ EXPECTED_TABLES = frozenset(
 _BASELINE_TABLES = frozenset({"_meta", "people", "entries"})
 
 _OCCURRED_AT_BACKFILL_KEY = "occurred_at_utc_backfill_v2"
+_NAMES_BACKFILL_KEY = "unicode_names_backfill_v1"
 _FTS5_META_KEY = "fts5"
 
 
@@ -246,6 +249,22 @@ def _normalize_occurred_at_once(conn: sqlite3.Connection) -> None:
         "INSERT INTO _meta (key, value) VALUES (?, '1')",
         (_OCCURRED_AT_BACKFILL_KEY,),
     )
+
+
+def _normalize_names_once(conn: sqlite3.Connection) -> None:
+    """Bring stored handles and tag names up to the current normalization, once.
+
+    Earlier releases stored them as typed, so a decomposed accent or a leading
+    ``#`` on a tag made a second record that looked like an existing one.
+    """
+    already_done = conn.execute(
+        "SELECT 1 FROM _meta WHERE key = ?", (_NAMES_BACKFILL_KEY,)
+    ).fetchone()
+    if already_done is not None:
+        return
+    renormalize_handles(conn)
+    renormalize_tag_names(conn)
+    conn.execute("INSERT INTO _meta (key, value) VALUES (?, '1')", (_NAMES_BACKFILL_KEY,))
 
 
 def _local_reference(created_at: str) -> datetime | None:
@@ -463,5 +482,6 @@ def _apply_schema_steps(conn: sqlite3.Connection) -> None:
     _migrate_reviews_scope_v4(conn)
     _execute_script(conn, SCHEMA_V2_SQL)
     _execute_script(conn, SCHEMA_V3_SQL)
+    _normalize_names_once(conn)
     _configure_fts5(conn)
     _set_schema_version(conn, SCHEMA_VERSION)

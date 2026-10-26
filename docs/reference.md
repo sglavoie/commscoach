@@ -34,7 +34,7 @@ The database is created with mode `0600`. Directories commscoach creates for it 
 
 ## Capture and dates
 
-Handles are shown as `@handle`, and every command accepts a handle with or without that `@`. On `entry add` and `entry edit`, `--person` is repeatable or comma-separated like `--tag` (`--person jdoe,asmith`). Search and list filters such as `--person`, `--tag`, and `--source` take a single value; repeating one is a usage error (exit 2) rather than silently keeping the last value. Handles are case-insensitive, including accented letters (`Émile` is `émile`), and cannot contain spaces or commas; `doctor` flags any older handle that does.
+Handles are shown as `@handle`, and every command accepts a handle with or without that `@`. On `entry add` and `entry edit`, `--person` is repeatable or comma-separated like `--tag` (`--person jdoe,asmith`). Search and list filters such as `--person`, `--tag`, and `--source` take a single value; repeating one is a usage error (exit 2) rather than silently keeping the last value. Handles are case-insensitive, including accented letters (`Émile` is `émile`), and an accent typed as a separate combining mark matches its precomposed letter. They cannot contain spaces or commas; `doctor` flags any older handle that does, and any pair of older handles that differ only by accented case.
 
 `entry add` body sources are a literal string, `-` for stdin, or `@PATH` for a UTF-8 file. On an interactive terminal, omitting the body opens `$VISUAL` or `$EDITOR` (falling back to `vi`). The same body-source convention applies to `entry edit --body`, `feedback add`, and `review add`; their omitted-body forms also use the editor where supported.
 
@@ -129,7 +129,7 @@ produce no reminder. Existing coaching is left intact.
 
 ## Tags
 
-Tags live in their own table with their own normalization and orphan collection, so the vocabulary stays maintainable instead of letting one typo split a theme across your stats permanently:
+Tags live in their own table with their own normalization (trimmed, lowercased, Unicode-composed, and without a leading `#`, so `--tag '#Review'` names `review`) and orphan collection, so the vocabulary stays maintainable instead of letting one typo split a theme across your stats permanently:
 
 ```sh
 commscoach tag list                           # most-used first, with entry counts

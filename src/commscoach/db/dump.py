@@ -23,8 +23,9 @@ from typing import Any
 
 from .common import handle_key, normalize_date_bound, read_snapshot
 from .errors import DBError
+from .people import renormalize_handles
 from .schema import get_schema_version
-from .tags import normalize_tag
+from .tags import normalize_tag, renormalize_tag_names
 
 FORMAT = "commscoach-dump"
 FORMAT_VERSION = 2
@@ -276,7 +277,9 @@ def _validate_row(table: str, index: int, row: Any) -> None:
             raise DumpFormatError(f"{location}.handle must be a non-empty, trimmed string")
     elif table == "tags":
         name = row["name"]
-        if not isinstance(name, str) or not name or normalize_tag(name) != name:
+        # Exports from before NFC and '#' normalization keep importing; the
+        # restore renormalizes those names afterwards.
+        if not isinstance(name, str) or not normalize_tag(name) or name.strip().lower() != name:
             raise DumpFormatError(
                 f"{location}.name must be a non-empty, trimmed, lowercase tag name"
             )
@@ -348,7 +351,9 @@ def validate_dump(data: Any) -> None:
         if key in seen_handles:
             raise DumpFormatError(
                 f"people[{index}].handle {person['handle']!r} duplicates"
-                f" people[{seen_handles[key]}].handle"
+                f" people[{seen_handles[key]}].handle; rename one with"
+                " 'commscoach person edit HANDLE --handle NEW' in the source database"
+                " and export again"
             )
         seen_handles[key] = index
 
@@ -427,6 +432,9 @@ def load_from_dict(
 ) -> None:
     """Restore ``data`` into an empty database, preserving every stored ID.
 
+    The one exception: a tag stored under older normalization rules is folded
+    into the tag it now equals, as ``init`` does for an existing database.
+
     ``dry_run`` executes the same inserts and constraint checks, then rolls the
     savepoint back. No merge or destructive force mode is provided.
     """
@@ -457,6 +465,8 @@ def load_from_dict(
         for table in _AUTOINCREMENT_TABLES:
             conn.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table,))
         _restore_rows(conn, data)
+        renormalize_handles(conn)
+        renormalize_tag_names(conn)
     except BaseException as exc:
         conn.execute(f"ROLLBACK TO {savepoint}")
         conn.execute(f"RELEASE {savepoint}")

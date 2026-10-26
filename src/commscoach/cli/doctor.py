@@ -255,11 +255,14 @@ def _addressable_names_check(conn: sqlite3.Connection) -> dict[str, Any]:
 
     A handle with '@', a comma, or whitespace, or a tag with a comma, cannot be
     typed back the way it is displayed (``--person``/``--tag`` split on
-    commas and ``@`` is stripped), so the user should rename it.
+    commas and ``@`` is stripped), so the user should rename it. Neither can
+    the second of two handles that differ only by non-ASCII case (``Émile``
+    and ``émile``), which older releases allowed.
     """
     try:
         handles = conn.execute("SELECT handle FROM people ORDER BY id").fetchall()
         tags = conn.execute("SELECT name FROM tags WHERE name LIKE '%,%' ORDER BY id").fetchall()
+        collisions = db.handle_collisions(conn)
     except sqlite3.Error as exc:
         return _result("addressable_names", "fail", f"cannot inspect handles and tags: {exc}")
     details: list[dict[str, Any]] = []
@@ -271,13 +274,18 @@ def _addressable_names_check(conn: sqlite3.Connection) -> dict[str, Any]:
             pass
         details.append({"handle": row["handle"], "fix": "person edit HANDLE --handle NEW"})
     details.extend({"tag": row["name"], "fix": "tag rename NAME NEW"} for row in tags)
+    details.extend(
+        {"handle": handle, "same_as": group[0], "fix": "person edit HANDLE --handle NEW"}
+        for group in collisions
+        for handle in group[1:]
+    )
     if not details:
         return _result("addressable_names", "ok", "every handle and tag can be typed back")
     return _result(
         "addressable_names",
         "warn",
-        f"{len(details)} handle(s) or tag(s) contain '@', commas, or whitespace "
-        "and are hard to address; rename them",
+        f"{len(details)} handle(s) or tag(s) contain '@', commas, or whitespace,"
+        " or share another handle's identity, and are hard to address; rename them",
         details=details,
     )
 

@@ -87,7 +87,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="TAG",
         help=(
             "Attach a tag (repeatable or comma-separated, e.g. --tag 1on1,review;"
-            " values are stripped + lowercased)."
+            " values are stripped + lowercased, and a leading # is dropped)."
         ),
     )
     add.add_argument(

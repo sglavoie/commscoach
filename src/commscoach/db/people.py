@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import unicodedata
 from collections.abc import Iterable
 from typing import Any
 
@@ -67,7 +68,8 @@ def validate_handle(handle: Any) -> str:
     """
     if not isinstance(handle, str) or not handle.strip():
         raise DBError("handle must be a non-empty string")
-    handle = handle.strip()
+    # NFC, so a handle typed with a combining accent is stored like the one shown.
+    handle = unicodedata.normalize("NFC", handle.strip())
     if handle.startswith("@"):
         raise DBError(f"handle {handle!r} must not start with '@'")
     if "," in handle or any(char.isspace() for char in handle):
@@ -188,12 +190,48 @@ def get_person_by_handle(conn: sqlite3.Connection, handle: str) -> Person | None
     if not handle.strip():
         raise DBError("person handle must be a non-empty string")
     row = conn.execute(
-        "SELECT * FROM people WHERE handle_key(handle) = handle_key(?)",
-        (handle,),
+        # When legacy handles collide (see handle_collisions), the exact
+        # spelling wins, so each stays reachable to rename.
+        "SELECT * FROM people WHERE handle_key(handle) = handle_key(?)"
+        " ORDER BY handle = ? DESC, id",
+        (handle, unicodedata.normalize("NFC", handle.strip())),
     ).fetchone()
     if row is None:
         return None
     return row_to_person(row)
+
+
+def renormalize_handles(conn: sqlite3.Connection) -> None:
+    """Store every handle in NFC, as ``validate_handle`` now does.
+
+    A handle that would then collide with another person's identity is left
+    alone: people cannot be merged automatically, and ``doctor`` reports the
+    pair so one can be renamed. The caller owns the transaction.
+    """
+    rows = conn.execute("SELECT id, handle FROM people ORDER BY id").fetchall()
+    for row in rows:
+        normalized = unicodedata.normalize("NFC", row["handle"])
+        if normalized == row["handle"]:
+            continue
+        clash = conn.execute(
+            "SELECT 1 FROM people WHERE handle_key(handle) = handle_key(?) AND id != ?",
+            (normalized, row["id"]),
+        ).fetchone()
+        if clash is None:
+            conn.execute("UPDATE people SET handle = ? WHERE id = ?", (normalized, row["id"]))
+
+
+def handle_collisions(conn: sqlite3.Connection) -> list[list[str]]:
+    """Return groups of stored handles that share one identity under ``handle_key``.
+
+    Possible in databases written before handles were compared Unicode-aware
+    (the unique index only folds ASCII case); only the first of each group is
+    reachable by handle until the others are renamed.
+    """
+    groups: dict[str, list[str]] = {}
+    for row in conn.execute("SELECT handle FROM people ORDER BY id"):
+        groups.setdefault(common.handle_key(row["handle"]), []).append(row["handle"])
+    return [handles for handles in groups.values() if len(handles) > 1]
 
 
 def list_people(

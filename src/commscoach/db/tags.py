@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import unicodedata
 from collections.abc import Iterable
 from typing import Any
 
@@ -12,8 +13,13 @@ from .errors import DBError, DuplicateTagError, TagNotFoundError
 
 
 def normalize_tag(name: str) -> str:
-    """Normalize a tag for storage: stripped, lowercased."""
-    return name.strip().lower()
+    """Normalize a tag for storage: NFC, stripped, lowercased, without a leading ``#``.
+
+    Tags display as ``#tag``, so ``--tag '#tag'`` names the same tag, the way
+    ``@handle`` names a person. NFC makes a precomposed ``é`` and ``e`` plus a
+    combining accent, which look identical, the same tag.
+    """
+    return unicodedata.normalize("NFC", name).strip().lstrip("#").strip().lower()
 
 
 def normalize_tag_list(tags: Iterable[str]) -> list[str]:
@@ -208,6 +214,30 @@ def merge_tags(conn: sqlite3.Connection, source: str, dest: str) -> Tag:
     # No gc_orphan_tags here: the source row is deleted explicitly, and a blanket
     # sweep would also drop unrelated zero-entry tags, including the destination.
     return _get_tag(conn, dest_id)
+
+
+def renormalize_tag_names(conn: sqlite3.Connection) -> None:
+    """Bring stored tag names up to the current ``normalize_tag`` rules.
+
+    Names stored under older rules (decomposed accents, a leading ``#``) are
+    renamed, or folded into the tag they now equal, carrying tag-scoped
+    reviews along as ``merge_tags`` does. The caller owns the transaction.
+    """
+    for row in conn.execute("SELECT id, name FROM tags ORDER BY id").fetchall():
+        old_name, new_name = row["name"], normalize_tag(row["name"])
+        if new_name == old_name or not new_name:
+            continue
+        dest_id = _find_tag_id(conn, new_name)
+        if dest_id is None:
+            conn.execute("UPDATE tags SET name = ? WHERE id = ?", (new_name, row["id"]))
+        else:
+            conn.execute(
+                "UPDATE OR IGNORE entry_tags SET tag_id = ? WHERE tag_id = ?",
+                (dest_id, row["id"]),
+            )
+            conn.execute("DELETE FROM entry_tags WHERE tag_id = ?", (row["id"],))
+            conn.execute("DELETE FROM tags WHERE id = ?", (row["id"],))
+        conn.execute("UPDATE reviews SET scope_tag = ? WHERE scope_tag = ?", (new_name, old_name))
 
 
 @common.writes
