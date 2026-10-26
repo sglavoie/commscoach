@@ -45,6 +45,12 @@ class ExportFileTests(ExportTestBase):
                 self.assertEqual(rc, 1)
                 self.assertIn("SQLite sidecars", err)
 
+    def test_rejects_a_directory_destination(self) -> None:
+        rc, out, err = self._run("export", "--out", str(self.tmpdir))
+        self.assertEqual(rc, 1)
+        self.assertEqual(out, "")
+        self.assertIn("is a directory; give a file path", err)
+
     def test_failed_write_or_replace_preserves_existing_export_and_cleans_temp(self) -> None:
         destination = self.tmpdir / "existing.md"
         destination.write_text("previous export", encoding="utf-8")

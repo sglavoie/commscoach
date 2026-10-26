@@ -35,7 +35,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--out",
         default=None,
         metavar="PATH",
-        help="Write output to this file with mode 0600. Default: stdout.",
+        help="Write output to this file (not a directory) with mode 0600. Default: stdout.",
     )
     export_parser.set_defaults(func=cmd_export)
 
@@ -176,6 +176,8 @@ def _write_export_file(out_path: Path, content: str) -> None:
 
 def _validate_export_destination(out_path: Path, source_path: Path) -> None:
     """Protect the active store and SQLite sidecars, including filesystem aliases."""
+    if out_path.is_dir():
+        raise db.DBError(f"export destination {out_path} is a directory; give a file path")
     source = source_path.resolve()
     protected = [source, *(Path(f"{source}{suffix}") for suffix in ("-wal", "-shm", "-journal"))]
     for path in protected:

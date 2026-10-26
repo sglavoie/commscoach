@@ -139,6 +139,23 @@ class BackupCommandTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertNotEqual(target.read_bytes(), b"keep me")
 
+    def test_out_directory_gets_a_timestamped_backup_without_prompting(self) -> None:
+        target = Path(self._tmp.name) / "elsewhere"
+        target.mkdir()
+        out = io.StringIO()
+        with (
+            redirect_stdout(out),
+            mock.patch.object(backup_cli, "confirm", side_effect=AssertionError("prompted")),
+        ):
+            rc = cli.main(
+                ["--db", str(self.db_path), "--json", "backup", "--out", str(target), "--keep", "1"]
+            )
+        self.assertEqual(rc, 0)
+        created = Path(json.loads(out.getvalue())["backup_path"])
+        self.assertEqual(created.parent, target)
+        self.assertTrue(created.name.startswith("commscoach-"))
+        self.assertTrue(created.is_file())
+
     def test_same_second_default_backups_do_not_overwrite(self) -> None:
         args = Namespace(db=str(self.db_path), out=None, keep=None, json=True)
         now = datetime(2026, 8, 25, 12, 0, 0, tzinfo=UTC)

@@ -27,8 +27,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         metavar="PATH",
         help=(
-            "Write to PATH (default: a timestamped file under backups/). An existing"
-            " file is only replaced after confirmation or with --yes."
+            "Write to PATH (default: a timestamped file under backups/). A directory"
+            " gets a timestamped file inside it; an existing file is only replaced"
+            " after confirmation or with --yes."
         ),
     )
     parser.add_argument(
@@ -38,19 +39,23 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="N",
         help=(
             "Keep only the newest N (at least 1) timestamped backups in the output"
-            " directory; the backup just taken always counts as one of them."
+            " directory, counting the one just taken when it is timestamped; a"
+            " custom --out file name is never pruned or counted."
         ),
     )
     parser.set_defaults(func=cmd_backup)
 
 
-def default_backup_path(db_path: Path, *, now: datetime | None = None) -> Path:
-    """Return the timestamped default backup path for ``db_path``."""
+def default_backup_path(
+    db_path: Path, *, now: datetime | None = None, directory: Path | None = None
+) -> Path:
+    """Return a timestamped backup path in ``directory`` (default: ``backups/`` by ``db_path``)."""
     current = now if now is not None else datetime.now(UTC)
     if current.tzinfo is None:
         current = current.replace(tzinfo=UTC)
     stamp = current.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
-    directory = db_path.parent / "backups"
+    if directory is None:
+        directory = db_path.parent / "backups"
     candidate = directory / f"{BACKUP_PREFIX}{stamp}{BACKUP_SUFFIX}"
     counter = 1
     # Two backups within one second must not overwrite each other.
@@ -62,15 +67,16 @@ def default_backup_path(db_path: Path, *, now: datetime | None = None) -> Path:
 
 def cmd_backup(args: argparse.Namespace, *, now: datetime | None = None) -> int:
     source_path = resolve_db_path(args)
-    destination = (
-        Path(args.out).expanduser()
-        if args.out is not None
-        else default_backup_path(source_path, now=now)
-    )
+    out = Path(args.out).expanduser() if args.out is not None else None
+    custom_name = out is not None and not out.is_dir()
+    if custom_name:
+        destination = out
+    else:
+        destination = default_backup_path(source_path, now=now, directory=out)
     if destination.resolve() == source_path.resolve():
         raise db.DBError("backup destination must differ from the source database")
     if (
-        args.out is not None
+        custom_name
         and destination.exists()
         and not confirm(f"Overwrite existing file {destination}?", assume_yes=args.yes)
     ):
