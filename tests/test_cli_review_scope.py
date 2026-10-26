@@ -241,26 +241,26 @@ class ScopeKindFlagTests(ScopedContextBase):
         payload = self._scope("--scope", "range", "--since", "2026-07-01")
         self.assertEqual(payload["scope"]["kind"], "range")
 
-    def test_scope_contradicting_the_axis_flag_exits_one(self) -> None:
+    def test_scope_contradicting_the_axis_flag_exits_two(self) -> None:
         rc, _, err = self._run("review", "context", "--person", "alice", "--scope", "tag")
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--scope tag", err)
         self.assertIn("--person", err)
 
-    def test_scope_latest_with_an_axis_flag_exits_one(self) -> None:
+    def test_scope_latest_with_an_axis_flag_exits_two(self) -> None:
         rc, _, err = self._run("review", "context", "--scope", "latest", "--tag", "conflict")
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--scope latest", err)
         self.assertIn("--tag", err)
 
     def test_scope_person_without_an_axis_flag_names_the_missing_flag(self) -> None:
         rc, _, err = self._run("review", "context", "--scope", "person")
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--person", err)
 
     def test_scope_range_without_bounds_names_both_bound_flags(self) -> None:
         rc, _, err = self._run("review", "context", "--scope", "range")
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--since", err)
         self.assertIn("--until", err)
 

@@ -154,7 +154,7 @@ A review answers a question about a slice of the journal, and that slice is its 
 
 Scope is single-axis: a review covers the latest entries, *or* one person, *or* one tag, *or* one date range — never a combination. Flags from two axes are rejected (`--person cannot be combined with --tag`).
 
-`review context` (the skill-facing JSON) and `review add` (the stored record) take the same axis flags, and the scope kind is derived from whichever flag you pass. `--scope KIND` is optional and acts as an assertion: when supplied it must agree with the axis flags, so `--scope tag --person alice` exits 1 instead of silently picking one.
+`review context` (the skill-facing JSON) and `review add` (the stored record) take the same axis flags, and the scope kind is derived from whichever flag you pass. `--scope KIND` is optional and acts as an assertion: when supplied it must agree with the axis flags, so `--scope tag --person alice` is a usage error (exit 2) instead of silently picking one. An unknown `--person` or `--tag` exits 1 on both commands, before any editor opens.
 
 Axis flags narrow entries exactly the way `entry search --person`, `--tag`, `--since`, and `--until` do — handles and tag names match case-insensitively, and the date bounds are inclusive against when the entry occurred, falling back to when it was created. `--limit` caps the entries under every scope.
 

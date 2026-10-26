@@ -261,6 +261,9 @@ def cmd_review_add(args: argparse.Namespace) -> int:
         if scope.person_handle is not None:
             if db.get_person_by_handle(conn, scope.person_handle) is None:
                 raise db.PersonNotFoundError(scope.person_handle)
+        if scope.tag is not None:
+            # As review context does: a scope no entry can match is a typo.
+            db.get_tag(conn, scope.tag, hint="'commscoach tag list' shows existing tags")
         outside: list[int] = []
         for entry_id in dict.fromkeys(args.entry_ids):
             entry = db.get_entry(conn, entry_id)

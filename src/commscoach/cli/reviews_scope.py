@@ -91,8 +91,9 @@ def resolve_scope(args: argparse.Namespace) -> Scope:
 
     Argparse's mutually-exclusive groups cannot express "``--since`` and
     ``--until`` together, but neither alongside ``--person``", so the conflict
-    is rejected here as a ``db.DBError`` (exit 1) naming every flag involved --
-    the same way ``cmd_entry_edit`` rejects ``--clear-tags`` with ``--tag``.
+    is rejected here as a ``UsageError`` (exit 2) naming every flag involved --
+    the same way ``cmd_entry_edit`` rejects ``--clear-tags`` with ``--tag``. An
+    explicit ``--scope`` that disagrees with the axis flags is a usage error too.
 
     A reversed closed range is rejected here rather than left to the DB layer
     because ``cmd_review_add`` resolves the scope *before* ``read_body_arg``:
@@ -111,8 +112,8 @@ def resolve_scope(args: argparse.Namespace) -> Scope:
     requested = getattr(args, "scope_kind", None)
     if requested is not None and requested != derived:
         if not flags:
-            raise db.DBError(f"--scope {requested} requires {_SCOPE_REQUIRES[requested]}")
-        raise db.DBError(
+            raise UsageError(f"--scope {requested} requires {_SCOPE_REQUIRES[requested]}")
+        raise UsageError(
             f"--scope {requested} does not match {', '.join(flags)} (scope '{derived}')"
         )
 

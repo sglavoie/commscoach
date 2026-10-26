@@ -343,7 +343,7 @@ class ScopedAddTests(ReviewTestBase):
         self.assertEqual(review.scope_kind, "latest")
         self.assertEqual(review.scope_limit, 30)
 
-    def test_scope_contradicting_the_axis_flag_exits_one_without_writing(self) -> None:
+    def test_scope_contradicting_the_axis_flag_exits_two_without_writing(self) -> None:
         rc, _, err = self._run(
             "review",
             "add",
@@ -355,7 +355,7 @@ class ScopedAddTests(ReviewTestBase):
             "--scope",
             "tag",
         )
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--scope tag", err)
         self.assertIn("--person", err)
         with closing(db.connect(self.db_path)) as conn:
@@ -453,6 +453,16 @@ class ScopedAddTests(ReviewTestBase):
         )
         self.assertEqual(rc, 1)
         self.assertIn("nobody", err)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.list_reviews(conn), ())
+
+    def test_unknown_tag_exits_one_without_writing(self) -> None:
+        rc, _, err = self._run(
+            "review", "add", "body", "--entry", str(self.entry.id), "--tag", "nosuch"
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("tag 'nosuch' not found", err)
+        self.assertNotIn("warning", err)
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.list_reviews(conn), ())
 
