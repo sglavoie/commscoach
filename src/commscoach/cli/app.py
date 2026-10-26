@@ -3,12 +3,11 @@
 Exit codes follow the project contract:
 
 - ``0`` success.
-- ``1`` semantic user error (any ``db.DBError`` raised by a handler, a rejected
-  confirmation, or ``KeyboardInterrupt``), an unexpected SQLite error, or a
-  closed output pipe.
+- ``1`` semantic user error (any ``db.DBError`` raised by a handler or a
+  rejected confirmation), an unexpected SQLite error, or a closed output pipe.
 - ``2`` argparse syntax error (raised by ``argparse`` itself).
-- ``128 + N`` terminated by signal ``N`` (SIGTERM or SIGHUP), after the usual
-  editor-draft cleanup or recovery has run.
+- ``128 + N`` terminated by signal ``N``: ``130`` for Ctrl-C (SIGINT), and
+  SIGTERM or SIGHUP likewise, after the usual editor-draft cleanup or recovery.
 """
 
 from __future__ import annotations
@@ -202,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except KeyboardInterrupt:
         print_err("interrupted")
-        return 1
+        return 128 + signal.SIGINT
     except _Terminated as exc:
         print_err("terminated")
         return 128 + exc.signum

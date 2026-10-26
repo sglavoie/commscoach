@@ -247,14 +247,14 @@ class ExitCodeTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("simulated semantic failure", err_buf.getvalue())
 
-    def test_keyboard_interrupt_maps_to_exit_one(self) -> None:
+    def test_keyboard_interrupt_maps_to_exit_130(self) -> None:
         def boom(_args: object) -> int:
             raise KeyboardInterrupt()
 
         err_buf = io.StringIO()
         with mock.patch.object(cli_app, "cmd_init", boom), redirect_stderr(err_buf):
             rc = cli.main(["init"])
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 130)
         self.assertIn("interrupted", err_buf.getvalue())
 
     def test_sqlite_error_maps_to_exit_one_with_message(self) -> None:

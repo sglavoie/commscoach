@@ -56,7 +56,7 @@ class DraftRecoveryTests(EntryTestBase):
 
                 with mock.patch.object(editor.subprocess, "call", side_effect=run):
                     rc, out, err = self._run("entry", "add", "--json")
-                self.assertEqual(rc, 1)
+                self.assertEqual(rc, 130 if isinstance(failure, KeyboardInterrupt) else 1)
                 self.assertEqual(out, "")
                 self._assert_recovered(err)
                 self.assertNotIn("My unsaved text", err)

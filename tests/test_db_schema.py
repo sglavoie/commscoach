@@ -56,6 +56,9 @@ class InitDbSchemaTests(unittest.TestCase):
             "idx_reviews_created_at",
             "idx_reviews_scope",
             "idx_reviews_scope_person_id",
+            "idx_reviews_scope_tag",
+            "idx_reviews_scope_person_handle_lower",
+            "idx_entries_source_nocase",
             "idx_review_entries_entry_id",
             "idx_review_entries_review_position",
             "idx_goals_status",
@@ -64,6 +67,26 @@ class InitDbSchemaTests(unittest.TestCase):
         ):
             self.assertIn(required, indexes)
         self.assertIn("COALESCE(occurred_at, created_at) DESC", effective_index_sql)
+
+    def test_filter_queries_use_their_indexes(self) -> None:
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            for sql, index in (
+                (
+                    "SELECT id FROM entries e WHERE e.source = ? COLLATE NOCASE",
+                    "idx_entries_source_nocase",
+                ),
+                ("SELECT id FROM reviews WHERE scope_tag = ?", "idx_reviews_scope_tag"),
+                (
+                    "SELECT id FROM reviews WHERE LOWER(scope_person_handle) = LOWER(?)",
+                    "idx_reviews_scope_person_handle_lower",
+                ),
+            ):
+                with self.subTest(index=index):
+                    plan = " ".join(
+                        row["detail"] for row in conn.execute(f"EXPLAIN QUERY PLAN {sql}", ("x",))
+                    )
+                    self.assertIn(index, plan)
 
     def test_init_stamps_schema_version(self) -> None:
         db.init_db(self.db_path)

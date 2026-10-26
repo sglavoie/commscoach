@@ -100,6 +100,12 @@ _REVIEWS_INDEX_STATEMENTS = (
     ("CREATE INDEX IF NOT EXISTS idx_reviews_created_at ON reviews (created_at, id)"),
     ("CREATE INDEX IF NOT EXISTS idx_reviews_scope ON reviews (scope_kind, created_at)"),
     ("CREATE INDEX IF NOT EXISTS idx_reviews_scope_person_id ON reviews (scope_person_id)"),
+    # Match the review list/search filters on tag and stored handle.
+    ("CREATE INDEX IF NOT EXISTS idx_reviews_scope_tag ON reviews (scope_tag)"),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_reviews_scope_person_handle_lower"
+        " ON reviews (LOWER(scope_person_handle))"
+    ),
 )
 
 SCHEMA_V2_SQL = (
@@ -122,6 +128,10 @@ CREATE INDEX IF NOT EXISTS idx_review_entries_review_position
 
 CREATE INDEX IF NOT EXISTS idx_entries_effective_at
     ON entries (COALESCE(occurred_at, created_at) DESC);
+
+-- entry search --source compares case-insensitively.
+CREATE INDEX IF NOT EXISTS idx_entries_source_nocase
+    ON entries (source COLLATE NOCASE);
 """
 )
 
