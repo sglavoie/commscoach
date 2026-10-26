@@ -82,7 +82,7 @@ class EntryConvenienceTests(EntryTestBase):
         )
         self.assertEqual(rc, 0, err)
         self.assertIn(f"[{older.id}]", out)
-        self.assertIn("Showing 1 of 2 matching entries.", out)
+        self.assertIn("Showing 1 of 2 matching entries.", err)
 
     def test_search_totals_follow_fts_literal_and_fallback_matching(self):
         for body in ("café discussion 10%", "cafe discussion 10%", "cafeteria", "unrelated"):
@@ -112,12 +112,12 @@ class EntryConvenienceTests(EntryTestBase):
                     *extra,
                 )
                 self.assertEqual(rc, 0, err)
-                self.assertIn(f"Showing 1 of {total} matching entries.", out)
+                self.assertIn(f"Showing 1 of {total} matching entries.", err)
         with closing(db.connect(self.db_path)) as conn, conn:
             conn.execute("UPDATE _meta SET value = '0' WHERE key = 'fts5'")
         rc, out, err = self._run("entry", "search", "--query", "10%", "--limit", "1")
         self.assertEqual(rc, 0, err)
-        self.assertIn("Showing 1 of 2 matching entries.", out)
+        self.assertIn("Showing 1 of 2 matching entries.", err)
 
     def test_search_totals_only_appear_when_human_results_are_omitted(self):
         for _ in range(2):
@@ -131,10 +131,10 @@ class EntryConvenienceTests(EntryTestBase):
             with self.subTest(flags=flags):
                 rc, out, err = self._run("entry", "search", *flags)
                 self.assertEqual(rc, 0, err)
-                self.assertNotIn("Showing", out)
+                self.assertNotIn("Showing", out + err)
         rc, out, err = self._run("entry", "search", "--limit", "0")
         self.assertEqual(rc, 0, err)
-        self.assertIn("Showing 0 of 2 matching entries.", out)
+        self.assertIn("Showing 0 of 2 matching entries.", err)
         with mock.patch.object(db, "count_search_entries") as count:
             rc, out, err = self._run("entry", "search", "--limit", "1", "--json")
             self.assertEqual(rc, 0, err)

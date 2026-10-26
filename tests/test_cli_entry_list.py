@@ -121,14 +121,14 @@ class EntryListTests(EntryTestBase):
     def test_list_limit(self) -> None:
         for i in range(5):
             self._seed_entry(f"entry {i}")
-        rc, out, _ = self._run("entry", "list", "--limit", "2")
+        rc, out, err = self._run("entry", "list", "--limit", "2")
         self.assertEqual(rc, 0)
-        # Two entries plus the omitted-entries footer.
+        # Two entries on stdout; the omitted-entries footer goes to stderr.
         non_empty = [line for line in out.splitlines() if line.strip()]
-        self.assertEqual(len(non_empty), 3)
-        self.assertEqual(non_empty[-1], "Showing 2 of 5 entries.")
-        rc, out, _ = self._run("entry", "list", "--limit", "5")
-        self.assertNotIn("Showing", out)
+        self.assertEqual(len(non_empty), 2)
+        self.assertEqual(err.strip(), "Showing 2 of 5 entries.")
+        rc, out, err = self._run("entry", "list", "--limit", "5")
+        self.assertNotIn("Showing", out + err)
 
     def test_list_negative_limit_exits_two(self) -> None:
         with redirect_stderr(io.StringIO()):

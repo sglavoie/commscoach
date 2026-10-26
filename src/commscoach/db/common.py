@@ -45,6 +45,23 @@ def write_transaction(conn: sqlite3.Connection) -> Iterator[None]:
         _ACTIVE_WRITES.discard(key)
 
 
+@contextmanager
+def read_snapshot(conn: sqlite3.Connection) -> Iterator[None]:
+    """Run several reads against one snapshot of the database.
+
+    Each SELECT otherwise sees whatever was committed when it ran, so a
+    concurrent write between queries could make related reads disagree.
+    """
+    if conn.in_transaction:
+        yield
+        return
+    conn.execute("BEGIN")
+    try:
+        yield
+    finally:
+        conn.rollback()
+
+
 def writes(func: _F) -> _F:
     """Run a ``(conn, ...)`` mutator, lookups included, in :func:`write_transaction`."""
 

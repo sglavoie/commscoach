@@ -17,12 +17,11 @@ from __future__ import annotations
 
 import sqlite3
 import warnings
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from .common import normalize_date_bound
+from .common import normalize_date_bound, read_snapshot
 from .errors import DBError
 from .schema import get_schema_version
 
@@ -115,23 +114,9 @@ def _dump_rows(conn: sqlite3.Connection, table: str) -> list[dict[str, Any]]:
     return [_row_dict(row, columns) for row in rows]
 
 
-@contextmanager
-def _read_snapshot(conn: sqlite3.Connection) -> Iterator[None]:
-    """Read every table from one snapshot, so a concurrent write cannot leave
-    the archive with links to rows it does not contain."""
-    if conn.in_transaction:
-        yield
-        return
-    conn.execute("BEGIN")
-    try:
-        yield
-    finally:
-        conn.rollback()
-
-
 def dump_to_dict(conn: sqlite3.Connection) -> dict[str, Any]:
     """Return a deterministic, lossless JSON-compatible representation."""
-    with _read_snapshot(conn):
+    with read_snapshot(conn):
         return _dump_snapshot(conn)
 
 

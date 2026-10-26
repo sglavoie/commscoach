@@ -91,6 +91,13 @@ class StatsTests(DBTestCase):
             ),
         )
 
+    def test_stats_read_one_snapshot_and_leave_no_open_transaction(self) -> None:
+        self._add_entry("2026-01-05T09:00:00+00:00")
+        self.conn.commit()
+        stats = db.get_stats(self.conn)
+        self.assertEqual(stats.entry_count, 1)
+        self.assertFalse(self.conn.in_transaction)
+
     def test_streak_that_ended_before_last_week_is_not_current(self) -> None:
         for timestamp in ("2026-01-05T09:00:00+00:00", "2026-01-12T09:00:00+00:00"):
             self._add_entry(timestamp)

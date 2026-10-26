@@ -29,9 +29,9 @@ class ReviewSearchTests(ReviewTestBase):
                 rc, out, err = self._run(*flags, "--limit", str(limit))
                 self.assertEqual(rc, 0, err)
                 if limit < 3:
-                    self.assertIn(f"Showing {limit} of 3 matching reviews.", out)
+                    self.assertIn(f"Showing {limit} of 3 matching reviews.", err)
                 else:
-                    self.assertNotIn("Showing", out)
+                    self.assertNotIn("Showing", out + err)
                 rc, out, err = self._run(*flags, "--limit", str(limit), "--json")
                 self.assertEqual(rc, 0, err)
                 self.assertEqual(len(json.loads(out)), min(limit, 3))
@@ -48,7 +48,7 @@ class ReviewSearchTests(ReviewTestBase):
             "0",
         )
         self.assertEqual(rc, 0, err)
-        self.assertIn("Showing 0 of 1 matching reviews.", out)
+        self.assertIn("Showing 0 of 1 matching reviews.", err)
         self.assertEqual(self._run(*flags, "--tag", "meeting")[1], "(no reviews)\n")
 
     def test_search_shows_matching_excerpt_and_full_json(self):

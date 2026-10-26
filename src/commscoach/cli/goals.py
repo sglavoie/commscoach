@@ -359,7 +359,7 @@ def cmd_goal_list(args: argparse.Namespace) -> int:
         query=getattr(args, "query", None),
     )
     if not args.json and total > len(goals):
-        print(f"Showing {len(goals)} of {total} matching goals.")
+        print(f"Showing {len(goals)} of {total} matching goals.", file=sys.stderr)
     return 0
 
 

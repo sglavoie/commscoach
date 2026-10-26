@@ -73,7 +73,8 @@ commscoach entry search --source email --person jdoe --since "30 days ago"
 `entry list --limit N` and `review list --limit N` cap the newest results shown. `--oldest-first` applies to `entry search` and orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. By default, when SQLite has FTS5, `entry search --query` matches the start of words, accent-insensitively: `meet` also finds `meeting`, and several words must all appear. Queries using full-text syntax are passed through as written, so quote a phrase (`"lead with the ask"`) for exact words in order, or use `*`, `OR`, and `NOT`. Without FTS5 it falls back to substring matching. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters. Feedback, review, and goal searches always use substring matching.
 
 When `entry search --limit N` omits matches, human output ends with a count such
-as `Showing 5 of 23 matching entries.` The total respects every search filter,
+as `Showing 5 of 23 matching entries.`, printed to stderr so piping the results
+(for example to `wc -l`) counts only records. The total respects every search filter,
 including full-text or literal matching and `--no-feedback`. `--limit 0` still
 reports omitted matches. Complete results have no footer; JSON remains an array
 of entries without extra metadata.

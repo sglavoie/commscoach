@@ -106,13 +106,13 @@ class GoalOutcomeSearchTests(GoalTestBase):
                     rc, out, err = self._run(*flags, "--limit", str(limit), "--oldest-first")
                     self.assertEqual(rc, 0, err)
                     if limit < total:
-                        self.assertIn(f"Showing {limit} of {total} matching goals.", out)
+                        self.assertIn(f"Showing {limit} of {total} matching goals.", err)
                     else:
-                        self.assertNotIn("Showing", out)
+                        self.assertNotIn("Showing", out + err)
                     rc, out, err = self._run(*flags, "--limit", str(limit), "--json")
                     self.assertEqual(rc, 0, err)
                     self.assertEqual(len(json.loads(out)), min(limit, total))
-        self.assertNotIn("Showing", self._run("goal", "list", "--status", "all")[1])
+        self.assertNotIn("Showing", "".join(self._run("goal", "list", "--status", "all")[1:]))
         self.assertEqual(self._run("goal", "search", "--query", "missing")[1], "(no goals)\n")
 
     def test_outcome_list_and_search_show_full_text_without_duplicate_excerpt(self) -> None:

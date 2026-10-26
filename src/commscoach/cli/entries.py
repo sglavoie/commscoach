@@ -404,7 +404,7 @@ def cmd_entry_list(args: argparse.Namespace) -> int:
         coached = db.feedback_entry_ids(conn, (e.id for e in entries)) if not args.json else set()
     emit_entries(args, entries, coached)
     if not args.json and total > len(entries):
-        print(f"Showing {len(entries)} of {total} entries.")
+        print(f"Showing {len(entries)} of {total} entries.", file=sys.stderr)
     return 0
 
 
@@ -457,7 +457,7 @@ def cmd_entry_search(args: argparse.Namespace) -> int:
         coached = db.feedback_entry_ids(conn, (e.id for e in entries)) if not args.json else set()
     emit_entries(args, entries, coached, excerpts=excerpts)
     if not args.json and total > len(entries):
-        print(f"Showing {len(entries)} of {total} matching entries.")
+        print(f"Showing {len(entries)} of {total} matching entries.", file=sys.stderr)
     return 0
 
 

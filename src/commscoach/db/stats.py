@@ -9,7 +9,7 @@ from itertools import pairwise
 from typing import Any
 
 from ..models import Stats
-from .common import date_bound_timestamp, validate_range_bounds
+from .common import date_bound_timestamp, read_snapshot, validate_range_bounds
 from .errors import DBError
 
 
@@ -111,7 +111,7 @@ def _weekly_metrics(
     return len(timestamps) / span_weeks, current_streak, longest, tuple(buckets)
 
 
-def get_stats(
+def _collect_stats(
     conn: sqlite3.Connection,
     *,
     since: str | None = None,
@@ -245,3 +245,19 @@ def get_stats(
         top_sources=top_sources,
         top_people=top_people,
     )
+
+
+def get_stats(
+    conn: sqlite3.Connection,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    top: int = 5,
+    today: date | None = None,
+) -> Stats:
+    """Return windowed counts, weekly cadence, streaks, and top dimensions.
+
+    All figures come from one snapshot; see :func:`_collect_stats`.
+    """
+    with read_snapshot(conn):
+        return _collect_stats(conn, since=since, until=until, top=top, today=today)

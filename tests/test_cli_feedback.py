@@ -72,9 +72,9 @@ class FeedbackNavigationTests(FeedbackTestBase):
                 rc, out, err = self._run(*flags, "--limit", str(limit))
                 self.assertEqual(rc, 0, err)
                 if limit < 3:
-                    self.assertIn(f"Showing {limit} of 3 matching feedback notes.", out)
+                    self.assertIn(f"Showing {limit} of 3 matching feedback notes.", err)
                 else:
-                    self.assertNotIn("Showing", out)
+                    self.assertNotIn("Showing", out + err)
                 rc, out, err = self._run(*flags, "--limit", str(limit), "--json")
                 self.assertEqual(rc, 0, err)
                 self.assertEqual(len(json.loads(out)), min(limit, 3))

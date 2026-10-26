@@ -223,7 +223,7 @@ def cmd_feedback_search(args: argparse.Namespace) -> int:
         )
     _emit_feedback_list(args, items, query=args.query)
     if not args.json and total > len(items):
-        print(f"Showing {len(items)} of {total} matching feedback notes.")
+        print(f"Showing {len(items)} of {total} matching feedback notes.", file=sys.stderr)
     return 0
 
 
