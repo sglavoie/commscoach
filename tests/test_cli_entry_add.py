@@ -61,13 +61,21 @@ class EntryAddTests(EntryTestBase):
 
     def test_add_unknown_person_exits_one(self) -> None:
         with mock.patch.object(cli_people, "confirm", return_value=False):
-            rc, _, err = self._run(
-                "entry", "add", "body", "--person", "ghost"
-            )
+            rc, _, err = self._run("entry", "add", "body", "--person", "ghost")
         self.assertEqual(rc, 1)
         self.assertIn("ghost", err)
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.list_entries(conn), ())
+
+    def test_piped_body_with_unknown_person_explains_how_to_proceed(self) -> None:
+        # stdin is consumed by the body, so the prompt sees EOF.
+        rc, _, err = self._run(
+            "entry", "add", "-", "--person", "newbie", stdin=io.StringIO("body\n")
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("Create person @newbie? [y/N] \n", err)
+        self.assertIn("person @newbie does not exist; pass --yes to create it", err)
+        self.assertIn(f"commscoach --db {self.db_path} person add newbie", err)
 
     def test_add_unknown_person_with_yes_creates_and_links(self) -> None:
         rc, _, _ = self._run(
@@ -95,9 +103,7 @@ class EntryAddTests(EntryTestBase):
             self.assertEqual(db.list_entries(conn), ())
 
     def test_add_comma_delimited_tags(self) -> None:
-        rc, _, _ = self._run(
-            "entry", "add", "body", "--tag", "alpha, Beta,alpha"
-        )
+        rc, _, _ = self._run("entry", "add", "body", "--tag", "alpha, Beta,alpha")
         self.assertEqual(rc, 0)
         with closing(db.connect(self.db_path)) as conn:
             entry = db.get_entry(conn, 1)
@@ -110,9 +116,7 @@ class EntryAddTests(EntryTestBase):
         self.assertIn("non-empty", err)
 
     def test_add_bad_occurred_at_exits_one_without_writing(self) -> None:
-        rc, _, err = self._run(
-            "entry", "add", "body", "--occurred-at", "yesterdya"
-        )
+        rc, _, err = self._run("entry", "add", "body", "--occurred-at", "yesterdya")
         self.assertEqual(rc, 1)
         self.assertIn("accepted forms", err)
         with closing(db.connect(self.db_path)) as conn:
@@ -140,6 +144,21 @@ class EntryAddTests(EntryTestBase):
         rc, _, err = self._run("entry", "add", "@/no/such/file.txt")
         self.assertEqual(rc, 1)
         self.assertIn("cannot read body", err)
+
+    def test_add_body_from_non_utf8_file_exits_one(self) -> None:
+        body_file = self.tmpdir / "bad.txt"
+        body_file.write_bytes(b"bad \xff text")
+        rc, _, err = self._run("entry", "add", f"@{body_file}")
+        self.assertEqual(rc, 1)
+        self.assertIn("cannot read body: not valid UTF-8", err)
+
+    def test_add_out_of_range_occurred_at_exits_one(self) -> None:
+        for value in ("999999999 days ago", "9999-12-31", "0001-01-01T00:00+00:00"):
+            with self.subTest(value=value):
+                rc, _, err = self._run("entry", "add", "body", "--occurred-at", value)
+                self.assertEqual(rc, 1)
+                self.assertIn("out of range", err)
+                self.assertNotIn("Traceback", err)
 
     def test_add_json_output_includes_entry_fields(self) -> None:
         self._create_person("alice")

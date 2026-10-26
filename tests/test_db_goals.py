@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 
 from commscoach import db
@@ -38,7 +39,9 @@ class GoalCrudTests(DBTestCase):
     def test_query_filters_all_text_fields_before_sorting_and_limit(self) -> None:
         db.create_person(self.conn, "alice")
         title = db.create_goal(self.conn, "Try A_B!", person_handle="alice", now=T0)
-        detail = db.create_goal(self.conn, "Detail", detail="Try a_b!", person_handle="alice", now=T1)
+        detail = db.create_goal(
+            self.conn, "Detail", detail="Try a_b!", person_handle="alice", now=T1
+        )
         closed = db.create_goal(self.conn, "Outcome", person_handle="alice", now=T2)
         db.close_goal(self.conn, closed.id, outcome="Tried A_B!", now=T2)
         db.create_goal(self.conn, "Wrong person A_B!", now=T2)
@@ -46,7 +49,9 @@ class GoalCrudTests(DBTestCase):
         found = db.list_goals(self.conn, query="a_b!", person_handle="ALICE", status=None)
         self.assertEqual([goal.id for goal in found], [detail.id, title.id, closed.id])
         self.assertEqual(
-            db.list_goals(self.conn, query="a_b!", person_handle="alice", oldest_first=True, limit=1),
+            db.list_goals(
+                self.conn, query="a_b!", person_handle="alice", oldest_first=True, limit=1
+            ),
             (title,),
         )
         with self.assertRaisesRegex(db.DBError, "non-empty"):
@@ -56,19 +61,29 @@ class GoalCrudTests(DBTestCase):
         db.create_person(self.conn, "alice")
         db.create_person(self.conn, "bob")
         review = db.create_review(self.conn, "review", [db.create_entry(self.conn, "entry").id])
-        linked = db.create_goal(self.conn, "linked", person_handle="alice", review_id=review.id, now=T0)
+        linked = db.create_goal(
+            self.conn, "linked", person_handle="alice", review_id=review.id, now=T0
+        )
         general = db.create_goal(self.conn, "general", review_id=review.id, now=T1)
         closed = db.create_goal(self.conn, "closed general", review_id=review.id, now=T2)
         db.close_goal(self.conn, closed.id)
         db.create_goal(self.conn, "bob", person_handle="bob", review_id=review.id, now=T2)
         db.create_goal(self.conn, "another review", person_handle="alice", now=T2)
         self.assertEqual(
-            db.list_goals(self.conn, person_handle="ALICE", include_general=True, review_id=review.id),
+            db.list_goals(
+                self.conn, person_handle="ALICE", include_general=True, review_id=review.id
+            ),
             (general, linked),
         )
         self.assertEqual(
-            db.list_goals(self.conn, person_handle="ALICE", include_general=True,
-                          review_id=review.id, oldest_first=True, limit=1),
+            db.list_goals(
+                self.conn,
+                person_handle="ALICE",
+                include_general=True,
+                review_id=review.id,
+                oldest_first=True,
+                limit=1,
+            ),
             (linked,),
         )
         with self.assertRaisesRegex(db.DBError, "requires person_handle"):
@@ -80,14 +95,22 @@ class GoalCrudTests(DBTestCase):
                 goal = db.create_goal(self.conn, "goal", now=T0)
                 if status != "active":
                     goal = db.close_goal(
-                        self.conn, goal.id, outcome="original outcome",
-                        dropped=status == "dropped", now=T1,
+                        self.conn,
+                        goal.id,
+                        outcome="original outcome",
+                        dropped=status == "dropped",
+                        now=T1,
                     )
                 self.assertEqual(
-                    db.update_goal(self.conn, goal.id, status=status, now=T2), goal,
+                    db.update_goal(self.conn, goal.id, status=status, now=T2),
+                    goal,
                 )
                 edited = db.update_goal(
-                    self.conn, goal.id, status=status, detail="new detail", now=T2,
+                    self.conn,
+                    goal.id,
+                    status=status,
+                    detail="new detail",
+                    now=T2,
                 )
                 self.assertEqual(edited.detail, "new detail")
                 self.assertEqual(edited.updated_at, T2)
@@ -124,9 +147,7 @@ class GoalCrudTests(DBTestCase):
                 closed = db.close_goal(
                     self.conn, goal.id, outcome="worked", dropped=dropped, now=T1
                 )
-                self.assertEqual(
-                    db.close_goal(self.conn, goal.id, dropped=dropped, now=T2), closed
-                )
+                self.assertEqual(db.close_goal(self.conn, goal.id, dropped=dropped, now=T2), closed)
                 self.assertEqual(
                     db.close_goal(self.conn, goal.id, outcome="worked", dropped=dropped, now=T2),
                     closed,
@@ -136,11 +157,13 @@ class GoalCrudTests(DBTestCase):
         goal = db.create_goal(self.conn, "goal", now=T0)
         db.close_goal(self.conn, goal.id, outcome="original", now=T1)
         corrected = db.close_goal(self.conn, goal.id, outcome="corrected", now=T2)
-        self.assertEqual((corrected.outcome, corrected.closed_at, corrected.updated_at),
-                         ("corrected", T1, T2))
+        self.assertEqual(
+            (corrected.outcome, corrected.closed_at, corrected.updated_at), ("corrected", T1, T2)
+        )
         dropped = db.close_goal(self.conn, goal.id, dropped=True, now=T2)
-        self.assertEqual((dropped.status, dropped.outcome, dropped.closed_at),
-                         ("dropped", "corrected", T2))
+        self.assertEqual(
+            (dropped.status, dropped.outcome, dropped.closed_at), ("dropped", "corrected", T2)
+        )
 
     def test_create_and_get_goal_hydrates_relationships(self) -> None:
         person = db.create_person(self.conn, "alex")
@@ -160,7 +183,8 @@ class GoalCrudTests(DBTestCase):
         self.assertEqual(goal.status, "active")
         self.assertEqual(goal.created_at, T0)
         self.assertEqual(goal.person, person)
-        self.assertEqual(goal.review, review)
+        # The goal carries its source review without the covered entries.
+        self.assertEqual(goal.review, dataclasses.replace(review, entries=()))
         self.assertEqual(db.get_goal(self.conn, goal.id), goal)
 
     def test_create_rejects_blank_title(self) -> None:
@@ -229,9 +253,7 @@ class GoalCrudTests(DBTestCase):
             review_id=review.id,
             now=T0,
         )
-        updated = db.update_goal(
-            self.conn, goal.id, person_handle=None, review_id=None, now=T1
-        )
+        updated = db.update_goal(self.conn, goal.id, person_handle=None, review_id=None, now=T1)
         self.assertIsNone(updated.person)
         self.assertIsNone(updated.review)
 
@@ -280,13 +302,9 @@ class GoalSchemaInvariantTests(DBTestCase):
     def test_raw_update_cannot_break_closed_at_invariant(self) -> None:
         goal = db.create_goal(self.conn, "goal", now=T0)
         with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute(
-                "UPDATE goals SET status = 'done' WHERE id = ?", (goal.id,)
-            )
+            self.conn.execute("UPDATE goals SET status = 'done' WHERE id = ?", (goal.id,))
         with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute(
-                "UPDATE goals SET closed_at = ? WHERE id = ?", (T1, goal.id)
-            )
+            self.conn.execute("UPDATE goals SET closed_at = ? WHERE id = ?", (T1, goal.id))
 
     def test_deleting_person_and_review_sets_goal_foreign_keys_null(self) -> None:
         person = db.create_person(self.conn, "alex")

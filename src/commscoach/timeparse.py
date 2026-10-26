@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, time, timedelta, timezone, tzinfo
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
 
 class TimeParseError(ValueError):
@@ -11,12 +11,10 @@ class TimeParseError(ValueError):
 
 
 _ACCEPTED_FORMS = (
-    "ISO-8601; now/today/yesterday/tomorrow [TIME]; "
+    "ISO-8601; now; today/yesterday/tomorrow [TIME]; "
     "[last ]WEEKDAY [TIME]; or N minutes/hours/days/weeks ago"
 )
-_KEYWORD_RE = re.compile(
-    r"^(now|today|yesterday|tomorrow)(?:\s+(.+))?$", re.IGNORECASE
-)
+_KEYWORD_RE = re.compile(r"^(now|today|yesterday|tomorrow)(?:\s+(.+))?$", re.IGNORECASE)
 _WEEKDAY_RE = re.compile(
     r"^(?:last\s+)?"
     r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
@@ -40,6 +38,17 @@ _WEEKDAYS = {
     "saturday": 5,
     "sunday": 6,
 }
+
+
+# A day inside datetime's range on each side, since no UTC offset reaches a
+# full day: anything stored is then printable in every local timezone.
+EARLIEST = datetime.min.replace(tzinfo=UTC) + timedelta(days=1)
+LATEST = datetime.max.replace(tzinfo=UTC) - timedelta(days=1)
+
+
+def in_supported_range(dt: datetime) -> bool:
+    """Return whether an aware ``dt`` converts to any local timezone without overflow."""
+    return EARLIEST <= dt <= LATEST
 
 
 def _error(text: str) -> TimeParseError:
@@ -85,11 +94,28 @@ def _at_local_time(reference: datetime, day_offset: int, clock: time) -> datetim
 def _canonical(dt: datetime, reference: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=_local_timezone(reference))
-    return dt.astimezone(timezone.utc).isoformat()
+    return dt.astimezone(UTC).isoformat()
 
 
 def parse_when(text: str, *, now: datetime | None = None) -> str:
     """Parse a supported human timestamp into a UTC ISO-8601 string."""
+    try:
+        result = _parse_when(text, now=now)
+    except TimeParseError:
+        raise
+    except (OverflowError, ValueError) as exc:
+        # e.g. "999999999 days ago", or a local 9999-12-31 that lands in year 10000 UTC.
+        raise _out_of_range(text) from exc
+    if not in_supported_range(datetime.fromisoformat(result)):
+        raise _out_of_range(text)
+    return result
+
+
+def _out_of_range(text: str) -> TimeParseError:
+    return TimeParseError(f"timestamp {text!r} is out of range")
+
+
+def _parse_when(text: str, *, now: datetime | None) -> str:
     if not isinstance(text, str):
         raise _error(str(text))
     value = text.strip()
@@ -109,7 +135,9 @@ def parse_when(text: str, *, now: datetime | None = None) -> str:
     if match:
         keyword = match.group(1).lower()
         clock_text = match.group(2)
-        if keyword == "now" and clock_text is None:
+        if keyword == "now":
+            if clock_text is not None:
+                raise _error(text)
             return _canonical(reference, reference)
         clock = _parse_clock(clock_text, text) if clock_text else time()
         offsets = {"now": 0, "today": 0, "yesterday": -1, "tomorrow": 1}
@@ -118,6 +146,8 @@ def parse_when(text: str, *, now: datetime | None = None) -> str:
     match = _WEEKDAY_RE.fullmatch(value)
     if match:
         target_weekday = _WEEKDAYS[match.group(1).lower()]
+        # Strictly in the past: on a Monday, "monday" is a week ago, and the
+        # optional "last" does not change the meaning.
         days_back = (reference.weekday() - target_weekday) % 7 or 7
         clock = _parse_clock(match.group(2), text) if match.group(2) else time()
         return _canonical(_at_local_time(reference, -days_back, clock), reference)
@@ -132,7 +162,15 @@ def parse_when(text: str, *, now: datetime | None = None) -> str:
             "d": timedelta(days=amount),
             "w": timedelta(weeks=amount),
         }[unit]
-        return _canonical(reference - delta, reference)
+        if unit in "mh":
+            # Elapsed time: subtract from the absolute instant so a DST change
+            # in between does not shift the result by an hour. Days and weeks
+            # stay wall-clock ("2 days ago" keeps the time of day).
+            instant = _canonical(reference, reference)
+            return (datetime.fromisoformat(instant) - delta).isoformat()
+        # Arithmetic resets ``fold``, which would move "0 days ago" during a
+        # repeated fall-back hour to that hour's first occurrence.
+        return _canonical((reference - delta).replace(fold=reference.fold), reference)
 
     raise _error(text)
 
@@ -154,11 +192,14 @@ def parse_bound(text: str, *, upper: bool = False, now: datetime | None = None) 
         weekday = _WEEKDAY_RE.fullmatch(value)
         day_only = day_only or bool(weekday and weekday.group(2) is None)
     if day_only:
-        local_day = parsed.astimezone(reference.tzinfo).date()
-        if upper:
-            local_day += timedelta(days=1)
-        boundary = datetime.combine(local_day, time(), tzinfo=reference.tzinfo)
-        parsed = boundary.astimezone(timezone.utc)
+        try:
+            local_day = parsed.astimezone(reference.tzinfo).date()
+            if upper:
+                local_day += timedelta(days=1)
+            boundary = datetime.combine(local_day, time(), tzinfo=reference.tzinfo)
+            parsed = boundary.astimezone(UTC)
+        except (OverflowError, ValueError) as exc:
+            raise _out_of_range(text) from exc
         if upper:
             parsed -= timedelta(microseconds=1)
     return parsed.isoformat()

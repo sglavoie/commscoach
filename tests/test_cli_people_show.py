@@ -18,13 +18,24 @@ class PersonShowTests(PeopleTestBase):
         self._seed_person("bob")
         with closing(db.connect(self.db_path)) as conn:
             entry = db.create_entry(conn, "Alice interaction", people=("alice",))
-            older = db.create_review(conn, "Older advice", (entry.id,),
-                                     scope_kind="person", scope_person_handle="alice")
-            newest = db.create_review(conn, "Latest advice. " * 40, (entry.id,),
-                                      scope_kind="person", scope_person_handle="alice")
+            older = db.create_review(
+                conn, "Older advice", (entry.id,), scope_kind="person", scope_person_handle="alice"
+            )
+            newest = db.create_review(
+                conn,
+                "Latest advice. " * 40,
+                (entry.id,),
+                scope_kind="person",
+                scope_person_handle="alice",
+            )
             other = db.create_entry(conn, "Bob interaction", people=("bob",))
-            db.create_review(conn, "Unrelated person advice", (other.id,),
-                             scope_kind="person", scope_person_handle="bob")
+            db.create_review(
+                conn,
+                "Unrelated person advice",
+                (other.id,),
+                scope_kind="person",
+                scope_person_handle="bob",
+            )
             db.create_review(conn, "General review mentioning Alice", (entry.id,))
             # Equal creation times exercise the stable ID tie-breaker.
             with conn:
@@ -41,7 +52,9 @@ class PersonShowTests(PeopleTestBase):
                 rc, out, err = self._run(*flags, "--json")
                 self.assertEqual(rc, 0, err)
                 payload = json.loads(out)
-                self.assertEqual([r["id"] for r in payload["recent_reviews"]], [newest.id, older.id])
+                self.assertEqual(
+                    [r["id"] for r in payload["recent_reviews"]], [newest.id, older.id]
+                )
                 self.assertEqual(payload["recent_reviews"][0]["body"], newest.body)
                 self.assertEqual("recent_entries" in payload, bool(extra))
                 rc, out, err = self._run("person", "show", "alice", *extra, "--json")
@@ -67,13 +80,22 @@ class PersonShowTests(PeopleTestBase):
             self.assertEqual(json.loads(out)["recent_reviews"], [])
         with closing(db.connect(self.db_path)) as conn:
             entry = db.create_entry(conn, "Alice interaction", people=("alice",))
-            db.create_review(conn, "Existing advice", (entry.id,),
-                             scope_kind="person", scope_person_handle="alice")
+            db.create_review(
+                conn,
+                "Existing advice",
+                (entry.id,),
+                scope_kind="person",
+                scope_person_handle="alice",
+            )
         rc, out, err = self._run("person", "show", "alice", "--reviews", "0", "--json")
         self.assertEqual(rc, 0, err)
         self.assertEqual(json.loads(out)["recent_reviews"], [])
         for limit in ("-1", "bad"):
-            with self.subTest(limit=limit), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            with (
+                self.subTest(limit=limit),
+                redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as raised,
+            ):
                 cli.main(["--db", str(self.db_path), "person", "show", "alice", "--reviews", limit])
             self.assertEqual(raised.exception.code, 2)
         rc, out, err = self._run("person", "show", "missing", "--reviews", "1")
@@ -90,7 +112,9 @@ class PersonShowTests(PeopleTestBase):
             other = db.create_entry(conn, "Other", people=("bob",), occurred_at="2026-04-01")
             db.create_feedback(conn, older.id, "Excluded old advice")
             db.create_feedback(conn, other.id, "Excluded unrelated advice")
-            first = db.create_feedback(conn, coached.id, "First advice\n" + "Full coaching text. " * 30)
+            first = db.create_feedback(
+                conn, coached.id, "First advice\n" + "Full coaching text. " * 30
+            )
             second = db.create_feedback(conn, coached.id, "Second advice")
         flags = ("person", "show", "ALICE", "--recent", "2", "--with-feedback")
         rc, out, err = self._run(*flags)
@@ -116,10 +140,14 @@ class PersonShowTests(PeopleTestBase):
         self.assertEqual(rc, 1)
         self.assertIn("requires --recent", err)
         for limit in ("0", "5"):
-            rc, out, err = self._run("person", "show", "alice", "--recent", limit, "--with-feedback")
+            rc, out, err = self._run(
+                "person", "show", "alice", "--recent", limit, "--with-feedback"
+            )
             self.assertEqual(rc, 0, err)
             self.assertIn("(no entries)", out)
-            rc, out, err = self._run("person", "show", "alice", "--recent", limit, "--with-feedback", "--json")
+            rc, out, err = self._run(
+                "person", "show", "alice", "--recent", limit, "--with-feedback", "--json"
+            )
             self.assertEqual(rc, 0, err)
             self.assertEqual(json.loads(out)["recent_entries"], [])
 
@@ -128,7 +156,9 @@ class PersonShowTests(PeopleTestBase):
         self._seed_person("bob")
         with closing(db.connect(self.db_path)) as conn:
             db.set_person_note(conn, alice.id, "Prefers short updates")
-            newest = db.create_entry(conn, "latest conversation", people=("alice",), occurred_at="2026-02-01")
+            newest = db.create_entry(
+                conn, "latest conversation", people=("alice",), occurred_at="2026-02-01"
+            )
             db.create_entry(conn, "older conversation", people=("alice",), occurred_at="2026-01-01")
             db.create_entry(conn, "unrelated", people=("bob",), occurred_at="2026-03-01")
             db.create_feedback(conn, newest.id, "Good listening")
@@ -145,8 +175,14 @@ class PersonShowTests(PeopleTestBase):
         self.assertEqual([g["id"] for g in payload["active_goals"]], [goal.id])
         rc, out, err = self._run("person", "show", "alice", "--recent", "1")
         self.assertEqual(rc, 0, err)
-        for text in ("Prefers short updates", "Recent interactions:", "latest conversation",
-                     "has feedback", "Active goals:", "Ask a question"):
+        for text in (
+            "Prefers short updates",
+            "Recent interactions:",
+            "latest conversation",
+            "has feedback",
+            "Active goals:",
+            "Ask a question",
+        ):
             self.assertIn(text, out)
         self.assertNotIn("older conversation", out)
         rc, out, err = self._run("person", "show", "alice", "--json")

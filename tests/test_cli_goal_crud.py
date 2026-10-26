@@ -7,7 +7,7 @@ import json
 import unittest
 from contextlib import closing
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest import mock
 
 from commscoach import db
@@ -33,9 +33,7 @@ class GoalCrudTests(GoalTestBase):
         second = self._seed_goal("second")
         with closing(db.connect(self.db_path)) as conn:
             db.close_goal(conn, second.id, dropped=True)
-        rc, out, _ = self._run(
-            "--json", "goal", "list", "--status", "all", "--limit", "2"
-        )
+        rc, out, _ = self._run("--json", "goal", "list", "--status", "all", "--limit", "2")
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual([row["id"] for row in payload], [first.id, second.id])
@@ -53,7 +51,7 @@ class GoalCrudTests(GoalTestBase):
 
     def test_active_goal_age_uses_elapsed_days_since_creation(self) -> None:
         goal = self._seed_goal()
-        now = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
+        now = datetime(2026, 10, 2, 12, tzinfo=UTC)
         for stamp, expected in (
             ("2026-08-25T12:00:00+00:00", "38 days"),
             ("2026-10-01T12:00:00+00:00", "1 day"),
@@ -94,9 +92,7 @@ class GoalCrudTests(GoalTestBase):
     def test_edit_human_updates_and_clears(self) -> None:
         self._seed_person()
         with closing(db.connect(self.db_path)) as conn:
-            goal = db.create_goal(
-                conn, "old", detail="old detail", person_handle="alex"
-            )
+            goal = db.create_goal(conn, "old", detail="old detail", person_handle="alex")
         rc, out, _ = self._run(
             "goal",
             "edit",
@@ -132,12 +128,19 @@ class GoalCrudTests(GoalTestBase):
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out)["detail"], "new detail")
 
-    def test_edit_mutual_exclusion_and_empty_edit_exit_one(self) -> None:
+    def test_titles_are_trimmed_on_add_and_edit(self) -> None:
+        rc, out, _ = self._run("--json", "goal", "add", "  Ask first  ")
+        self.assertEqual(rc, 0)
+        goal = json.loads(out)
+        self.assertEqual(goal["title"], "Ask first")
+        rc, out, _ = self._run("goal", "edit", str(goal["id"]), "--title", " Ask first\n")
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("unchanged"), out)
+
+    def test_edit_mutual_exclusion_exits_two_and_empty_edit_exits_one(self) -> None:
         goal = self._seed_goal()
-        rc, _, err = self._run(
-            "goal", "edit", str(goal.id), "--detail", "x", "--clear-detail"
-        )
-        self.assertEqual(rc, 1)
+        rc, _, err = self._run("goal", "edit", str(goal.id), "--detail", "x", "--clear-detail")
+        self.assertEqual(rc, 2)
         self.assertIn("cannot be combined", err)
         rc, _, err = self._run("goal", "edit", str(goal.id))
         self.assertEqual(rc, 1)
@@ -157,11 +160,22 @@ class GoalCrudTests(GoalTestBase):
         self.assertIn(f"closed goal {goal.id}", out)
         self.assertIn("It worked", out)
 
+    def test_repeated_close_reports_unchanged_updated_or_closed(self) -> None:
+        goal = self._seed_goal()
+        for flags, verb in (
+            ((), "closed"),
+            ((), "unchanged"),
+            (("--outcome", "Corrected"), "updated"),
+            (("--dropped",), "closed"),
+        ):
+            with self.subTest(flags=flags):
+                rc, out, err = self._run("goal", "close", str(goal.id), *flags)
+                self.assertEqual(rc, 0, err)
+                self.assertTrue(out.startswith(f"{verb} goal {goal.id}"), out)
+
     def test_close_json_dropped(self) -> None:
         goal = self._seed_goal()
-        rc, out, _ = self._run(
-            "--json", "goal", "close", str(goal.id), "--dropped"
-        )
+        rc, out, _ = self._run("--json", "goal", "close", str(goal.id), "--dropped")
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual(payload["status"], "dropped")
@@ -194,6 +208,26 @@ class GoalCrudTests(GoalTestBase):
         self.assertEqual(rc, 0)
         for verb in ("add", "list", "show", "edit", "close", "rm"):
             self.assertIn(verb, out)
+
+
+class GoalEmptyTextTests(GoalTestBase):
+    def test_empty_stdin_text_is_rejected_without_writing(self) -> None:
+        rc, _, err = self._run(
+            "goal", "add", "Practice", "--detail", "-", stdin=io.StringIO("  \n")
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("--detail must not be empty", err)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.list_goals(conn, status=None), ())
+            goal = db.create_goal(conn, "Practice")
+        for argv in (
+            ("goal", "edit", str(goal.id), "--outcome", "-"),
+            ("goal", "close", str(goal.id), "--outcome", "-"),
+        ):
+            with self.subTest(argv=argv):
+                rc, _, err = self._run(*argv, stdin=io.StringIO(""))
+                self.assertEqual(rc, 1)
+                self.assertIn("--outcome must not be empty", err)
 
 
 if __name__ == "__main__":

@@ -18,15 +18,30 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import sqlite3
 import sys
+from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
-from typing import Any, Callable, Iterator, TextIO
+from typing import Any, TextIO
 
 from .. import db, paths
+from ..db.common import search_fold
 from ..timeparse import TimeParseError, parse_bound, parse_when
+
+
+class UsageError(db.DBError):
+    """A flag combination argparse cannot express; exits 2 like argparse's own errors."""
+
+
+def command_prefix(args: argparse.Namespace) -> list[str]:
+    """Return ``commscoach [--db PATH]`` for follow-up commands shown to the user."""
+    command = ["commscoach"]
+    if getattr(args, "db", None):
+        command.extend(("--db", args.db))
+    return command
 
 
 def print_err(message: str, *, stream: TextIO | None = None) -> None:
@@ -38,7 +53,8 @@ def print_err(message: str, *, stream: TextIO | None = None) -> None:
 def print_json(obj: Any, *, stream: TextIO | None = None) -> None:
     """Serialize ``obj`` as a pretty, sorted JSON document with a trailing newline."""
     out = stream if stream is not None else sys.stdout
-    json.dump(obj, out, indent=2, sort_keys=True, default=str)
+    # Unescaped like the JSON export, so names and notes stay readable.
+    json.dump(obj, out, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     out.write("\n")
 
 
@@ -82,22 +98,51 @@ def first_prose_line(body: str) -> str:
     return lines[0] if lines else ""
 
 
+def _fold_with_offsets(text: str) -> tuple[str, list[int]]:
+    """Fold ``text`` for search, remembering each folded character's source index."""
+    folded: list[str] = []
+    offsets: list[int] = []
+    for index, char in enumerate(text):
+        piece = search_fold(char)
+        folded.append(piece)
+        offsets.extend([index] * len(piece))
+    return "".join(folded), offsets
+
+
+def contains_folded(text: str, query: str) -> bool:
+    """Report whether ``query`` occurs in ``text`` under the substring searches' folding."""
+    return search_fold(query) in search_fold(text)
+
+
 def search_excerpt(body: str, query: str, *, width: int = 180) -> str:
     """Show context around the first literal match, preserving matched headings.
 
-    Fold ASCII only, like SQLite LIKE, so Unicode characters do not shift the
-    match offsets. Long queries remain whole even when they exceed the budget.
+    Matching folds case and accents like the database searches do; offsets are
+    mapped back to ``body`` so the excerpt is cut from the original text. Long
+    queries remain whole even when they exceed the budget.
     """
-    fold = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
-    match = body.translate(fold).find(query.translate(fold))
-    if not query or match < 0:
+    folded, offsets = _fold_with_offsets(body)
+    position = folded.find(search_fold(query)) if query else -1
+    if position < 0:
         return truncate(first_prose_line(body), width=width)
+    match = offsets[position]
     budget = max(width, len(query))
     start = max(0, match - (budget - len(query)) // 2)
     end = min(len(body), start + budget)
     start = max(0, end - budget)
     excerpt = " ".join(body[start:end].split())
     return ("…" if start else "") + excerpt + ("…" if end < len(body) else "")
+
+
+def plural(count: int, singular: str, plural_form: str | None = None) -> str:
+    """Render ``count`` with the matching noun form: ``1 entry``, ``2 entries``."""
+    noun = singular if count == 1 else (plural_form or f"{singular}s")
+    return f"{count} {noun}"
+
+
+def edit_verb(before: str, after: str) -> str:
+    """Name an edit's outcome from the row's ``updated_at`` before and after it."""
+    return "updated" if after != before else "unchanged"
 
 
 def format_stamp(iso: str) -> str:
@@ -111,6 +156,27 @@ def format_stamp(iso: str) -> str:
     except ValueError:
         return iso
     return parsed.astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def _format_bound(value: str | None) -> str:
+    """Render a stored range bound as the local day or time the user typed.
+
+    Bounds are stored as UTC instants, so ``--until 2026-09-01`` is kept as the
+    last microsecond of that local day, which in UTC can fall on 09-02. Whole
+    local days render as a bare date; legacy date-only bounds pass through.
+    """
+    if not value:
+        return ""
+    try:
+        stamp = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if stamp.tzinfo is None:
+        return value
+    local = stamp.astimezone()
+    if local.time() in (time.min, time.max):
+        return local.date().isoformat()
+    return local.strftime("%Y-%m-%d %H:%M")
 
 
 def format_scope(review: db.Review, *, separator: str = ":") -> str:
@@ -143,10 +209,8 @@ def format_scope(review: db.Review, *, separator: str = ":") -> str:
     if kind == "tag" and review.scope_tag:
         return f"{kind}{separator}{review.scope_tag}"
     if kind == "range" and (review.scope_since or review.scope_until):
-        return (
-            f"{kind}{separator}"
-            f"{review.scope_since or ''}..{review.scope_until or ''}"
-        )
+        since, until = _format_bound(review.scope_since), _format_bound(review.scope_until)
+        return f"{kind}{separator}{since}..{until}"
     return kind
 
 
@@ -172,6 +236,8 @@ def read_body_or_raise(value: str) -> str:
         return read_body(value)
     except OSError as exc:
         raise db.DBError(f"cannot read body: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise db.DBError(f"cannot read body: not valid UTF-8 ({exc.reason})") from exc
 
 
 def read_body_arg(
@@ -182,15 +248,42 @@ def read_body_arg(
     preamble: str,
     isatty: Callable[[], bool],
     compose: Callable[..., str],
+    flag: str | None = None,
 ) -> str:
-    """Resolve an optional body argument, composing interactively when omitted."""
+    """Resolve an optional body argument, composing interactively when omitted.
+
+    ``flag`` names the option that takes the text (``--notes``), so the
+    non-interactive hint shows where it goes rather than a bare "the text".
+    """
     if value is not None:
         return read_body_or_raise(value)
     if not isatty():
-        raise db.DBError(
-            f"{what} required: pass BODY, '-' for stdin, or '@PATH'"
+        forms = (
+            f"{flag} TEXT, {flag} - to read stdin, or {flag} @PATH"
+            if flag is not None
+            else "the text, '-' to read stdin, or '@PATH'"
         )
-    return compose(template=template, preamble=preamble)
+        raise db.DBError(f"{what} required when stdin is not a terminal: pass {forms}")
+    return compose(template=template, preamble=preamble, what=what)
+
+
+# ``const`` of the edit commands' ``--body``: a bare flag opens the editor. A
+# sentinel rather than "" so an explicit ``--body ""`` is rejected as empty
+# instead of silently opening the editor.
+EDIT_IN_EDITOR: Any = object()
+
+
+def read_replacement_body(value: Any, *, command: str) -> str | None:
+    """Read an edit command's ``--body`` before the database is opened.
+
+    Returns the given text (literal, ``-`` or ``@PATH``), or ``None`` for a bare
+    ``--body``, meaning the caller opens the editor on the stored text.
+    """
+    if value is None:
+        raise db.DBError(f"{command} requires --body")
+    if value is EDIT_IN_EDITOR:
+        return None
+    return read_body_or_raise(value)
 
 
 def parse_when_or_raise(value: str, *, now: datetime | None = None) -> str:
@@ -235,22 +328,25 @@ def add_date_bounds(parser: argparse.ArgumentParser, *, noun: str = "entries") -
     )
 
 
+def add_oldest_first(parser: argparse.ArgumentParser, *, noun: str) -> None:
+    """Declare the shared ``--oldest-first`` flag of the listing commands."""
+    parser.add_argument(
+        "--oldest-first",
+        action="store_true",
+        help=f"Return the oldest {noun} first, before applying --limit.",
+    )
+
+
 def parse_date_bounds(args: argparse.Namespace) -> tuple[str | None, str | None]:
     """Resolve and validate shared CLI date bounds."""
     now = datetime.now()
     since = (
-        parse_date_bound(args.since, flag="--since", now=now)
-        if args.since is not None
-        else None
+        parse_date_bound(args.since, flag="--since", now=now) if args.since is not None else None
     )
     until = (
-        parse_date_bound(args.until, flag="--until", now=now)
-        if args.until is not None
-        else None
+        parse_date_bound(args.until, flag="--until", now=now) if args.until is not None else None
     )
-    db.validate_range_bounds(
-        since, until, since_name="--since", until_name="--until"
-    )
+    db.validate_range_bounds(since, until, since_name="--since", until_name="--until")
     return since, until
 
 
@@ -259,24 +355,47 @@ def confirm(
     *,
     assume_yes: bool = False,
     stream: TextIO | None = None,
-    input_fn: Callable[[str], str] = input,
+    input_fn: Callable[[str], str] | None = None,
+    isatty: Callable[[], bool] | None = None,
 ) -> bool:
     """Prompt the user for a y/N confirmation.
 
     Returns ``True`` only when the user types ``y`` or ``yes`` (case-insensitive).
     EOF and any other input return ``False``. ``assume_yes`` skips the prompt
     entirely so ``--yes`` callers do not block on stdin.
+
+    When the default (``input``) would read a stdin that is not a terminal, the
+    answer is "no" without reading: a pipe that stays open (an agent harness,
+    a background job) would otherwise block forever on a prompt nobody sees.
+    ``isatty`` defaults to ``sys.stdin.isatty`` and is injectable for tests.
     """
     if assume_yes:
         return True
     out = stream if stream is not None else sys.stderr
     out.write(f"{prompt} [y/N] ")
+    if input_fn is None:
+        if not (isatty or _stdin_isatty)():
+            # Same output as EOF: callers say how to proceed (``--yes``).
+            out.write("\n")
+            out.flush()
+            return False
+        input_fn = input
     out.flush()
     try:
         answer = input_fn("")
     except EOFError:
+        # End the prompt line so a following error message starts cleanly.
+        out.write("\n")
+        out.flush()
         return False
     return answer.strip().lower() in {"y", "yes"}
+
+
+def _stdin_isatty() -> bool:
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):  # replaced or closed stdin
+        return False
 
 
 def resolve_db_path(args: argparse.Namespace) -> Path:
@@ -287,15 +406,79 @@ def resolve_db_path(args: argparse.Namespace) -> Path:
         raise db.DBError(str(exc)) from exc
 
 
-def non_negative_int(value: str) -> int:
-    """Parse an argparse integer that cannot be negative."""
+def reject_store_destination(destination: Path, source_path: Path, *, what: str) -> None:
+    """Refuse to write over the active store or its SQLite sidecars, including aliases.
+
+    A sidecar is protected even when absent: SQLite creates and deletes them on
+    the next write, which would silently destroy or corrupt anything put there.
+    """
+    source = source_path.resolve()
+    for path in (source, *paths.sidecar_paths(source)):
+        if destination.resolve() == path or (
+            destination.exists() and path.exists() and destination.samefile(path)
+        ):
+            raise db.DBError(
+                f"{what} destination must differ from the source database and its SQLite sidecars"
+            )
+
+
+# SQLite stores integers as signed 64-bit values; anything larger would
+# surface as an OverflowError traceback instead of a usage error.
+_SQLITE_INT_MAX = 2**63 - 1
+
+
+def _bounded_int(value: str, *, minimum: int, below: str) -> int:
     try:
         parsed = int(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("must be an integer") from exc
-    if parsed < 0:
-        raise argparse.ArgumentTypeError("must be non-negative")
+        raise argparse.ArgumentTypeError(f"invalid integer: {value!r}") from exc
+    if parsed < minimum:
+        raise argparse.ArgumentTypeError(below)
+    if parsed > _SQLITE_INT_MAX:
+        raise argparse.ArgumentTypeError(f"must be at most {_SQLITE_INT_MAX}")
     return parsed
+
+
+def non_negative_int(value: str) -> int:
+    """Parse an argparse integer that cannot be negative."""
+    return _bounded_int(value, minimum=0, below="must be non-negative")
+
+
+def positive_int(value: str) -> int:
+    """Parse an argparse integer that must be at least 1."""
+    return _bounded_int(value, minimum=1, below="must be at least 1")
+
+
+def row_id(value: str) -> int:
+    """Parse a row id argument; ids are positive and fit in SQLite's INTEGER."""
+    return _bounded_int(value, minimum=1, below="ids are positive integers")
+
+
+def handle_arg(value: str) -> str:
+    """Accept a person handle as typed, including the ``@handle`` form shown in output."""
+    value = value.strip()
+    return value[1:] if value.startswith("@") else value
+
+
+def handle_list_arg(value: str) -> list[str]:
+    """Split a comma-separated ``--person`` value like ``--tag`` does."""
+    return [handle_arg(part) for part in value.split(",") if part.strip()]
+
+
+def covered_entry_id(value: str) -> int:
+    """Parse one ``--entry`` value, explaining the usual ordering mistake.
+
+    ``--entry`` takes every following word, so a body written after it is
+    read as an id; say how to fix that instead of a bare "invalid int".
+    """
+    try:
+        return row_id(value)
+    except argparse.ArgumentTypeError as exc:
+        if value.lstrip("-").isdigit():
+            raise
+        raise argparse.ArgumentTypeError(
+            f"invalid entry id {value!r} (put the body before --entry, or after '--')"
+        ) from exc
 
 
 @contextmanager
@@ -322,14 +505,22 @@ def open_db(
                 "Open its folder in Finder or run 'brctl download', then retry. "
                 "Do NOT run 'commscoach init' — it would create an empty database here."
             )
-        raise db.DBError("run 'commscoach init' first")
+        raise db.InitRequiredError(_init_command(args))
     try:
         conn = db.connect(db_path)
     except sqlite3.Error as exc:
         raise db.DBError(f"cannot open database {db_path}: {exc}") from exc
     with closing(conn) as conn:
-        if allow_legacy_schema:
-            db.validate_backup_source(conn)
-        else:
-            db.validate_schema(conn)
+        try:
+            if allow_legacy_schema:
+                db.validate_backup_source(conn)
+            else:
+                db.validate_schema(conn)
+        except db.InitRequiredError as exc:
+            raise db.InitRequiredError(_init_command(args), reason=exc.reason) from exc
         yield conn
+
+
+def _init_command(args: argparse.Namespace) -> str:
+    """Return the ``init`` command for the database this invocation targets."""
+    return shlex.join([*command_prefix(args), "init"])

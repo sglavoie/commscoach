@@ -57,9 +57,7 @@ class EntryCrudTests(DBTestCase):
         self.assertEqual(db.list_entries(self.conn), ())
 
     def test_create_entry_normalizes_occurred_at(self) -> None:
-        entry = db.create_entry(
-            self.conn, "msg", occurred_at="2026-01-01T01:30:00+01:30"
-        )
+        entry = db.create_entry(self.conn, "msg", occurred_at="2026-01-01T01:30:00+01:30")
         self.assertEqual(entry.occurred_at, "2026-01-01T00:00:00+00:00")
 
     def test_create_entry_normalizes_and_dedups_tags(self) -> None:
@@ -142,9 +140,7 @@ class EntryCrudTests(DBTestCase):
             db.update_entry(self.conn, entry.id, body="  ")
 
     def test_update_entry_rejects_bad_occurred_at_without_changing_entry(self) -> None:
-        entry = db.create_entry(
-            self.conn, "msg", occurred_at="2026-01-01T00:00:00+00:00"
-        )
+        entry = db.create_entry(self.conn, "msg", occurred_at="2026-01-01T00:00:00+00:00")
         with self.assertRaises(db.DBError):
             db.update_entry(self.conn, entry.id, occurred_at="not-a-time")
         unchanged = db.get_entry(self.conn, entry.id)
@@ -152,9 +148,7 @@ class EntryCrudTests(DBTestCase):
         self.assertEqual(unchanged.occurred_at, "2026-01-01T00:00:00+00:00")
 
     def test_update_entry_does_not_touch_unspecified_fields(self) -> None:
-        entry = db.create_entry(
-            self.conn, "msg", source="cli", occurred_at="2026-01-01T00:00:00Z"
-        )
+        entry = db.create_entry(self.conn, "msg", source="cli", occurred_at="2026-01-01T00:00:00Z")
         updated = db.update_entry(self.conn, entry.id, body="new")
         self.assertEqual(updated.body, "new")
         self.assertEqual(updated.source, "cli")
@@ -198,9 +192,7 @@ class EntryCrudTests(DBTestCase):
 
     def test_list_entries_delegates_filters_to_search(self) -> None:
         sentinel: tuple[Entry, ...] = ()
-        with mock.patch.object(
-            entries_mod, "search_entries", return_value=sentinel
-        ) as search:
+        with mock.patch.object(entries_mod, "search_entries", return_value=sentinel) as search:
             result = entries_mod.list_entries(
                 self.conn,
                 since="2026-06-01",
@@ -213,6 +205,7 @@ class EntryCrudTests(DBTestCase):
             since="2026-06-01",
             until="2026-06-02",
             limit=4,
+            oldest_first=False,
         )
 
     def test_delete_entry_cascades_links_and_feedback(self) -> None:
@@ -221,9 +214,7 @@ class EntryCrudTests(DBTestCase):
         self.assertTrue(db.delete_entry(self.conn, entry.id))
         self.assertIsNone(db.get_entry(self.conn, entry.id))
         self.assertEqual(db.list_feedback(self.conn, entry.id), ())
-        (ep_count,) = self.conn.execute(
-            "SELECT COUNT(*) FROM entry_people"
-        ).fetchone()
+        (ep_count,) = self.conn.execute("SELECT COUNT(*) FROM entry_people").fetchone()
         self.assertEqual(ep_count, 0)
 
     def test_delete_entry_garbage_collects_orphan_tags(self) -> None:
@@ -232,26 +223,28 @@ class EntryCrudTests(DBTestCase):
         other = db.create_entry(self.conn, "other", tags=["shared"])
         db.update_entry(self.conn, entry.id, tags=["shared"])
 
-        (count_before_delete,) = self.conn.execute(
-            "SELECT COUNT(*) FROM tags"
-        ).fetchone()
+        (count_before_delete,) = self.conn.execute("SELECT COUNT(*) FROM tags").fetchone()
         self.assertEqual(count_before_delete, 1)  # work and focus already GC'd
 
         db.delete_entry(self.conn, other.id)
         # entry still references "shared", so it stays
-        (count_after_other_delete,) = self.conn.execute(
-            "SELECT COUNT(*) FROM tags"
-        ).fetchone()
+        (count_after_other_delete,) = self.conn.execute("SELECT COUNT(*) FROM tags").fetchone()
         self.assertEqual(count_after_other_delete, 1)
 
         db.delete_entry(self.conn, entry.id)
-        (count_after_all,) = self.conn.execute(
-            "SELECT COUNT(*) FROM tags"
-        ).fetchone()
+        (count_after_all,) = self.conn.execute("SELECT COUNT(*) FROM tags").fetchone()
         self.assertEqual(count_after_all, 0)
 
     def test_delete_entry_missing_returns_false(self) -> None:
         self.assertFalse(db.delete_entry(self.conn, 9999))
+
+    def test_source_filter_matches_non_ascii_case(self) -> None:
+        upper = db.create_entry(self.conn, "a", source="ÉQUIPE")
+        lower = db.create_entry(self.conn, "b", source="équipe")
+        db.create_entry(self.conn, "c", source="equipe")
+        found = db.search_entries(self.conn, source="Équipe", oldest_first=True)
+        self.assertEqual([e.id for e in found], [upper.id, lower.id])
+        self.assertEqual(db.count_search_entries(self.conn, source="ÉQUIPE"), 2)
 
     def test_search_entries_by_body_substring_case_insensitive(self) -> None:
         db.create_entry(self.conn, "Hello world")
@@ -274,12 +267,7 @@ class EntryCrudTests(DBTestCase):
         match = db.create_entry(self.conn, "Quarterly planning")
 
         self.assertEqual(
-            [
-                entry.id
-                for entry in db.search_entries(
-                    self.conn, query="arter", mode="like"
-                )
-            ],
+            [entry.id for entry in db.search_entries(self.conn, query="arter", mode="like")],
             [match.id],
         )
         self.assertEqual(
@@ -298,12 +286,7 @@ class EntryCrudTests(DBTestCase):
     def test_search_entries_fts_triggers_follow_edit_and_delete(self) -> None:
         entry = db.create_entry(self.conn, "Original searchable token")
         self.assertEqual(
-            [
-                item.id
-                for item in db.search_entries(
-                    self.conn, query="original", mode="fts"
-                )
-            ],
+            [item.id for item in db.search_entries(self.conn, query="original", mode="fts")],
             [entry.id],
         )
 
@@ -313,12 +296,7 @@ class EntryCrudTests(DBTestCase):
             (),
         )
         self.assertEqual(
-            [
-                item.id
-                for item in db.search_entries(
-                    self.conn, query="replacement", mode="fts"
-                )
-            ],
+            [item.id for item in db.search_entries(self.conn, query="replacement", mode="fts")],
             [entry.id],
         )
 
@@ -329,9 +307,7 @@ class EntryCrudTests(DBTestCase):
         )
 
     def test_search_entries_probe_negative_uses_like(self) -> None:
-        self.conn.execute(
-            "INSERT OR REPLACE INTO _meta (key, value) VALUES ('fts5', '0')"
-        )
+        self.conn.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('fts5', '0')")
         match = db.create_entry(self.conn, "Quarterly planning")
 
         results = db.search_entries(self.conn, query="arter")
@@ -358,9 +334,7 @@ class EntryCrudTests(DBTestCase):
         db.create_entry(self.conn, "alpha", tags=["x"], people=["alice"])
         db.create_entry(self.conn, "alpha", tags=["x"], people=["bob"])
         db.create_entry(self.conn, "alpha", tags=["y"], people=["alice"])
-        results = db.search_entries(
-            self.conn, query="alpha", tag="x", person_handle="alice"
-        )
+        results = db.search_entries(self.conn, query="alpha", tag="x", person_handle="alice")
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].people[0].handle, "alice")
         self.assertEqual(results[0].tags, ("x",))
@@ -417,18 +391,10 @@ class EntryCrudTests(DBTestCase):
             "2026-06-10T12:00:02+00:00",
             "2026-06-09T23:59:59+00:00",
         ):
-            match = db.create_entry(
-                self.conn, "match", tags=["work"], people=["alice"]
-            )
-            db.create_entry(
-                self.conn, "wrong tag", tags=["other"], people=["alice"]
-            )
-            db.create_entry(
-                self.conn, "wrong person", tags=["work"], people=["bob"]
-            )
-            db.create_entry(
-                self.conn, "wrong date", tags=["work"], people=["alice"]
-            )
+            match = db.create_entry(self.conn, "match", tags=["work"], people=["alice"])
+            db.create_entry(self.conn, "wrong tag", tags=["other"], people=["alice"])
+            db.create_entry(self.conn, "wrong person", tags=["work"], people=["bob"])
+            db.create_entry(self.conn, "wrong date", tags=["work"], people=["alice"])
 
         results = db.search_entries(
             self.conn,

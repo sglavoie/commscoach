@@ -85,6 +85,17 @@ class PeopleCrudTests(DBTestCase):
         result = db.list_people(self.conn)
         self.assertEqual([p.handle for p in result], ["me", "alice", "Bob", "charlie"])
 
+    def test_accented_handles_and_tags_sort_with_their_base_letters(self) -> None:
+        for handle in ("zoe", "Émile", "adam", "élodie", "Bob"):
+            db.create_person(self.conn, handle)
+        expected = ["adam", "Bob", "élodie", "Émile", "zoe"]
+        self.assertEqual([p.handle for p in db.list_people(self.conn)], expected)
+        entry = db.create_entry(
+            self.conn, "msg", people=["zoe", "Émile", "adam"], tags=["zèbre", "école", "ami"]
+        )
+        self.assertEqual([p.handle for p in entry.people], ["adam", "Émile", "zoe"])
+        self.assertEqual(entry.tags, ("ami", "école", "zèbre"))
+
     def test_delete_person_returns_true_and_cascades_entry_people(self) -> None:
         alice = db.create_person(self.conn, "alice")
         entry = db.create_entry(self.conn, "msg", people=["alice"])
@@ -116,6 +127,14 @@ class PeopleCrudTests(DBTestCase):
         people_with_self = [p for p in db.list_people(self.conn) if p.is_self]
         self.assertEqual(len(people_with_self), 1)
         self.assertEqual(people_with_self[0].id, second.id)
+
+    def test_set_self_on_current_self_is_a_no_op(self) -> None:
+        with patch_timestamps("t0", "t0"):
+            me = db.create_person(self.conn, "me", is_self=True)
+        with patch_timestamps("t1"):
+            again = db.set_self(self.conn, me.id)
+        self.assertEqual(again, me)
+        self.assertEqual(db.get_person(self.conn, me.id).updated_at, "t0")
 
     def test_set_self_when_no_existing_self(self) -> None:
         person = db.create_person(self.conn, "me")

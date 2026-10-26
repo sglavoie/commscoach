@@ -6,7 +6,7 @@ import io
 import json
 import unittest
 from contextlib import closing, redirect_stderr
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from commscoach import cli, db
 from commscoach.cli.common import format_stamp
@@ -16,7 +16,12 @@ from .cli_entry_case import EntryTestBase
 
 class EntryListTests(EntryTestBase):
     def test_literal_search_shows_late_heading_match_and_preserves_json(self):
-        body = "Opening paragraph.\n" + "Background. " * 40 + "\n## A 10%_ improvement\n" + "Afterwards. " * 30
+        body = (
+            "Opening paragraph.\n"
+            + "Background. " * 40
+            + "\n## A 10%_ improvement\n"
+            + "Afterwards. " * 30
+        )
         entry = self._seed_entry(body, source="email", tags=("work",))
         for flags in (("--exact",), ()):
             with self.subTest(flags=flags):
@@ -32,15 +37,24 @@ class EntryListTests(EntryTestBase):
         self.assertEqual(json.loads(out)[0]["body"], body)
         rc, shown, err = self._run("entry", "show", str(entry.id), "--json")
         self.assertEqual(rc, 0, err)
-        self.assertEqual(json.loads(out), [json.loads(shown)])
+        # Rows add the coaching status that list and search text output shows.
+        self.assertEqual(json.loads(out), [{**json.loads(shown), "has_feedback": False}])
 
     def test_token_search_excerpts_follow_fts_matching(self):
         with closing(db.connect(self.db_path)) as conn:
             if conn.execute("SELECT value FROM _meta WHERE key = 'fts5'").fetchone()[0] != "1":
                 self.skipTest("FTS5 unavailable")
-        self._seed_entry("Opening words. " * 60 + "\n## Café listening carefully\n" + "Afterwards. " * 60)
-        for query in ('"listening carefully"', "listen*", "cafe", "absent OR listening",
-                      "listening NOT absent", "NEAR(cafe carefully)"):
+        self._seed_entry(
+            "Opening words. " * 60 + "\n## Café listening carefully\n" + "Afterwards. " * 60
+        )
+        for query in (
+            '"listening carefully"',
+            "listen*",
+            "cafe",
+            "absent OR listening",
+            "listening NOT absent",
+            "NEAR(cafe carefully)",
+        ):
             with self.subTest(query=query):
                 rc, out, err = self._run("entry", "search", "--query", query)
                 self.assertEqual(rc, 0, err)
@@ -63,8 +77,11 @@ class EntryListTests(EntryTestBase):
             self.assertNotIn("late target passage", out)
 
     def test_list_and_search_show_date_source_and_live_feedback_status(self):
-        entry = self._seed_entry("## Situation\nA useful conversation", source="in-person",
-                                 occurred_at="2026-06-01T18:30:00+00:00")
+        entry = self._seed_entry(
+            "## Situation\nA useful conversation",
+            source="in-person",
+            occurred_at="2026-06-01T18:30:00+00:00",
+        )
         fallback = self._seed_entry("No occurrence time")
         with closing(db.connect(self.db_path)) as conn:
             feedback = db.create_feedback(conn, entry.id, "Useful coaching")
@@ -78,12 +95,34 @@ class EntryListTests(EntryTestBase):
             line = next(row for row in rows if row.startswith(f"[{fallback.id}]"))
             self.assertIn(format_stamp(fallback.created_at), line)
             self.assertIn("needs feedback", line)
+            rc, out, err = self._run("entry", command, "--json")
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(
+                {row["id"]: row["has_feedback"] for row in json.loads(out)},
+                {entry.id: True, fallback.id: False},
+            )
         with closing(db.connect(self.db_path)) as conn:
             db.delete_feedback(conn, feedback.id)
         rc, out, err = self._run("entry", "search", "--query", "useful")
         self.assertEqual(rc, 0, err)
         self.assertIn("needs feedback", out)
         self.assertNotIn("has feedback", out)
+
+    def test_rows_prefix_every_tag_and_person(self) -> None:
+        self._create_person("alice")
+        self._create_person("bob")
+        self._seed_entry("body", tags=("ops", "work"), people=("alice", "bob"))
+        rc, out, _ = self._run("entry", "list")
+        self.assertEqual(rc, 0)
+        self.assertIn("· #ops, #work · @alice, @bob", out)
+
+    def test_search_defaults_to_twenty_results_like_other_searches(self) -> None:
+        for index in range(21):
+            self._seed_entry(f"body {index}")
+        rc, out, err = self._run("entry", "search", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(len(json.loads(out)), 20)
+        self.assertIn("Showing 20 of 21 matching entries.", err)
 
     def test_list_empty(self) -> None:
         rc, out, _ = self._run("entry", "list")
@@ -105,11 +144,14 @@ class EntryListTests(EntryTestBase):
     def test_list_limit(self) -> None:
         for i in range(5):
             self._seed_entry(f"entry {i}")
-        rc, out, _ = self._run("entry", "list", "--limit", "2")
+        rc, out, err = self._run("entry", "list", "--limit", "2")
         self.assertEqual(rc, 0)
-        # Two entries → two non-empty lines.
+        # Two entries on stdout; the omitted-entries footer goes to stderr.
         non_empty = [line for line in out.splitlines() if line.strip()]
         self.assertEqual(len(non_empty), 2)
+        self.assertEqual(err.strip(), "Showing 2 of 5 entries.")
+        rc, out, err = self._run("entry", "list", "--limit", "5")
+        self.assertNotIn("Showing", out + err)
 
     def test_list_negative_limit_exits_two(self) -> None:
         with redirect_stderr(io.StringIO()):
@@ -141,15 +183,11 @@ class EntryListTests(EntryTestBase):
         self.assertEqual(payload[0]["tags"], ["hello"])
 
     def test_list_filters_by_inclusive_date_bounds(self) -> None:
-        included = self._seed_entry(
-            "included", occurred_at="2026-06-02T23:59:59"
-        )
+        included = self._seed_entry("included", occurred_at="2026-06-02T23:59:59")
         self._seed_entry("too early", occurred_at="2026-05-31T23:59:59")
         self._seed_entry("too late", occurred_at="2026-06-03T00:00:00")
 
-        rc, out, _ = self._run(
-            "entry", "list", "--since", "2026-06-01", "--until", "2026-06-02"
-        )
+        rc, out, _ = self._run("entry", "list", "--since", "2026-06-01", "--until", "2026-06-02")
 
         self.assertEqual(rc, 0)
         self.assertIn(f"[{included.id}]", out)
@@ -162,9 +200,7 @@ class EntryListTests(EntryTestBase):
         self.assertIn("--since", err)
 
     def test_list_rejects_reversed_date_range(self) -> None:
-        rc, _, err = self._run(
-            "entry", "list", "--since", "2026-06-03", "--until", "2026-06-02"
-        )
+        rc, _, err = self._run("entry", "list", "--since", "2026-06-03", "--until", "2026-06-02")
         self.assertEqual(rc, 1)
         self.assertIn("--since must not be after --until", err)
 
@@ -176,9 +212,7 @@ class EntryListTests(EntryTestBase):
 
 class EntrySearchTests(EntryTestBase):
     def test_search_rejects_reversed_date_range(self) -> None:
-        rc, _, err = self._run(
-            "entry", "search", "--since", "2026-06-03", "--until", "2026-06-02"
-        )
+        rc, _, err = self._run("entry", "search", "--since", "2026-06-03", "--until", "2026-06-02")
         self.assertEqual(rc, 1)
         self.assertIn("--since must not be after --until", err)
 
@@ -193,9 +227,7 @@ class EntrySearchTests(EntryTestBase):
     def test_search_exact_finds_midword_substring(self) -> None:
         match = self._seed_entry("Quarterly review meeting")
 
-        rc, out, _ = self._run(
-            "entry", "search", "--query", "arter", "--exact"
-        )
+        rc, out, _ = self._run("entry", "search", "--query", "arter", "--exact")
 
         self.assertEqual(rc, 0)
         self.assertIn(f"[{match.id}]", out)
@@ -219,9 +251,7 @@ class EntrySearchTests(EntryTestBase):
 
     def test_search_combined_filters(self) -> None:
         self._create_person("alice")
-        match = self._seed_entry(
-            "kickoff sync", tags=("kickoff",), people=("alice",)
-        )
+        match = self._seed_entry("kickoff sync", tags=("kickoff",), people=("alice",))
         self._seed_entry("kickoff solo", tags=("kickoff",))
         rc, out, _ = self._run(
             "entry",
@@ -255,9 +285,7 @@ class EntrySearchTests(EntryTestBase):
     def test_search_limit_caps_results(self) -> None:
         for _ in range(4):
             self._seed_entry("hit")
-        rc, out, _ = self._run(
-            "--json", "entry", "search", "--query", "hit", "--limit", "2"
-        )
+        rc, out, _ = self._run("--json", "entry", "search", "--query", "hit", "--limit", "2")
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual(len(payload), 2)
@@ -326,7 +354,7 @@ class EntrySearchTests(EntryTestBase):
         yesterday = datetime.now().astimezone() - timedelta(days=1)
         match = self._seed_entry(
             "yesterday entry",
-            occurred_at=yesterday.astimezone(timezone.utc).isoformat(),
+            occurred_at=yesterday.astimezone(UTC).isoformat(),
         )
 
         rc, out, _ = self._run("entry", "search", "--since", "yesterday")

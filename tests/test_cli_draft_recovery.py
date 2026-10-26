@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import sqlite3
 import stat
 from contextlib import closing
@@ -23,10 +24,13 @@ class DraftRecoveryTests(EntryTestBase):
         self.enterContext(mock.patch("sys.stdin.isatty", return_value=True))
         # Keep even deliberately retained drafts inside the test directory.
         mkstemp = editor.tempfile.mkstemp
-        self.enterContext(mock.patch.object(
-            editor.tempfile, "mkstemp",
-            side_effect=lambda **kw: mkstemp(dir=self.tmpdir, **kw),
-        ))
+        self.enterContext(
+            mock.patch.object(
+                editor.tempfile,
+                "mkstemp",
+                side_effect=lambda **kw: mkstemp(dir=self.tmpdir, **kw),
+            )
+        )
 
     def _write_draft(self, command: list[str]) -> int:
         self.draft_path = Path(command[-1])
@@ -42,7 +46,8 @@ class DraftRecoveryTests(EntryTestBase):
     def test_editor_error_and_interrupt_preserve_nonempty_private_draft(self) -> None:
         for failure in (7, KeyboardInterrupt()):
             with self.subTest(failure=failure):
-                def run(command):
+
+                def run(command, failure=failure):
                     self._write_draft(command)
                     self.draft_path.chmod(0o644)
                     if isinstance(failure, BaseException):
@@ -51,7 +56,7 @@ class DraftRecoveryTests(EntryTestBase):
 
                 with mock.patch.object(editor.subprocess, "call", side_effect=run):
                     rc, out, err = self._run("entry", "add", "--json")
-                self.assertEqual(rc, 1)
+                self.assertEqual(rc, 130 if isinstance(failure, KeyboardInterrupt) else 1)
                 self.assertEqual(out, "")
                 self._assert_recovered(err)
                 self.assertNotIn("My unsaved text", err)
@@ -76,9 +81,15 @@ class DraftRecoveryTests(EntryTestBase):
             (("goal", "close", str(goal.id), "--outcome"), "close_goal"),
         )
         for args, mutator in cases:
-            with self.subTest(command=args), mock.patch.object(
-                editor.subprocess, "call", side_effect=self._write_draft,
-            ), mock.patch.object(db, mutator, side_effect=db.DBError("save failed")):
+            with (
+                self.subTest(command=args),
+                mock.patch.object(
+                    editor.subprocess,
+                    "call",
+                    side_effect=self._write_draft,
+                ),
+                mock.patch.object(db, mutator, side_effect=db.DBError("save failed")),
+            ):
                 rc, out, err = self._run(*args)
                 self.assertEqual(rc, 1)
                 self.assertEqual(out, "")
@@ -106,7 +117,7 @@ class DraftRecoveryTests(EntryTestBase):
                 with mock.patch.object(editor.subprocess, "call", side_effect=empty_draft):
                     rc, _, err = self._run("goal", command, str(goal.id), f"--{field}")
                 self.assertEqual(rc, 1)
-                self.assertIn("empty body", err)
+                self.assertIn(f"editor produced empty {field}", err)
                 self.assertFalse(self.draft_path.exists())
                 with closing(db.connect(self.db_path)) as conn:
                     self.assertEqual(db.get_goal(conn, goal.id), before)
@@ -128,7 +139,7 @@ class DraftRecoveryTests(EntryTestBase):
         with mock.patch.object(editor.subprocess, "call", side_effect=empty_draft):
             rc, _, err = self._run("goal", "add", "Empty", "--detail")
         self.assertEqual(rc, 1)
-        self.assertIn("empty body", err)
+        self.assertIn("editor produced empty detail", err)
         self.assertFalse(self.draft_path.exists())
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.list_goals(conn), before)
@@ -148,7 +159,7 @@ class DraftRecoveryTests(EntryTestBase):
         with mock.patch.object(editor.subprocess, "call", side_effect=empty_draft):
             rc, _, err = self._run("person", "edit", "alice", "--notes", "--name", "Changed")
         self.assertEqual(rc, 1)
-        self.assertIn("empty body", err)
+        self.assertIn("editor produced empty notes", err)
         self.assertFalse(self.draft_path.exists())
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.get_person_note(conn, person.id).body, "My unsaved text")
@@ -162,8 +173,10 @@ class DraftRecoveryTests(EntryTestBase):
             self.assertTrue(self.draft_path.exists())
             return create_entry(*args, **kwargs)
 
-        with mock.patch.object(editor.subprocess, "call", side_effect=self._write_draft), \
-                mock.patch.object(db, "create_entry", side_effect=save):
+        with (
+            mock.patch.object(editor.subprocess, "call", side_effect=self._write_draft),
+            mock.patch.object(db, "create_entry", side_effect=save),
+        ):
             rc, _, err = self._run("entry", "add")
         self.assertEqual(rc, 0, err)
         self.assertEqual(err, "")
@@ -184,6 +197,48 @@ class DraftRecoveryTests(EntryTestBase):
         assert self.draft_path is not None
         self.assertFalse(self.draft_path.exists())
 
+    def test_cancelled_edit_of_unchanged_text_leaves_no_draft(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            entry = db.create_entry(conn, "Private original text")
+
+        def run(command):
+            self.draft_path = Path(command[-1])
+            return 1  # e.g. vim's :cq without touching the buffer
+
+        with mock.patch.object(editor.subprocess, "call", side_effect=run):
+            rc, _, err = self._run("entry", "edit", str(entry.id), "--body")
+        self.assertEqual(rc, 1)
+        self.assertNotIn("Draft saved", err)
+        assert self.draft_path is not None
+        self.assertFalse(self.draft_path.exists())
+
+    def test_sigterm_during_editor_keeps_new_text_and_removes_untouched_drafts(
+        self,
+    ) -> None:
+        before = signal.getsignal(signal.SIGTERM)
+        for wrote_text in (True, False):
+            with self.subTest(wrote_text=wrote_text):
+
+                def run(command, wrote_text=wrote_text):
+                    if wrote_text:
+                        self._write_draft(command)
+                    else:
+                        self.draft_path = Path(command[-1])
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    return 0
+
+                with mock.patch.object(editor.subprocess, "call", side_effect=run):
+                    rc, _, err = self._run("entry", "add")
+                self.assertEqual(rc, 128 + signal.SIGTERM)
+                self.assertIn("terminated", err)
+                assert self.draft_path is not None
+                if wrote_text:
+                    self._assert_recovered(err)
+                else:
+                    self.assertFalse(self.draft_path.exists())
+        # The previous handler is restored once the command finishes.
+        self.assertIs(signal.getsignal(signal.SIGTERM), before)
+
     def test_invalid_utf8_draft_is_retained(self) -> None:
         def run(command):
             self.draft_path = Path(command[-1])
@@ -197,9 +252,12 @@ class DraftRecoveryTests(EntryTestBase):
         self.assertEqual(self.draft_path.read_bytes(), b"unfinished \xff text")
 
     def test_unexpected_database_error_also_keeps_draft(self) -> None:
-        with mock.patch.object(editor.subprocess, "call", side_effect=self._write_draft), \
-                mock.patch.object(db, "create_entry", side_effect=sqlite3.OperationalError("locked")):
-            with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
-                self._run("entry", "add")
+        with (
+            mock.patch.object(editor.subprocess, "call", side_effect=self._write_draft),
+            mock.patch.object(db, "create_entry", side_effect=sqlite3.OperationalError("locked")),
+        ):
+            rc, _, err = self._run("entry", "add")
+        self.assertEqual(rc, 1)
+        self.assertIn("database error: locked", err)
         assert self.draft_path is not None
         self.assertIn("My unsaved text", self.draft_path.read_text(encoding="utf-8"))

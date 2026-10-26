@@ -21,9 +21,14 @@ class PersonEditTests(PeopleTestBase):
                 with closing(db.connect(self.db_path)) as conn:
                     if existing is not None:
                         db.set_person_note(conn, person.id, existing)
-                with mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
-                    cli_people, "compose_in_editor", return_value="Revised notes",
-                ) as compose:
+                with (
+                    mock.patch("sys.stdin.isatty", return_value=True),
+                    mock.patch.object(
+                        cli_people,
+                        "compose_in_editor",
+                        return_value="Revised notes",
+                    ) as compose,
+                ):
                     rc, _, err = self._run("person", "edit", "alice", "--notes")
                 self.assertEqual(rc, 0, err)
                 self.assertEqual(compose.call_args.kwargs["template"], existing or "")
@@ -32,9 +37,13 @@ class PersonEditTests(PeopleTestBase):
 
     def test_notes_editor_checks_person_and_terminal_before_opening(self) -> None:
         self._seed_person("alice")
-        with mock.patch("sys.stdin.isatty", return_value=False), mock.patch.object(
-            cli_people, "compose_in_editor",
-        ) as compose:
+        with (
+            mock.patch("sys.stdin.isatty", return_value=False),
+            mock.patch.object(
+                cli_people,
+                "compose_in_editor",
+            ) as compose,
+        ):
             rc, _, err = self._run("person", "edit", "ghost", "--notes")
             self.assertEqual(rc, 1)
             self.assertIn("ghost", err)
@@ -45,9 +54,7 @@ class PersonEditTests(PeopleTestBase):
 
     def test_edit_handle(self) -> None:
         person = self._seed_person("alice")
-        rc, out, _ = self._run(
-            "person", "edit", "alice", "--handle", "alicia"
-        )
+        rc, out, _ = self._run("person", "edit", "alice", "--handle", "alicia")
         self.assertEqual(rc, 0)
         self.assertIn("updated", out)
         self.assertIn("@alicia", out)
@@ -59,9 +66,7 @@ class PersonEditTests(PeopleTestBase):
 
     def test_edit_name(self) -> None:
         person = self._seed_person("alice")
-        rc, _, _ = self._run(
-            "person", "edit", "alice", "--name", "Alice Smith"
-        )
+        rc, _, _ = self._run("person", "edit", "alice", "--name", "Alice Smith")
         self.assertEqual(rc, 0)
         with closing(db.connect(self.db_path)) as conn:
             updated = db.get_person(conn, person.id)
@@ -70,28 +75,33 @@ class PersonEditTests(PeopleTestBase):
 
     def test_edit_name_empty_string_clears(self) -> None:
         person = self._seed_person("alice", name="Alice")
-        rc, _, _ = self._run("person", "edit", "alice", "--name", "")
+        for blank in ("", "   "):
+            with self.subTest(blank=blank):
+                rc, _, _ = self._run("person", "edit", "alice", "--name", blank)
+                self.assertEqual(rc, 0)
+                with closing(db.connect(self.db_path)) as conn:
+                    updated = db.get_person(conn, person.id)
+                assert updated is not None
+                self.assertIsNone(updated.name)
+
+    def test_names_are_trimmed_on_add_and_edit(self) -> None:
+        rc, out, _ = self._run("--json", "person", "add", "bob", "--name", "  Bob  ")
+        self.assertEqual(json.loads(out)["name"], "Bob")
+        rc, out, _ = self._run("person", "edit", "bob", "--name", " Bob ")
         self.assertEqual(rc, 0)
-        with closing(db.connect(self.db_path)) as conn:
-            updated = db.get_person(conn, person.id)
-        assert updated is not None
-        self.assertIsNone(updated.name)
+        self.assertTrue(out.startswith("unchanged"), out)
 
     def test_edit_handle_collision_exits_one(self) -> None:
         self._seed_person("alice")
         self._seed_person("bob")
-        rc, _, err = self._run(
-            "person", "edit", "alice", "--handle", "BOB"
-        )
+        rc, _, err = self._run("person", "edit", "alice", "--handle", "BOB")
         self.assertEqual(rc, 1)
         self.assertIn("bob", err.lower())
         with closing(db.connect(self.db_path)) as conn:
             self.assertIsNotNone(db.get_person_by_handle(conn, "alice"))
 
     def test_edit_missing_person_exits_one(self) -> None:
-        rc, _, err = self._run(
-            "person", "edit", "ghost", "--name", "Ghosty"
-        )
+        rc, _, err = self._run("person", "edit", "ghost", "--name", "Ghosty")
         self.assertEqual(rc, 1)
         self.assertIn("ghost", err)
 
@@ -103,13 +113,17 @@ class PersonEditTests(PeopleTestBase):
 
     def test_edit_json_output(self) -> None:
         self._seed_person("alice")
-        rc, out, _ = self._run(
-            "--json", "person", "edit", "alice", "--name", "Alice"
-        )
+        rc, out, _ = self._run("--json", "person", "edit", "alice", "--name", "Alice")
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual(payload["handle"], "alice")
         self.assertEqual(payload["name"], "Alice")
+        self.assertIsNone(payload["notes"])
+
+        rc, out, _ = self._run("--json", "person", "edit", "alice", "--notes", "saved")
+        self.assertEqual(json.loads(out)["notes"], "saved")
+        rc, out, _ = self._run("--json", "person", "edit", "alice", "--clear-notes")
+        self.assertIsNone(json.loads(out)["notes"])
 
     def test_edit_notes_from_literal_stdin_and_file(self) -> None:
         person = self._seed_person("alice")
@@ -122,9 +136,7 @@ class PersonEditTests(PeopleTestBase):
         self.assertEqual(rc, 0)
         note_path = self.tmpdir / "note.txt"
         note_path.write_text("from file", encoding="utf-8")
-        rc, _, _ = self._run(
-            "person", "edit", "alice", "--notes", f"@{note_path}"
-        )
+        rc, _, _ = self._run("person", "edit", "alice", "--notes", f"@{note_path}")
         self.assertEqual(rc, 0)
 
         with closing(db.connect(self.db_path)) as conn:
@@ -190,8 +202,11 @@ class PersonRmTests(PeopleTestBase):
             entry = db.create_entry(conn, "Conversation", people=("alice", "bob"))
             feedback = db.create_feedback(conn, entry.id, "Advice")
             review = db.create_review(
-                conn, "Review", (entry.id,),
-                scope_kind="person", scope_person_handle="alice",
+                conn,
+                "Review",
+                (entry.id,),
+                scope_kind="person",
+                scope_person_handle="alice",
             )
             db.create_review(conn, "General review", (entry.id,))
             goal = db.create_goal(conn, "Practice", person_handle="alice")
@@ -202,8 +217,14 @@ class PersonRmTests(PeopleTestBase):
         self.assertEqual(rc, 1)
         self.assertIn("aborted", err)
         prompt = confirm.call_args.args[0]
-        for text in ("1 private note,", "1 entry link,", "2 goals", "1 person-scoped review.",
-                     "Entries, feedback, goals, and reviews remain", "keep the handle"):
+        for text in (
+            "1 private note,",
+            "1 entry link,",
+            "2 goals",
+            "1 person-scoped review.",
+            "Entries, feedback, goals, and reviews remain",
+            "keep the handle",
+        ):
             self.assertIn(text, prompt)
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.get_person(conn, person.id), person)
@@ -228,12 +249,17 @@ class PersonRmTests(PeopleTestBase):
         with mock.patch.object(cli_people, "confirm", return_value=False) as confirm:
             self._run("person", "rm", "me")
         prompt = confirm.call_args.args[0]
-        for text in ("0 private notes", "0 entry links", "0 goals", "0 person-scoped reviews",
-                     "removes your self profile"):
+        for text in (
+            "0 private notes",
+            "0 entry links",
+            "0 goals",
+            "0 person-scoped reviews",
+            "removes your self profile",
+        ):
             self.assertIn(text, prompt)
 
     def test_rm_with_yes_skips_prompt(self) -> None:
-        person = self._seed_person("alice")
+        self._seed_person("alice")
         rc, out, _ = self._run("--yes", "person", "rm", "alice")
         self.assertEqual(rc, 0)
         self.assertIn("@alice", out)
@@ -284,9 +310,7 @@ class PersonRmTests(PeopleTestBase):
 
     def test_rm_json_output(self) -> None:
         person = self._seed_person("alice")
-        rc, out, _ = self._run(
-            "--yes", "--json", "person", "rm", "alice"
-        )
+        rc, out, _ = self._run("--yes", "--json", "person", "rm", "alice")
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual(

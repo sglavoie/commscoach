@@ -126,8 +126,7 @@ def build_v3_database(db_path: Path) -> None:
         )
         for review_id, entry_id, position in ((1, 3, 0), (1, 2, 1), (1, 1, 2), (2, 1, 0)):
             conn.execute(
-                "INSERT INTO review_entries (review_id, entry_id, position)"
-                " VALUES (?, ?, ?)",
+                "INSERT INTO review_entries (review_id, entry_id, position) VALUES (?, ?, ?)",
                 (review_id, entry_id, position),
             )
         conn.execute(

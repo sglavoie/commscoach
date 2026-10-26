@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Iterable
+import unicodedata
+from collections.abc import Iterable
+from typing import Any
 
 from ..models import Person, PersonActivity
 from . import common
@@ -34,15 +36,15 @@ def get_people_activity(conn: sqlite3.Connection) -> dict[int, PersonActivity]:
     ).fetchall()
     return {
         row["id"]: PersonActivity(
-            row["last_logged_interaction"], row["interaction_count"], row["active_goal_count"],
+            row["last_logged_interaction"],
+            row["interaction_count"],
+            row["active_goal_count"],
         )
         for row in rows
     }
 
 
-def _wrap_people_integrity_error(
-    exc: sqlite3.IntegrityError, handle: str | None
-) -> None:
+def _wrap_people_integrity_error(exc: sqlite3.IntegrityError, handle: str | None) -> None:
     """Translate a people-table IntegrityError into a typed DBError. Always raises.
 
     SQLite reports the partial UNIQUE index on ``is_self`` as
@@ -57,6 +59,32 @@ def _wrap_people_integrity_error(
     raise exc
 
 
+def validate_handle(handle: Any) -> str:
+    """Return ``handle`` stripped, or raise ``DBError`` if it cannot be a handle.
+
+    Handles are shown as ``@handle`` and ``--person`` splits on commas, so a
+    leading ``@``, a comma, or whitespace would create a person that can never
+    be typed back exactly as it is displayed.
+    """
+    if not isinstance(handle, str) or not handle.strip():
+        raise DBError("handle must be a non-empty string")
+    # NFC, so a handle typed with a combining accent is stored like the one shown.
+    handle = unicodedata.normalize("NFC", handle.strip())
+    if handle.startswith("@"):
+        raise DBError(f"handle {handle!r} must not start with '@'")
+    if "," in handle or any(char.isspace() for char in handle):
+        raise DBError(f"handle {handle!r} must not contain commas or whitespace")
+    return handle
+
+
+def _normalize_name(name: str | None) -> str | None:
+    """Trim a display name; a blank one means no name, as ``--name ''`` clears it."""
+    if name is None:
+        return None
+    return name.strip() or None
+
+
+@common.writes
 def create_person(
     conn: sqlite3.Connection,
     handle: str,
@@ -69,11 +97,14 @@ def create_person(
     Raises ``DuplicateHandleError`` on case-insensitive handle collision and
     ``DuplicateSelfError`` if ``is_self=True`` while another self row exists.
     """
-    if not handle or not handle.strip():
-        raise DBError("handle must be a non-empty string")
+    handle = validate_handle(handle)
+    name = _normalize_name(name)
     now = common.utcnow_iso()
     try:
-        with conn:
+        with common.write_transaction(conn):
+            # The UNIQUE index folds ASCII only; this also catches "Émile" vs "émile".
+            if get_person_by_handle(conn, handle) is not None:
+                raise DuplicateHandleError(handle)
             cur = conn.execute(
                 "INSERT INTO people (handle, name, is_self, created_at, updated_at)"
                 " VALUES (?, ?, ?, ?, ?)",
@@ -86,6 +117,7 @@ def create_person(
     return person
 
 
+@common.writes
 def update_person(
     conn: sqlite3.Connection,
     person_id: int,
@@ -117,13 +149,17 @@ def update_person(
     fields: list[str] = []
     params: list[Any] = []
     if handle is not common.UNSET:
-        if not handle or not str(handle).strip():
-            raise DBError("handle must be a non-empty string")
-        fields.append("handle = ?")
-        params.append(handle)
+        handle = validate_handle(handle)
+        if handle == person.handle:
+            handle = common.UNSET
+        else:
+            fields.append("handle = ?")
+            params.append(handle)
     if name is not common.UNSET:
-        fields.append("name = ?")
-        params.append(name)
+        name = _normalize_name(name)
+        if name != person.name:
+            fields.append("name = ?")
+            params.append(name)
     if not fields:
         return person
 
@@ -131,21 +167,22 @@ def update_person(
     params.append(common.utcnow_iso())
     params.append(person_id)
     try:
-        with conn:
+        with common.write_transaction(conn):
+            if handle is not common.UNSET:
+                clash = get_person_by_handle(conn, handle)
+                if clash is not None and clash.id != person_id:
+                    raise DuplicateHandleError(handle)
             conn.execute(
                 f"UPDATE people SET {', '.join(fields)} WHERE id = ?",
                 params,
             )
             if handle is not common.UNSET:
                 conn.execute(
-                    "UPDATE reviews SET scope_person_handle = ?"
-                    " WHERE scope_person_id = ?",
+                    "UPDATE reviews SET scope_person_handle = ? WHERE scope_person_id = ?",
                     (handle, person_id),
                 )
     except sqlite3.IntegrityError as exc:
-        _wrap_people_integrity_error(
-            exc, handle if handle is not common.UNSET else None
-        )
+        _wrap_people_integrity_error(exc, handle if handle is not common.UNSET else None)
     updated = get_person(conn, person_id)
     assert updated is not None
     return updated
@@ -159,17 +196,58 @@ def get_person(conn: sqlite3.Connection, person_id: int) -> Person | None:
 
 
 def get_person_by_handle(conn: sqlite3.Connection, handle: str) -> Person | None:
+    # A blank handle (say, an unset $VAR) is a mistake, not "no such person".
+    if not handle.strip():
+        raise DBError("person handle must be a non-empty string")
     row = conn.execute(
-        "SELECT * FROM people WHERE LOWER(handle) = LOWER(?)",
-        (handle,),
+        # When legacy handles collide (see handle_collisions), the exact
+        # spelling wins, so each stays reachable to rename.
+        "SELECT * FROM people WHERE handle_key(handle) = handle_key(?)"
+        " ORDER BY handle = ? DESC, id",
+        (handle, unicodedata.normalize("NFC", handle.strip())),
     ).fetchone()
     if row is None:
         return None
     return row_to_person(row)
 
 
+def renormalize_handles(conn: sqlite3.Connection) -> None:
+    """Store every handle in NFC, as ``validate_handle`` now does.
+
+    A handle that would then collide with another person's identity is left
+    alone: people cannot be merged automatically, and ``doctor`` reports the
+    pair so one can be renamed. The caller owns the transaction.
+    """
+    rows = conn.execute("SELECT id, handle FROM people ORDER BY id").fetchall()
+    for row in rows:
+        normalized = unicodedata.normalize("NFC", row["handle"])
+        if normalized == row["handle"]:
+            continue
+        clash = conn.execute(
+            "SELECT 1 FROM people WHERE handle_key(handle) = handle_key(?) AND id != ?",
+            (normalized, row["id"]),
+        ).fetchone()
+        if clash is None:
+            conn.execute("UPDATE people SET handle = ? WHERE id = ?", (normalized, row["id"]))
+
+
+def handle_collisions(conn: sqlite3.Connection) -> list[list[str]]:
+    """Return groups of stored handles that share one identity under ``handle_key``.
+
+    Possible in databases written before handles were compared Unicode-aware
+    (the unique index only folds ASCII case); only the first of each group is
+    reachable by handle until the others are renamed.
+    """
+    groups: dict[str, list[str]] = {}
+    for row in conn.execute("SELECT handle FROM people ORDER BY id"):
+        groups.setdefault(common.handle_key(row["handle"]), []).append(row["handle"])
+    return [handles for handles in groups.values() if len(handles) > 1]
+
+
 def list_people(
-    conn: sqlite3.Connection, *, query: str | None = None,
+    conn: sqlite3.Connection,
+    *,
+    query: str | None = None,
 ) -> tuple[Person, ...]:
     """Return people self-first, optionally matching a literal name/handle substring."""
     sql = "SELECT * FROM people"
@@ -177,18 +255,21 @@ def list_people(
     if query is not None:
         if not query.strip():
             raise DBError("query must be a non-empty string")
-        literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
-        sql += " WHERE (handle LIKE ? ESCAPE '!' OR name LIKE ? ESCAPE '!')"
-        params = [f"%{literal}%"] * 2
+        sql += (
+            " WHERE (search_fold(handle) LIKE ? ESCAPE '!' OR search_fold(name) LIKE ? ESCAPE '!')"
+        )
+        params = [common.contains_pattern(query)] * 2
     rows = conn.execute(
-        sql + " ORDER BY is_self DESC, handle COLLATE NOCASE", params,
+        sql + " ORDER BY is_self DESC, search_fold(handle), handle_key(handle), handle",
+        params,
     ).fetchall()
     return tuple(row_to_person(row) for row in rows)
 
 
+@common.writes
 def delete_person(conn: sqlite3.Connection, person_id: int) -> bool:
     """Delete a person. Returns ``True`` if a row was deleted, ``False`` otherwise."""
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
     return cur.rowcount > 0
 
@@ -200,21 +281,24 @@ def get_self_person(conn: sqlite3.Connection) -> Person | None:
     return row_to_person(row)
 
 
+@common.writes
 def set_self(conn: sqlite3.Connection, person_id: int) -> Person:
     """Promote ``person_id`` to self, demoting any prior self atomically.
 
     The partial UNIQUE index on ``is_self = 1`` would reject a concurrent two-row
     self state, so the demote-then-promote sequence runs inside a single
-    ``with conn:`` transaction to keep the intermediate state private.
+    write transaction to keep the intermediate state private.
     """
     person = get_person(conn, person_id)
     if person is None:
         raise PersonNotFoundError(person_id)
+    if person.is_self:
+        # Already self: like every other no-op edit, keep updated_at.
+        return person
     now = common.utcnow_iso()
-    with conn:
+    with common.write_transaction(conn):
         conn.execute(
-            "UPDATE people SET is_self = 0, updated_at = ?"
-            " WHERE is_self = 1 AND id != ?",
+            "UPDATE people SET is_self = 0, updated_at = ? WHERE is_self = 1 AND id != ?",
             (now, person_id),
         )
         conn.execute(
@@ -226,9 +310,7 @@ def set_self(conn: sqlite3.Connection, person_id: int) -> Person:
     return updated
 
 
-def resolve_person_handles(
-    conn: sqlite3.Connection, handles: Iterable[str]
-) -> list[Person]:
+def resolve_person_handles(conn: sqlite3.Connection, handles: Iterable[str]) -> list[Person]:
     """Resolve handles to ``Person`` rows preserving input order and de-duping.
 
     Raises ``PersonNotFoundError`` on the first unknown handle so entry mutation

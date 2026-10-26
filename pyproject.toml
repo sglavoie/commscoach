@@ -28,4 +28,14 @@ pythonpath = ["src"]
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.16",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# The formatter wraps code; the remaining long lines are prose in strings.
+ignore = ["E501"]

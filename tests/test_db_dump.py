@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import copy
+import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest import mock
 
 from commscoach import db
+from commscoach.db import dump as dump_mod
 
 from .db_case import DBTestCase
-from .db_schema_case import NOW
+
+# The canonical UTC form the CLI writes; restore normalizes to it.
+STAMP = "2026-06-20T00:00:00+00:00"
 
 
 def seed_complete_store(conn: object) -> None:
@@ -78,6 +83,37 @@ class DumpRoundTripTests(DBTestCase):
 
         self.assertEqual(db.dump_to_dict(restored), original)
 
+    def test_unaddressable_handles_tags_and_string_ids_are_rejected(self) -> None:
+        cases = {
+            "blank handle": lambda d: d["people"][0].update(handle="  "),
+            "untrimmed handle": lambda d: d["people"][0].update(handle=" me"),
+            "uppercase tag": lambda d: d["tags"][0].update(name="UPPER"),
+            "untrimmed tag": lambda d: d["tags"][0].update(name="upper "),
+            "string id": lambda d: d["entries"][0].update(id="7"),
+            "string goal person": lambda d: d["goals"][0].update(person_id="1"),
+            "blank entry body": lambda d: d["entries"][0].update(body=" \n"),
+            "blank feedback body": lambda d: d["feedback"][0].update(body=""),
+            "blank review body": lambda d: d["reviews"][0].update(body="  "),
+            "null note body": lambda d: d["person_notes"][0].update(body=None),
+            "blank goal title": lambda d: d["goals"][0].update(title="\t"),
+        }
+        for label, mutate in cases.items():
+            with self.subTest(label):
+                payload = db.dump_to_dict(self.conn)
+                mutate(payload)
+                restored = self._fresh_connection()
+                with self.assertRaises(db.DumpFormatError):
+                    db.load_from_dict(restored, payload)
+
+    def test_handles_differing_only_by_non_ascii_case_are_rejected(self) -> None:
+        payload = db.dump_to_dict(self.conn)
+        payload["people"][0].update(handle="Émile")
+        payload["people"][1].update(handle="émile")
+        restored = self._fresh_connection()
+        with self.assertRaisesRegex(db.DumpFormatError, r"people\[1\]\.handle"):
+            db.load_from_dict(restored, payload)
+        self.assertEqual(db.dump_to_dict(restored)["people"], [])
+
     def test_review_entry_positions_survive(self) -> None:
         original = db.dump_to_dict(self.conn)
         restored = self._fresh_connection()
@@ -114,6 +150,23 @@ class DumpRoundTripTests(DBTestCase):
 
         self.assertEqual(db.dump_to_dict(self.conn), before)
 
+    def test_emptiness_is_checked_under_the_write_lock(self) -> None:
+        data = db.dump_to_dict(self.conn)
+        target = Path(self._tmp.name) / "target.sqlite3"
+        db.init_db(target)
+        with closing(db.connect(target)) as conn, closing(db.connect(target)) as rival:
+            rival.execute("PRAGMA busy_timeout = 0")
+            real = dump_mod._database_has_data
+
+            def check_then_race(checked_conn):
+                # Another writer must not slip in between the check and the restore.
+                with self.assertRaises(sqlite3.OperationalError):
+                    rival.execute("BEGIN IMMEDIATE")
+                return real(checked_conn)
+
+            with mock.patch.object(dump_mod, "_database_has_data", side_effect=check_then_race):
+                db.load_from_dict(conn, data)
+
     def test_newer_format_version_is_a_hard_error(self) -> None:
         payload = db.dump_to_dict(self.conn)
         payload["format_version"] = db.FORMAT_VERSION + 1
@@ -127,26 +180,26 @@ class DumpRoundTripTests(DBTestCase):
 
     def test_round_trip_preserves_every_review_scope_column(self) -> None:
         # The CRUD layer cannot write these yet, so drive the columns directly.
-        person_id = self.conn.execute(
-            "SELECT id FROM people WHERE handle = 'alex'"
-        ).fetchone()["id"]
+        person_id = self.conn.execute("SELECT id FROM people WHERE handle = 'alex'").fetchone()[
+            "id"
+        ]
         self.conn.execute(
             "INSERT INTO reviews (body, scope_kind, scope_limit,"
             " scope_person_id, scope_person_handle, created_at, updated_at)"
             " VALUES ('about alex', 'person', NULL, ?, 'alex', ?, ?)",
-            (person_id, NOW, NOW),
+            (person_id, STAMP, STAMP),
         )
         self.conn.execute(
             "INSERT INTO reviews (body, scope_kind, scope_tag,"
             " created_at, updated_at)"
             " VALUES ('conflict theme', 'tag', 'conflict', ?, ?)",
-            (NOW, NOW),
+            (STAMP, STAMP),
         )
         self.conn.execute(
             "INSERT INTO reviews (body, scope_kind, scope_since, scope_until,"
             " created_at, updated_at)"
             " VALUES ('june', 'range', '2026-06-01', '2026-06-30', ?, ?)",
-            (NOW, NOW),
+            (STAMP, STAMP),
         )
         self.conn.commit()
         original = db.dump_to_dict(self.conn)
@@ -155,14 +208,33 @@ class DumpRoundTripTests(DBTestCase):
         db.load_from_dict(restored, original)
 
         self.assertEqual(db.dump_to_dict(restored), original)
-        scoped = {
-            review["body"]: review
-            for review in db.dump_to_dict(restored)["reviews"]
-        }
+        scoped = {review["body"]: review for review in db.dump_to_dict(restored)["reviews"]}
         self.assertEqual(scoped["about alex"]["scope_person_handle"], "alex")
         self.assertEqual(scoped["conflict theme"]["scope_tag"], "conflict")
         self.assertEqual(scoped["june"]["scope_since"], "2026-06-01")
         self.assertEqual(scoped["june"]["scope_until"], "2026-06-30")
+
+    def test_review_scope_tags_are_normalized_or_rejected(self) -> None:
+        # A scope may name a tag deleted since, so no tags row carries it along.
+        self.conn.execute(
+            "INSERT INTO reviews (body, scope_kind, scope_tag, created_at, updated_at)"
+            " VALUES ('old theme', 'tag', '#Conflict', ?, ?)",
+            (STAMP, STAMP),
+        )
+        self.conn.commit()
+        payload = db.dump_to_dict(self.conn)
+        restored = self._fresh_connection()
+        db.load_from_dict(restored, payload)
+        (review,) = db.list_reviews(restored, scope_kind="tag", tag="conflict")
+        self.assertEqual(review.scope_tag, "conflict")
+
+        for value in ("#", "  ", 7):
+            payload["reviews"][-1]["scope_tag"] = value
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(db.DumpFormatError, r"reviews\[\d+\]\.scope_tag"),
+            ):
+                db.validate_dump(payload)
 
     def test_format_version_one_archive_restores_with_null_scope_columns(self) -> None:
         # Hand-built: exactly what a pre-v4 export produced, with no scope
@@ -287,9 +359,10 @@ class SequenceResetTests(unittest.TestCase):
             target_path = Path(tmp) / "target.sqlite3"
             db.init_db(source_path)
             db.init_db(target_path)
-            with closing(db.connect(source_path)) as source, closing(
-                db.connect(target_path)
-            ) as target:
+            with (
+                closing(db.connect(source_path)) as source,
+                closing(db.connect(target_path)) as target,
+            ):
                 first = db.create_entry(source, "source")
                 for index in range(5):
                     db.create_entry(target, f"old {index}")
@@ -300,6 +373,74 @@ class SequenceResetTests(unittest.TestCase):
                 created = db.create_entry(target, "new")
 
                 self.assertEqual(created.id, first.id + 1)
+
+    def test_ids_of_rows_deleted_before_the_dump_are_not_reused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source_path = Path(tmp) / "source.sqlite3"
+            target_path = Path(tmp) / "target.sqlite3"
+            db.init_db(source_path)
+            db.init_db(target_path)
+            with (
+                closing(db.connect(source_path)) as source,
+                closing(db.connect(target_path)) as target,
+            ):
+                db.create_entry(source, "kept")
+                deleted = db.create_entry(source, "deleted later")
+                source.execute("DELETE FROM entries WHERE id = ?", (deleted.id,))
+                source.commit()
+
+                db.load_from_dict(target, db.dump_to_dict(source))
+                created = db.create_entry(target, "new")
+
+                self.assertEqual(created.id, deleted.id + 1)
+
+
+class RestoreValidationTests(DBTestCase):
+    def _restore(self, payload: dict) -> object:
+        restored_path = Path(self._tmp.name) / "restored" / "commscoach.sqlite3"
+        db.init_db(restored_path)
+        restored = db.connect(restored_path)
+        self.addCleanup(restored.close)
+        db.load_from_dict(restored, payload)
+        return restored
+
+    def _payload_with_entry(self, **overrides: object) -> dict:
+        db.create_entry(self.conn, "body")
+        payload = db.dump_to_dict(self.conn)
+        payload["entries"][0].update(overrides)
+        return payload
+
+    def test_offset_timestamps_are_normalized_to_utc(self) -> None:
+        payload = self._payload_with_entry(occurred_at="2026-03-01T21:00:00-05:00")
+        restored = self._restore(payload)
+        (occurred_at,) = restored.execute("SELECT occurred_at FROM entries").fetchone()
+        self.assertEqual(occurred_at, "2026-03-02T02:00:00+00:00")
+
+    def test_unparseable_or_naive_timestamps_are_rejected(self) -> None:
+        for value in ("last tuesday", "2026-03-01T21:00:00", 42):
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(db.DumpFormatError, r"entries\[0\]\.occurred_at"),
+            ):
+                db.validate_dump(self._payload_with_entry(occurred_at=value))
+
+    def test_timestamps_unprintable_in_some_timezone_are_rejected(self) -> None:
+        for value in ("0001-01-01T00:00:00+00:00", "9999-12-31T12:00:00+00:00"):
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(db.DumpFormatError, r"occurred_at is out of range"),
+            ):
+                db.validate_dump(self._payload_with_entry(occurred_at=value))
+
+    def test_out_of_range_id_is_a_clean_error_and_rolls_back(self) -> None:
+        payload = self._payload_with_entry(id=2**70)
+        restored_path = Path(self._tmp.name) / "restored" / "commscoach.sqlite3"
+        db.init_db(restored_path)
+        with closing(db.connect(restored_path)) as restored:
+            with self.assertRaises(db.DumpFormatError):
+                db.load_from_dict(restored, payload)
+            self.assertFalse(restored.in_transaction)
+            self.assertEqual(db.dump_to_dict(restored)["entries"], [])
 
 
 if __name__ == "__main__":

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from commscoach import db
-
 from tests.db_case import DBTestCase
 
 T0 = "2026-08-25T10:00:00+00:00"

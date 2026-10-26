@@ -9,7 +9,18 @@ from pathlib import Path
 from typing import Any
 
 from .. import db
-from .common import open_db, print_json
+from .common import open_db, plural, print_json
+
+# Singular and plural labels for the per-table counts in the import summary.
+_TABLE_NOUNS = {
+    "people": ("person", "people"),
+    "entries": ("entry", "entries"),
+    "tags": ("tag", "tags"),
+    "feedback": ("feedback note", "feedback notes"),
+    "reviews": ("review", "reviews"),
+    "goals": ("goal", "goals"),
+    "person_notes": ("person note", "person notes"),
+}
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -43,6 +54,8 @@ def _read_dump(path_arg: str) -> Any:
         )
     except OSError as exc:
         raise db.DumpFormatError(f"cannot read import: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise db.DumpFormatError(f"cannot read import: not valid UTF-8 ({exc.reason})") from exc
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
@@ -57,14 +70,20 @@ def cmd_import(args: argparse.Namespace) -> int:
         db.load_from_dict(conn, payload, dry_run=args.dry_run)
 
     result = {
+        "counts": db.dump_row_counts(payload),
         "dry_run": bool(args.dry_run),
         "imported": not args.dry_run,
         "source": "stdin" if args.path == "-" else str(Path(args.path).expanduser()),
     }
     if args.json:
         print_json(result)
-    elif args.dry_run:
-        print("import validated; no data written")
     else:
-        print(f"imported from {result['source']}")
+        summary = ", ".join(
+            plural(count, *_TABLE_NOUNS.get(table, (table, table)))
+            for table, count in result["counts"].items()
+        )
+        if args.dry_run:
+            print(f"import validated ({summary}); no data written")
+        else:
+            print(f"imported {summary} from {result['source']}")
     return 0

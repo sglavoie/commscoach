@@ -23,9 +23,7 @@ class GoalTestBase(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def _run(
-        self, *args: str, stdin: io.StringIO | None = None
-    ) -> tuple[int, str, str]:
+    def _run(self, *args: str, stdin: io.StringIO | None = None) -> tuple[int, str, str]:
         out_buf, err_buf = io.StringIO(), io.StringIO()
         argv = ["--db", str(self.db_path), *args]
         with redirect_stdout(out_buf), redirect_stderr(err_buf):

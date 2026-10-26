@@ -4,17 +4,23 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .. import db
 from .common import (
+    UsageError,
     confirm,
+    contains_folded,
+    edit_verb,
+    format_stamp,
+    handle_arg,
     non_negative_int,
     open_db,
     print_json,
     read_body_arg,
     read_body_or_raise,
+    row_id,
     search_excerpt,
 )
 from .editor import compose_in_editor
@@ -47,8 +53,20 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Goal detail (text, '-', or '@PATH'); omit the value to open $EDITOR.",
     )
-    add.add_argument("--person", default=None, metavar="HANDLE")
-    add.add_argument("--review", type=int, default=None, metavar="ID")
+    add.add_argument(
+        "--person",
+        default=None,
+        type=handle_arg,
+        metavar="HANDLE",
+        help="Tie the goal to an existing person (default: a general goal).",
+    )
+    add.add_argument(
+        "--review",
+        type=row_id,
+        default=None,
+        metavar="ID",
+        help="Record the review this goal came from.",
+    )
     add.set_defaults(func=cmd_goal_add)
 
     lst = goal_sub.add_parser("list", help="List goals.")
@@ -56,48 +74,86 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--status",
         choices=("active", "done", "dropped", "all"),
         default="active",
+        help="Goal status to list (default: active).",
     )
-    lst.add_argument("--person", default=None, metavar="HANDLE")
     lst.add_argument(
-        "--limit", type=non_negative_int, default=None, metavar="N",
+        "--person",
+        default=None,
+        type=handle_arg,
+        metavar="HANDLE",
+        help="Only goals tied to this person.",
+    )
+    lst.add_argument(
+        "--limit",
+        type=non_negative_int,
+        default=None,
+        metavar="N",
         help="Maximum results; text output reports omitted matches.",
     )
     lst.add_argument(
-        "--oldest-first", action="store_true",
+        "--oldest-first",
+        action="store_true",
         help="Show oldest goals first before applying --limit (active first with --status all).",
     )
     lst.set_defaults(func=cmd_goal_list)
     lst.add_argument(
-        "--with-detail", action="store_true", help="Show full detail beneath each goal.",
+        "--with-detail",
+        action="store_true",
+        help="Show full detail beneath each goal.",
     )
 
     search = goal_sub.add_parser("search", help="Search goal titles, details, and outcomes.")
-    search.add_argument("--query", required=True, metavar="TEXT")
     search.add_argument(
-        "--status", choices=("active", "done", "dropped", "all"), default="all",
+        "--query",
+        required=True,
+        metavar="TEXT",
+        help="Literal substring (ignoring case and accents) to find in titles, details, and outcomes.",
+    )
+    search.add_argument(
+        "--status",
+        choices=("active", "done", "dropped", "all"),
+        default="all",
         help="Goal status (default: all, active goals first).",
     )
-    search.add_argument("--person", default=None, metavar="HANDLE")
     search.add_argument(
-        "--limit", type=non_negative_int, default=20, metavar="N",
+        "--person",
+        default=None,
+        type=handle_arg,
+        metavar="HANDLE",
+        help="Only goals tied to this person.",
+    )
+    search.add_argument(
+        "--limit",
+        type=non_negative_int,
+        default=20,
+        metavar="N",
         help="Maximum results (default: 20); text output reports omitted matches.",
     )
-    search.add_argument("--oldest-first", action="store_true")
-    search.add_argument("--with-detail", action="store_true")
+    search.add_argument(
+        "--oldest-first",
+        action="store_true",
+        help="Show oldest goals first before applying --limit.",
+    )
+    search.add_argument(
+        "--with-detail",
+        action="store_true",
+        help="Show full detail beneath each goal.",
+    )
     search.set_defaults(func=cmd_goal_list)
     for parser in (lst, search):
         parser.add_argument(
-            "--with-outcome", action="store_true",
+            "--with-outcome",
+            action="store_true",
             help="Show the full recorded outcome beneath each goal.",
         )
 
     show = goal_sub.add_parser("show", help="Show one goal by id.")
-    show.add_argument("goal_id", type=int, metavar="GOAL_ID")
+    show.add_argument("goal_id", type=row_id, metavar="GOAL_ID")
     show.set_defaults(func=cmd_goal_show)
 
     edit = goal_sub.add_parser("edit", help="Update an existing goal.")
-    edit.add_argument("goal_id", type=int, metavar="GOAL_ID")
-    edit.add_argument("--title", default=None)
+    edit.add_argument("goal_id", type=row_id, metavar="GOAL_ID")
+    edit.add_argument("--title", default=None, help="Replace the goal title.")
     edit.add_argument(
         "--detail",
         nargs="?",
@@ -105,19 +161,37 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Replace detail (text, '-', or '@PATH'); omit the value to open $EDITOR.",
     )
-    edit.add_argument("--clear-detail", action="store_true")
+    edit.add_argument("--clear-detail", action="store_true", help="Remove the detail.")
     edit.add_argument(
-        "--outcome", nargs="?", const=_EDIT_TEXT, default=None,
+        "--outcome",
+        nargs="?",
+        const=_EDIT_TEXT,
+        default=None,
         help="Replace outcome without changing status (text, '-', '@PATH', or omit for $EDITOR).",
     )
-    edit.add_argument("--clear-outcome", action="store_true")
-    edit.add_argument("--person", default=None, metavar="HANDLE")
-    edit.add_argument("--clear-person", action="store_true")
-    edit.add_argument("--status", choices=("active", "done", "dropped"), default=None)
+    edit.add_argument("--clear-outcome", action="store_true", help="Remove the outcome.")
+    edit.add_argument(
+        "--person",
+        default=None,
+        type=handle_arg,
+        metavar="HANDLE",
+        help="Tie the goal to this existing person.",
+    )
+    edit.add_argument(
+        "--clear-person",
+        action="store_true",
+        help="Make the goal general (not tied to a person).",
+    )
+    edit.add_argument(
+        "--status",
+        choices=("active", "done", "dropped"),
+        default=None,
+        help="Set the status directly (use 'goal close' to record an outcome).",
+    )
     edit.set_defaults(func=cmd_goal_edit)
 
     close = goal_sub.add_parser("close", help="Close a goal as done or dropped.")
-    close.add_argument("goal_id", type=int, metavar="GOAL_ID")
+    close.add_argument("goal_id", type=row_id, metavar="GOAL_ID")
     close.add_argument(
         "--outcome",
         nargs="?",
@@ -125,18 +199,22 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Outcome (text, '-', or '@PATH'); omit the value to open $EDITOR.",
     )
-    close.add_argument("--dropped", action="store_true")
+    close.add_argument(
+        "--dropped",
+        action="store_true",
+        help="Close as dropped instead of done.",
+    )
     close.set_defaults(func=cmd_goal_close)
 
     rm = goal_sub.add_parser("rm", help="Delete one goal.")
-    rm.add_argument("goal_id", type=int, metavar="GOAL_ID")
+    rm.add_argument("goal_id", type=row_id, metavar="GOAL_ID")
     rm.set_defaults(func=cmd_goal_rm)
 
 
 def _format_goal_human(goal: db.Goal) -> str:
-    parts = [f"[{goal.id}]", goal.status, f"created {goal.created_at}"]
+    parts = [f"[{goal.id}]", goal.status, f"created {format_stamp(goal.created_at)}"]
     if goal.closed_at is not None:
-        parts.append(f"closed {goal.closed_at}")
+        parts.append(f"closed {format_stamp(goal.closed_at)}")
     lines = [" ".join(parts), goal.title]
     if goal.person is not None:
         lines.append(f"person: @{goal.person.handle}")
@@ -157,8 +235,8 @@ def _format_goal_short(goal: db.Goal, *, now: datetime | None = None) -> str:
         try:
             created = datetime.fromisoformat(goal.created_at)
             if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            days = max(0, ((now or datetime.now(timezone.utc)) - created).days)
+                created = created.replace(tzinfo=UTC)
+            days = max(0, ((now or datetime.now(UTC)) - created).days)
             parts.append(f"· age: {days} {'day' if days == 1 else 'days'}")
         except ValueError:
             pass
@@ -180,8 +258,12 @@ def _emit_goal(
 
 
 def _emit_goals(
-    args: argparse.Namespace, goals: tuple[db.Goal, ...], *, with_detail: bool = False,
-    query: str | None = None, with_outcome: bool = False,
+    args: argparse.Namespace,
+    goals: tuple[db.Goal, ...],
+    *,
+    with_detail: bool = False,
+    query: str | None = None,
+    with_outcome: bool = False,
 ) -> None:
     if args.json:
         print_json([goal_to_dict(goal) for goal in goals])
@@ -189,7 +271,7 @@ def _emit_goals(
     if not goals:
         print("(no goals)")
         return
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for goal in goals:
         line = _format_goal_short(goal, now=now)
         if with_detail and goal.person is None:
@@ -199,15 +281,30 @@ def _emit_goals(
             print("\n".join(f"  {line}" for line in goal.detail.splitlines()))
         if with_outcome:
             print("  outcome:")
-            print("\n".join(f"    {line}" for line in (goal.outcome or "(no outcome recorded)").splitlines()))
+            print(
+                "\n".join(
+                    f"    {line}" for line in (goal.outcome or "(no outcome recorded)").splitlines()
+                )
+            )
         if query is not None:
-            fold = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
-            for label, body in (("title", goal.title), ("detail", goal.detail),
-                                ("outcome", goal.outcome)):
+            for label, body in (
+                ("title", goal.title),
+                ("detail", goal.detail),
+                ("outcome", goal.outcome),
+            ):
                 if label == "outcome" and with_outcome:
                     continue
-                if body is not None and query.translate(fold) in body.translate(fold):
+                if body is not None and contains_folded(body, query):
                     print(f"  {label}: {search_excerpt(body, query)}")
+
+
+def _read_goal_text(value: str, *, flag: str) -> str:
+    """Read ``--detail``/``--outcome`` text, rejecting an empty value like the
+    editor does (an empty ``-`` on stdin used to store ``""``)."""
+    text = read_body_or_raise(value)
+    if not text.strip():
+        raise db.DBError(f"{flag} must not be empty; omit the flag to leave it unset")
+    return text
 
 
 def cmd_goal_add(args: argparse.Namespace) -> int:
@@ -220,12 +317,18 @@ def cmd_goal_add(args: argparse.Namespace) -> int:
             raise db.ReviewNotFoundError(args.review)
         if args.detail is _EDIT_TEXT:
             detail = read_body_arg(
-                None, what="detail", template="",
+                None,
+                what="detail",
+                template="",
                 preamble="Write goal detail below. Lines beginning with #> are ignored.",
-                isatty=sys.stdin.isatty, compose=compose_in_editor,
+                isatty=sys.stdin.isatty,
+                compose=compose_in_editor,
+                flag="--detail",
             )
         else:
-            detail = read_body_or_raise(args.detail) if args.detail is not None else None
+            detail = (
+                _read_goal_text(args.detail, flag="--detail") if args.detail is not None else None
+            )
         goal = db.create_goal(
             conn,
             args.title,
@@ -250,17 +353,27 @@ def cmd_goal_list(args: argparse.Namespace) -> int:
         )
         total = (
             db.count_goals(
-                conn, status=status, person_handle=args.person,
+                conn,
+                status=status,
+                person_handle=args.person,
                 query=getattr(args, "query", None),
             )
-            if not args.json and args.limit is not None else len(goals)
+            if args.limit is not None
+            else len(goals)
         )
     _emit_goals(
-        args, goals, with_detail=args.with_detail, with_outcome=args.with_outcome,
+        args,
+        goals,
+        with_detail=args.with_detail,
+        with_outcome=args.with_outcome,
         query=getattr(args, "query", None),
     )
-    if not args.json and total > len(goals):
-        print(f"Showing {len(goals)} of {total} matching goals.")
+    if total > len(goals):
+        # Active goals are the default view, as all entries are for entry list.
+        query = getattr(args, "query", None)
+        filtered = args.person is not None or query is not None or args.status != "active"
+        noun = "matching goals" if filtered else "goals"
+        print(f"Showing {len(goals)} of {total} {noun}.", file=sys.stderr)
     return 0
 
 
@@ -275,11 +388,11 @@ def cmd_goal_show(args: argparse.Namespace) -> int:
 
 def cmd_goal_edit(args: argparse.Namespace) -> int:
     if args.clear_detail and args.detail is not None:
-        raise db.DBError("--clear-detail cannot be combined with --detail")
+        raise UsageError("--clear-detail cannot be combined with --detail")
     if args.clear_person and args.person is not None:
-        raise db.DBError("--clear-person cannot be combined with --person")
+        raise UsageError("--clear-person cannot be combined with --person")
     if args.clear_outcome and args.outcome is not None:
-        raise db.DBError("--clear-outcome cannot be combined with --outcome")
+        raise UsageError("--clear-outcome cannot be combined with --outcome")
 
     edit_detail = args.detail is _EDIT_TEXT
     edit_outcome = args.outcome is _EDIT_TEXT
@@ -289,11 +402,11 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
     if args.clear_detail:
         update_kwargs["detail"] = None
     elif args.detail is not None and not edit_detail:
-        update_kwargs["detail"] = read_body_or_raise(args.detail)
+        update_kwargs["detail"] = _read_goal_text(args.detail, flag="--detail")
     if args.clear_outcome:
         update_kwargs["outcome"] = None
     elif args.outcome is not None and not edit_outcome:
-        update_kwargs["outcome"] = read_body_or_raise(args.outcome)
+        update_kwargs["outcome"] = _read_goal_text(args.outcome, flag="--outcome")
     if args.clear_person:
         update_kwargs["person_handle"] = None
     elif args.person is not None:
@@ -322,29 +435,35 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
                 preamble=DETAIL_PREAMBLE,
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
+                flag="--detail",
             )
         if edit_outcome:
             update_kwargs["outcome"] = read_body_arg(
-                None, what="outcome", template=current.outcome or "",
+                None,
+                what="outcome",
+                template=current.outcome or "",
                 preamble=OUTCOME_PREAMBLE + "\nUse --clear-outcome to remove the outcome.",
-                isatty=sys.stdin.isatty, compose=compose_in_editor,
+                isatty=sys.stdin.isatty,
+                compose=compose_in_editor,
+                flag="--outcome",
             )
         goal = db.update_goal(conn, args.goal_id, **update_kwargs)
-    _emit_goal(args, goal, human_prefix="updated")
+    _emit_goal(args, goal, human_prefix=edit_verb(current.updated_at, goal.updated_at))
     return 0
 
 
 def cmd_goal_close(args: argparse.Namespace) -> int:
     edit_outcome = args.outcome is _EDIT_TEXT
     outcome = (
-        read_body_or_raise(args.outcome)
-        if args.outcome is not None and not edit_outcome else None
+        _read_goal_text(args.outcome, flag="--outcome")
+        if args.outcome is not None and not edit_outcome
+        else None
     )
     with open_db(args) as conn:
+        current = db.get_goal(conn, args.goal_id)
+        if current is None:
+            raise db.GoalNotFoundError(args.goal_id)
         if edit_outcome:
-            current = db.get_goal(conn, args.goal_id)
-            if current is None:
-                raise db.GoalNotFoundError(args.goal_id)
             outcome = read_body_arg(
                 None,
                 what="outcome",
@@ -352,6 +471,7 @@ def cmd_goal_close(args: argparse.Namespace) -> int:
                 preamble=OUTCOME_PREAMBLE,
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
+                flag="--outcome",
             )
         goal = db.close_goal(
             conn,
@@ -359,7 +479,13 @@ def cmd_goal_close(args: argparse.Namespace) -> int:
             outcome=outcome,
             dropped=args.dropped,
         )
-    _emit_goal(args, goal, human_prefix="closed")
+    # Re-closing with the same status only corrects the outcome, if anything.
+    verb = (
+        "closed"
+        if goal.status != current.status
+        else edit_verb(current.updated_at, goal.updated_at)
+    )
+    _emit_goal(args, goal, human_prefix=verb)
     return 0
 
 
@@ -368,7 +494,7 @@ def cmd_goal_rm(args: argparse.Namespace) -> int:
         if db.get_goal(conn, args.goal_id) is None:
             raise db.GoalNotFoundError(args.goal_id)
         if not confirm(f"Delete goal {args.goal_id}?", assume_yes=args.yes):
-            raise db.DBError("aborted")
+            raise db.DBError("aborted; pass --yes to confirm without a prompt")
         deleted = db.delete_goal(conn, args.goal_id)
     if not deleted:
         raise db.GoalNotFoundError(args.goal_id)

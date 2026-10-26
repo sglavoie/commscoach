@@ -71,6 +71,23 @@ class PortingCLITests(unittest.TestCase):
         self.assertEqual(payload["entries"][0]["person_ids"], [1])
         self.assertEqual(payload["entries"][0]["tag_ids"], [1])
 
+    def test_global_json_flag_selects_json_export(self) -> None:
+        rc, out, err = self._run(self.source_path, "export", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["format_version"], 2)
+
+        rc, _, err = self._run(self.source_path, "export", "--json", "--format", "markdown")
+        self.assertEqual(rc, 2)
+        self.assertIn("--json conflicts with --format markdown", err)
+
+        out_path = self.tmpdir / "export.md"
+        rc, out, err = self._run(
+            self.source_path, "export", "--json", "--format", "markdown", "--out", str(out_path)
+        )
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out), {"format": "markdown", "path": str(out_path)})
+        self.assertFalse(out_path.read_text(encoding="utf-8").lstrip().startswith("{"))
+
     def test_json_export_file_has_mode_0600(self) -> None:
         out_path = self.tmpdir / "archive.json"
 
@@ -89,6 +106,31 @@ class PortingCLITests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(out_path.stat().st_mode), 0o600)
         self.assertEqual(json.loads(out_path.read_text())["format_version"], 2)
 
+    def test_json_export_to_file_and_import_report_what_happened(self) -> None:
+        archive = self.tmpdir / "archive.json"
+        rc, out, err = self._run(self.source_path, "--json", "export", "--out", str(archive))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out), {"format": "json", "path": str(archive)})
+
+        target = self.tmpdir / "target.sqlite3"
+        db.init_db(target)
+        rc, out, err = self._run(target, "--json", "import", str(archive), "--dry-run")
+        self.assertEqual(rc, 0, err)
+        counts = json.loads(out)["counts"]
+        self.assertEqual(counts["entries"], 1)
+        self.assertEqual(
+            set(counts),
+            {
+                "people",
+                "entries",
+                "tags",
+                "feedback",
+                "reviews",
+                "goals",
+                "person_notes",
+            },
+        )
+
     def test_import_from_path_round_trips(self) -> None:
         archive = self.tmpdir / "archive.json"
         self._run(
@@ -103,10 +145,11 @@ class PortingCLITests(unittest.TestCase):
         rc, stdout, _ = self._run(self.target_path, "import", str(archive))
 
         self.assertEqual(rc, 0)
-        self.assertIn("imported from", stdout)
-        with closing(db.connect(self.source_path)) as source, closing(
-            db.connect(self.target_path)
-        ) as target:
+        self.assertRegex(stdout, r"^imported 1 person, 1 entry, .* from ")
+        with (
+            closing(db.connect(self.source_path)) as source,
+            closing(db.connect(self.target_path)) as target,
+        ):
             self.assertEqual(db.dump_to_dict(target), db.dump_to_dict(source))
 
     def test_import_from_stdin(self) -> None:
@@ -123,9 +166,7 @@ class PortingCLITests(unittest.TestCase):
         archive = self.tmpdir / "archive.json"
         archive.write_text(json.dumps(self._export_payload()), encoding="utf-8")
 
-        rc, stdout, _ = self._run(
-            self.target_path, "import", str(archive), "--dry-run"
-        )
+        rc, stdout, _ = self._run(self.target_path, "import", str(archive), "--dry-run")
 
         self.assertEqual(rc, 0)
         self.assertIn("no data written", stdout)
@@ -138,9 +179,7 @@ class PortingCLITests(unittest.TestCase):
         # A v3 dump restored into a v4 database is the normal migration path;
         # the schema-version mismatch is reported, not refused.
         with self.assertWarns(RuntimeWarning):
-            rc, stdout, _ = self._run(
-                self.target_path, "import", str(archive), "--dry-run"
-            )
+            rc, stdout, _ = self._run(self.target_path, "import", str(archive), "--dry-run")
 
         self.assertEqual(rc, 0)
         self.assertIn("no data written", stdout)
@@ -211,6 +250,15 @@ class PortingCLITests(unittest.TestCase):
 
         self.assertEqual(rc, 1)
         self.assertIn("invalid JSON", stderr)
+
+    def test_non_utf8_archive_exits_one(self) -> None:
+        archive = self.tmpdir / "bad.json"
+        archive.write_bytes(b"{\xff}")
+
+        rc, _, stderr = self._run(self.target_path, "import", str(archive))
+
+        self.assertEqual(rc, 1)
+        self.assertIn("not valid UTF-8", stderr)
 
     def test_help_describes_lossless_boundaries(self) -> None:
         out = io.StringIO()

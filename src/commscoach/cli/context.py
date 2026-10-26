@@ -6,7 +6,7 @@ import argparse
 from typing import Any
 
 from .. import db
-from .common import non_negative_int, open_db, print_json
+from .common import non_negative_int, open_db, print_json, row_id
 from .serializers import (
     entry_to_dict,
     feedback_to_dict,
@@ -21,20 +21,20 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "context",
         help="Emit the skill-facing JSON context for one entry (requires self).",
     )
-    context_parser.add_argument("entry_id", type=int, metavar="ENTRY_ID")
+    context_parser.add_argument("entry_id", type=row_id, metavar="ENTRY_ID")
     context_parser.add_argument(
         "--history",
         type=non_negative_int,
         default=3,
         metavar="N",
-        help="Number of prior entries to include per linked person.",
+        help="Number of prior entries to include per linked person (default: 3).",
     )
     context_parser.add_argument(
         "--prior-review-limit",
         type=non_negative_int,
         default=1,
         metavar="N",
-        help="Number of prior review syntheses to include.",
+        help="Number of prior review syntheses to include (default: 1).",
     )
     context_parser.set_defaults(func=cmd_context)
     context_parser.add_argument(
@@ -58,17 +58,12 @@ def _context_to_dict(context: db.EntryContext) -> dict[str, Any]:
                     "limit": person_context.history_limit,
                     "count": len(person_context.history),
                     "total_count": person_context.total_history_count,
-                    "truncated": (
-                        len(person_context.history) < person_context.total_history_count
-                    ),
+                    "truncated": (len(person_context.history) < person_context.total_history_count),
                 },
                 "history": [
                     {
                         "entry": entry_to_dict(item.entry),
-                        "feedback": [
-                            feedback_to_dict(feedback)
-                            for feedback in item.feedback
-                        ],
+                        "feedback": [feedback_to_dict(feedback) for feedback in item.feedback],
                     }
                     for item in person_context.history
                 ],
@@ -83,9 +78,7 @@ def _context_to_dict(context: db.EntryContext) -> dict[str, Any]:
             "total_count": context.total_goal_count,
             "truncated": len(context.goals) < context.total_goal_count,
         },
-        "prior_reviews": [
-            review_to_dict(review) for review in context.prior_reviews
-        ],
+        "prior_reviews": [review_to_dict(review) for review in context.prior_reviews],
     }
 
 

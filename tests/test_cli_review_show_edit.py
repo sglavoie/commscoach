@@ -20,7 +20,9 @@ class ReviewShowTests(ReviewTestBase):
         review = self._seed_review("Review to revisit", [entry.id])
         other = self._seed_review("Other review", [entry.id])
         with closing(db.connect(self.db_path)) as conn:
-            active = db.create_goal(conn, "Keep practicing", review_id=review.id, detail="Ask first.")
+            active = db.create_goal(
+                conn, "Keep practicing", review_id=review.id, detail="Ask first."
+            )
             done = db.create_goal(conn, "Completed experiment", review_id=review.id)
             db.close_goal(conn, done.id, outcome="Worked in three meetings.")
             dropped = db.create_goal(conn, "Dropped experiment", review_id=review.id)
@@ -29,8 +31,16 @@ class ReviewShowTests(ReviewTestBase):
             db.create_goal(conn, "Unlinked experiment")
         rc, out, err = self._run("review", "show", str(review.id), "--with-goals")
         self.assertEqual(rc, 0, err)
-        for text in ("Review to revisit", "Linked goals:", "Keep practicing", "Ask first.",
-                     "Completed experiment", "Worked in three meetings.", "Dropped experiment", "Role changed."):
+        for text in (
+            "Review to revisit",
+            "Linked goals:",
+            "Keep practicing",
+            "Ask first.",
+            "Completed experiment",
+            "Worked in three meetings.",
+            "Dropped experiment",
+            "Role changed.",
+        ):
             self.assertIn(text, out)
         self.assertNotIn("Unrelated experiment", out)
         self.assertNotIn("Unlinked experiment", out)
@@ -122,9 +132,7 @@ class ReviewEditTests(ReviewTestBase):
         entry = self._seed_entry("entry")
         review = self._seed_review("first draft", [entry.id])
 
-        rc, out, _ = self._run(
-            "review", "edit", str(review.id), "--body", "tightened synthesis"
-        )
+        rc, out, _ = self._run("review", "edit", str(review.id), "--body", "tightened synthesis")
 
         self.assertEqual(rc, 0)
         self.assertIn(f"updated review {review.id}", out)
@@ -148,9 +156,7 @@ class ReviewEditTests(ReviewTestBase):
         assert updated is not None
         self.assertEqual(updated.scope_kind, "latest")
         self.assertEqual(updated.scope_limit, 20)
-        self.assertEqual(
-            [entry.id for entry in updated.entries], [second.id, first.id]
-        )
+        self.assertEqual([entry.id for entry in updated.entries], [second.id, first.id])
 
     def test_edit_leaves_a_scoped_axis_untouched(self) -> None:
         self._seed_person("alice")
@@ -196,9 +202,7 @@ class ReviewEditTests(ReviewTestBase):
         body_file = self.tmpdir / "revision.txt"
         body_file.write_text("file revision", encoding="utf-8")
 
-        rc, _, _ = self._run(
-            "review", "edit", str(review.id), "--body", f"@{body_file}"
-        )
+        rc, _, _ = self._run("review", "edit", str(review.id), "--body", f"@{body_file}")
 
         self.assertEqual(rc, 0)
         with closing(db.connect(self.db_path)) as conn:
@@ -210,15 +214,16 @@ class ReviewEditTests(ReviewTestBase):
         entry = self._seed_entry("entry")
         review = self._seed_review("first draft", [entry.id])
 
-        def compose(*, template: str, preamble: str) -> str:
+        def compose(*, template: str, preamble: str, what: str) -> str:
             self.assertEqual(template, "first draft")
             self.assertIn("#>", preamble)
             return "edited in place"
 
         tty = mock.Mock()
         tty.isatty.return_value = True
-        with mock.patch.object(cli_reviews.sys, "stdin", tty), mock.patch.object(
-            cli_reviews, "compose_in_editor", side_effect=compose
+        with (
+            mock.patch.object(cli_reviews.sys, "stdin", tty),
+            mock.patch.object(cli_reviews, "compose_in_editor", side_effect=compose),
         ):
             rc, _, _ = self._run("review", "edit", str(review.id), "--body")
 
@@ -232,8 +237,9 @@ class ReviewEditTests(ReviewTestBase):
         composed = mock.Mock()
         tty = mock.Mock()
         tty.isatty.return_value = True
-        with mock.patch.object(cli_reviews.sys, "stdin", tty), mock.patch.object(
-            cli_reviews, "compose_in_editor", composed
+        with (
+            mock.patch.object(cli_reviews.sys, "stdin", tty),
+            mock.patch.object(cli_reviews, "compose_in_editor", composed),
         ):
             rc, _, err = self._run("review", "edit", "9999", "--body")
 
@@ -272,9 +278,7 @@ class ReviewEditTests(ReviewTestBase):
         entry = self._seed_entry("entry")
         review = self._seed_review("first draft", [entry.id])
 
-        rc, out, _ = self._run(
-            "--json", "review", "edit", str(review.id), "--body", "json edit"
-        )
+        rc, out, _ = self._run("--json", "review", "edit", str(review.id), "--body", "json edit")
 
         self.assertEqual(rc, 0)
         payload = json.loads(out)

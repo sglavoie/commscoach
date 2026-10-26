@@ -7,26 +7,38 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Callable, Iterator
 
 from .. import db
 
 COMMENT_MARKER = "#>"
-_drafts: ContextVar[list[Path] | None] = ContextVar("editor_drafts", default=None)
+_drafts: ContextVar[list[tuple[Path, str]] | None] = ContextVar("editor_drafts", default=None)
 
 
-def _finish_draft(path: Path, *, recover: bool) -> None:
-    """Keep nonempty failed drafts, without masking the original error."""
+def _finish_draft(path: Path, *, recover: bool, template: str = "") -> None:
+    """Keep failed drafts holding new text, without masking the original error.
+
+    A draft that is empty or still equal to its starting ``template`` holds
+    nothing worth recovering (e.g. the user quit the editor with ``:cq``), and
+    keeping it would only leave a private copy of the original text behind.
+    """
     try:
         if recover:
             raw = path.read_bytes()
             # Preserve undecodable text too: a broken encoding must not lose work.
             body = strip_comment_lines(raw.decode("utf-8", errors="replace")).strip()
-            if body:
+            if body and body != template.strip():
                 path.chmod(0o600)
+                try:
+                    raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    pass  # keep an undecodable draft byte-for-byte
+                else:
+                    # Drop the #> instructions so ``@PATH`` restores just the text.
+                    path.write_text(body + "\n", encoding="utf-8")
                 print(f"Draft saved for recovery: {path}", file=sys.stderr)
                 return
         path.unlink()
@@ -39,7 +51,7 @@ def _finish_draft(path: Path, *, recover: bool) -> None:
 @contextmanager
 def recover_editor_drafts() -> Iterator[None]:
     """Retain editor files until the entire CLI command succeeds."""
-    drafts: list[Path] = []
+    drafts: list[tuple[Path, str]] = []
     token = _drafts.set(drafts)
     succeeded = False
     try:
@@ -47,8 +59,8 @@ def recover_editor_drafts() -> Iterator[None]:
         succeeded = True
     finally:
         _drafts.reset(token)
-        for path in drafts:
-            _finish_draft(path, recover=not succeeded)
+        for path, template in drafts:
+            _finish_draft(path, recover=not succeeded, template=template)
 
 
 def editor_command() -> list[str]:
@@ -63,10 +75,30 @@ def editor_command() -> list[str]:
     return command
 
 
-def strip_comment_lines(text: str) -> str:
-    """Remove editor instruction lines without treating Markdown as comments."""
+def _is_escaped_marker(line: str) -> bool:
+    return line.startswith("\\") and line.lstrip("\\").startswith(COMMENT_MARKER)
+
+
+def escape_comment_lines(text: str) -> str:
+    """Escape stored lines that would otherwise read back as instructions.
+
+    A body saved from a literal, ``-`` or ``@PATH`` can contain ``#>`` lines;
+    prefixing a backslash keeps them through an editor round trip, and
+    ``strip_comment_lines`` removes exactly that backslash again.
+    """
     return "".join(
-        line
+        "\\" + line if line.lstrip("\\").startswith(COMMENT_MARKER) else line
+        for line in text.splitlines(keepends=True)
+    )
+
+
+def strip_comment_lines(text: str) -> str:
+    """Remove editor instruction lines without treating Markdown as comments.
+
+    A line escaped as ``\\#>`` is body text: it loses one backslash and stays.
+    """
+    return "".join(
+        line[1:] if _is_escaped_marker(line) else line
         for line in text.splitlines(keepends=True)
         if not line.startswith(COMMENT_MARKER)
     )
@@ -76,24 +108,28 @@ def compose_in_editor(
     *,
     template: str,
     preamble: str,
+    what: str = "body",
     runner: Callable[[list[str]], int] | None = None,
 ) -> str:
-    """Compose privately; failed drafts survive and CLI drafts await save."""
+    """Compose privately; failed drafts survive and CLI drafts await save.
+
+    ``what`` names the text in the empty-draft error (``notes``, ``outcome``).
+    """
     fd, raw_path = tempfile.mkstemp(prefix="commscoach-", suffix=".md")
     path = Path(raw_path)
     drafts = _drafts.get()
     if drafts is not None:
-        drafts.append(path)
+        drafts.append((path, template))
     succeeded = False
     try:
         os.fchmod(fd, 0o600)
         comment_preamble = "\n".join(
-            f"{COMMENT_MARKER} {line}" if line else COMMENT_MARKER
-            for line in preamble.splitlines()
+            f"{COMMENT_MARKER} {line}" if line else COMMENT_MARKER for line in preamble.splitlines()
         )
         initial = comment_preamble
         if template:
-            initial = f"{initial}\n\n{template}" if initial else template
+            escaped = escape_comment_lines(template)
+            initial = f"{initial}\n\n{escaped}" if initial else escaped
         if initial and not initial.endswith("\n"):
             initial += "\n"
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -107,7 +143,7 @@ def compose_in_editor(
 
         body = strip_comment_lines(path.read_text(encoding="utf-8")).strip()
         if not body:
-            raise db.DBError("editor produced an empty body")
+            raise db.DBError(f"editor produced empty {what}")
         succeeded = True
         return body
     except (OSError, UnicodeError) as exc:
@@ -116,4 +152,4 @@ def compose_in_editor(
         if fd >= 0:
             os.close(fd)
         if drafts is None:
-            _finish_draft(path, recover=not succeeded)
+            _finish_draft(path, recover=not succeeded, template=template)

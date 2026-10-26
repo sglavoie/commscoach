@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import sqlite3
 from collections import Counter
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from itertools import pairwise
 from typing import Any
 
 from ..models import Stats
-from .common import date_bound_timestamp, validate_range_bounds
+from .common import date_bound_timestamp, read_snapshot, validate_range_bounds
 from .errors import DBError
 
 
@@ -42,21 +43,44 @@ def _ranked_counts(
     return tuple((str(row[0]), int(row[1])) for row in conn.execute(sql, params))
 
 
-def _monday(value: str) -> date:
+def _local_day(value: str) -> date:
+    """Return the system-local calendar day of a stored timestamp.
+
+    Weeks are the user's weeks: a Sunday-evening entry west of UTC belongs to
+    that Sunday's week, not to the following one. Converting each timestamp
+    separately keeps this right across DST changes.
+    """
     try:
-        day = date.fromisoformat(value[:10])
+        stamp = datetime.fromisoformat(value)
     except (TypeError, ValueError) as exc:
         raise DBError(f"invalid effective entry timestamp: {value!r}") from exc
+    if stamp.tzinfo is not None:
+        try:
+            stamp = stamp.astimezone()
+        except (OverflowError, OSError):
+            pass
+    return stamp.date()
+
+
+def _monday(day: date) -> date:
     return day - timedelta(days=day.weekday())
 
 
 def _weekly_metrics(
     timestamps: list[str],
+    *,
+    anchor: date,
 ) -> tuple[float, int, int, tuple[tuple[str, int], ...]]:
+    """Return cadence, current and longest weekly streaks, and week buckets.
+
+    The current streak is the run of consecutive active weeks ending in the
+    ``anchor`` week or the one before it (so a week not yet logged does not
+    break it); a run that ended earlier is no longer current.
+    """
     if not timestamps:
         return 0.0, 0, 0, ()
 
-    counts = Counter(_monday(timestamp) for timestamp in timestamps)
+    counts = Counter(_monday(_local_day(timestamp)) for timestamp in timestamps)
     occupied = sorted(counts)
     first_monday, last_monday = occupied[0], occupied[-1]
     span_weeks = ((last_monday - first_monday).days // 7) + 1
@@ -69,30 +93,40 @@ def _weekly_metrics(
 
     longest = 1
     run = 1
-    for previous, current in zip(occupied, occupied[1:]):
+    for previous, current in pairwise(occupied):
         if (current - previous).days == 7:
             run += 1
         else:
             run = 1
         longest = max(longest, run)
 
-    current_streak = 1
-    for previous, current in zip(reversed(occupied[:-1]), reversed(occupied[1:])):
-        if (current - previous).days != 7:
-            break
-        current_streak += 1
+    # Future-dated entries (e.g. "tomorrow") must not break the run that ends
+    # at the anchor week, so only weeks up to the anchor count here.
+    anchor_monday = _monday(anchor)
+    up_to_anchor = [week for week in occupied if week <= anchor_monday]
+    current_streak = 0
+    if up_to_anchor and (anchor_monday - up_to_anchor[-1]).days <= 7:
+        current_streak = 1
+        for previous, current in reversed(list(pairwise(up_to_anchor))):
+            if (current - previous).days != 7:
+                break
+            current_streak += 1
 
     return len(timestamps) / span_weeks, current_streak, longest, tuple(buckets)
 
 
-def get_stats(
+def _collect_stats(
     conn: sqlite3.Connection,
     *,
     since: str | None = None,
     until: str | None = None,
     top: int = 5,
+    today: date | None = None,
 ) -> Stats:
     """Return windowed counts, weekly cadence, streaks, and top dimensions.
+
+    Weeks are local Monday-to-Sunday weeks. The current streak is anchored at
+    ``until`` when given, otherwise at ``today`` (default: the local date).
 
     Entry cadence and linked-dimension counts use the entry's effective time,
     ``COALESCE(occurred_at, created_at)``. Feedback coverage is likewise based
@@ -102,23 +136,15 @@ def get_stats(
     if top < 0:
         raise DBError("top must be non-negative")
     validate_range_bounds(since, until, since_name="since", until_name="until")
+    anchor = today if today is not None else date.today()
+    if until is not None:
+        anchor = min(anchor, _local_day(date_bound_timestamp(until, name="until", upper=True)))
     since = date_bound_timestamp(since, name="since") if since is not None else None
-    until = (
-        date_bound_timestamp(until, name="until", upper=True)
-        if until is not None else None
-    )
-    entry_where, entry_params = _where_window(
-        "COALESCE(e.occurred_at, e.created_at)", since, until
-    )
-    review_where, review_params = _where_window(
-        "r.created_at", since, until
-    )
-    open_goal_where, open_goal_params = _where_window(
-        "g.created_at", since, until
-    )
-    closed_goal_where, closed_goal_params = _where_window(
-        "g.closed_at", since, until
-    )
+    until = date_bound_timestamp(until, name="until", upper=True) if until is not None else None
+    entry_where, entry_params = _where_window("COALESCE(e.occurred_at, e.created_at)", since, until)
+    review_where, review_params = _where_window("r.created_at", since, until)
+    open_goal_where, open_goal_params = _where_window("g.created_at", since, until)
+    closed_goal_where, closed_goal_params = _where_window("g.closed_at", since, until)
 
     entry_rows = conn.execute(
         "SELECT e.id, COALESCE(e.occurred_at, e.created_at) AS effective_at "
@@ -129,13 +155,12 @@ def get_stats(
     entry_count = len(entry_rows)
     timestamps = [str(row["effective_at"]) for row in entry_rows]
     entries_per_week, current_streak, longest_streak, buckets = _weekly_metrics(
-        timestamps
+        timestamps, anchor=anchor
     )
 
     feedback_count = _count(
         conn,
-        "SELECT COUNT(*) FROM feedback f JOIN entries e ON e.id = f.entry_id "
-        f"WHERE {entry_where}",
+        f"SELECT COUNT(*) FROM feedback f JOIN entries e ON e.id = f.entry_id WHERE {entry_where}",
         entry_params,
     )
     entries_with_feedback = _count(
@@ -171,14 +196,12 @@ def get_stats(
     ).fetchone()
     open_goal_count = _count(
         conn,
-        "SELECT COUNT(*) FROM goals g WHERE g.status = 'active' "
-        f"AND {open_goal_where}",
+        f"SELECT COUNT(*) FROM goals g WHERE g.status = 'active' AND {open_goal_where}",
         open_goal_params,
     )
     closed_goal_count = _count(
         conn,
-        "SELECT COUNT(*) FROM goals g WHERE g.status != 'active' "
-        f"AND {closed_goal_where}",
+        f"SELECT COUNT(*) FROM goals g WHERE g.status != 'active' AND {closed_goal_where}",
         closed_goal_params,
     )
 
@@ -187,14 +210,18 @@ def get_stats(
         "SELECT t.name, COUNT(*) AS uses FROM entry_tags et "
         "JOIN tags t ON t.id = et.tag_id JOIN entries e ON e.id = et.entry_id "
         f"WHERE {entry_where} GROUP BY t.id, t.name "
-        "ORDER BY uses DESC, t.name COLLATE NOCASE ASC LIMIT ?",
+        "ORDER BY uses DESC, search_fold(t.name), t.name LIMIT ?",
         [*entry_params, top],
     )
     top_sources = _ranked_counts(
         conn,
-        "SELECT e.source, COUNT(*) AS uses FROM entries e "
+        # Grouped case-insensitively like ``entry search --source``, so "Slack"
+        # and "slack" (or "ÉQUIPE" and "équipe") are one source, shown by its
+        # first spelling in sort order.
+        "SELECT MIN(e.source) AS source, COUNT(*) AS uses FROM entries e "
         f"WHERE {entry_where} AND e.source IS NOT NULL AND e.source != '' "
-        "GROUP BY e.source ORDER BY uses DESC, e.source COLLATE NOCASE ASC LIMIT ?",
+        "GROUP BY handle_key(e.source) "
+        "ORDER BY uses DESC, search_fold(source), handle_key(source), source LIMIT ?",
         [*entry_params, top],
     )
     top_people = _ranked_counts(
@@ -202,7 +229,7 @@ def get_stats(
         "SELECT p.handle, COUNT(*) AS uses FROM entry_people ep "
         "JOIN people p ON p.id = ep.person_id JOIN entries e ON e.id = ep.entry_id "
         f"WHERE {entry_where} GROUP BY p.id, p.handle "
-        "ORDER BY uses DESC, p.handle COLLATE NOCASE ASC LIMIT ?",
+        "ORDER BY uses DESC, search_fold(p.handle), handle_key(p.handle), p.handle LIMIT ?",
         [*entry_params, top],
     )
 
@@ -226,3 +253,19 @@ def get_stats(
         top_sources=top_sources,
         top_people=top_people,
     )
+
+
+def get_stats(
+    conn: sqlite3.Connection,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    top: int = 5,
+    today: date | None = None,
+) -> Stats:
+    """Return windowed counts, weekly cadence, streaks, and top dimensions.
+
+    All figures come from one snapshot; see :func:`_collect_stats`.
+    """
+    with read_snapshot(conn):
+        return _collect_stats(conn, since=since, until=until, top=top, today=today)

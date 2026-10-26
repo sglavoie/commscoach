@@ -97,18 +97,13 @@ CREATE TABLE IF NOT EXISTS {table} (
 # A table rebuild drops the table's indexes with it, so the rebuild replays
 # these one by one; the cumulative DDL below runs the same list as a script.
 _REVIEWS_INDEX_STATEMENTS = (
-    (
-        "CREATE INDEX IF NOT EXISTS idx_reviews_created_at"
-        " ON reviews (created_at, id)"
-    ),
-    (
-        "CREATE INDEX IF NOT EXISTS idx_reviews_scope"
-        " ON reviews (scope_kind, created_at)"
-    ),
-    (
-        "CREATE INDEX IF NOT EXISTS idx_reviews_scope_person_id"
-        " ON reviews (scope_person_id)"
-    ),
+    ("CREATE INDEX IF NOT EXISTS idx_reviews_created_at ON reviews (created_at, id)"),
+    ("CREATE INDEX IF NOT EXISTS idx_reviews_scope ON reviews (scope_kind, created_at)"),
+    ("CREATE INDEX IF NOT EXISTS idx_reviews_scope_person_id ON reviews (scope_person_id)"),
+    # Matches the review list/search filter on tag. The stored-handle filter
+    # compares handle_key(), an application function an index cannot use
+    # without breaking writes from tools that do not register it.
+    ("CREATE INDEX IF NOT EXISTS idx_reviews_scope_tag ON reviews (scope_tag)"),
 )
 
 SCHEMA_V2_SQL = (
@@ -184,8 +179,12 @@ AFTER DELETE ON entries BEGIN
     VALUES ('delete', old.id, old.body);
 END;
 
-CREATE TRIGGER IF NOT EXISTS entries_fts_after_update
-AFTER UPDATE ON entries BEGIN
+-- Only a body change touches the index; tag, people, and source edits also
+-- bump updated_at and used to delete and re-insert the body for nothing.
+-- Dropped first so init upgrades the older, unconditional trigger.
+DROP TRIGGER IF EXISTS entries_fts_after_update;
+CREATE TRIGGER entries_fts_after_update
+AFTER UPDATE OF body ON entries BEGIN
     INSERT INTO entries_fts(entries_fts, rowid, body)
     VALUES ('delete', old.id, old.body);
     INSERT INTO entries_fts(rowid, body) VALUES (new.id, new.body);

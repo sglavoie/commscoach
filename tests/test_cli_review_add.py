@@ -48,9 +48,14 @@ class ReviewAddTests(ReviewTestBase):
             (("--entry", str(entry.id), "--db", str(self.tmpdir / "missing.sqlite3")), "init"),
         )
         for flags, message in cases:
-            with self.subTest(flags=flags), mock.patch(
-                "sys.stdin.isatty", return_value=True,
-            ), mock.patch.object(cli_reviews, "compose_in_editor") as compose:
+            with (
+                self.subTest(flags=flags),
+                mock.patch(
+                    "sys.stdin.isatty",
+                    return_value=True,
+                ),
+                mock.patch.object(cli_reviews, "compose_in_editor") as compose,
+            ):
                 rc, out, err = self._run("review", "add", *flags)
                 self.assertEqual(rc, 1)
                 self.assertEqual(out, "")
@@ -62,12 +67,23 @@ class ReviewAddTests(ReviewTestBase):
     def test_valid_review_opens_editor_without_requiring_self(self) -> None:
         person = self._seed_person("alice")
         entry = self._seed_entry()
-        with mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
-            cli_reviews, "compose_in_editor", return_value="Written review",
-        ) as compose:
+        with (
+            mock.patch("sys.stdin.isatty", return_value=True),
+            mock.patch.object(
+                cli_reviews,
+                "compose_in_editor",
+                return_value="Written review",
+            ) as compose,
+        ):
             rc, out, err = self._run(
-                "review", "add", "--entry", str(entry.id), str(entry.id),
-                "--person", person.handle.upper(), "--json",
+                "review",
+                "add",
+                "--entry",
+                str(entry.id),
+                str(entry.id),
+                "--person",
+                person.handle.upper(),
+                "--json",
             )
         self.assertEqual(rc, 0, err)
         compose.assert_called_once()
@@ -79,9 +95,13 @@ class ReviewAddTests(ReviewTestBase):
     def test_outdated_database_does_not_open_editor(self) -> None:
         with closing(db.connect(self.db_path)) as conn, conn:
             conn.execute("UPDATE _meta SET value = '3' WHERE key = 'schema_version'")
-        with mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
-            cli_reviews, "compose_in_editor",
-        ) as compose:
+        with (
+            mock.patch("sys.stdin.isatty", return_value=True),
+            mock.patch.object(
+                cli_reviews,
+                "compose_in_editor",
+            ) as compose,
+        ):
             rc, out, err = self._run("review", "add", "--entry", "1")
         self.assertEqual(rc, 1)
         self.assertEqual(out, "")
@@ -171,9 +191,7 @@ class ReviewAddTests(ReviewTestBase):
         self.assertIsNone(payload["scope_since"])
         self.assertIsNone(payload["scope_until"])
         self.assertEqual(payload["entry_ids"], [second.id, first.id])
-        self.assertEqual(
-            [entry["id"] for entry in payload["entries"]], [second.id, first.id]
-        )
+        self.assertEqual([entry["id"] for entry in payload["entries"]], [second.id, first.id])
 
     def test_add_body_from_stdin(self) -> None:
         entry = self._seed_entry("entry")
@@ -196,9 +214,7 @@ class ReviewAddTests(ReviewTestBase):
         body_file = self.tmpdir / "review.txt"
         body_file.write_text("file review", encoding="utf-8")
 
-        rc, _, _ = self._run(
-            "review", "add", f"@{body_file}", "--entry", str(entry.id)
-        )
+        rc, _, _ = self._run("review", "add", f"@{body_file}", "--entry", str(entry.id))
 
         self.assertEqual(rc, 0)
         with closing(db.connect(self.db_path)) as conn:
@@ -208,9 +224,7 @@ class ReviewAddTests(ReviewTestBase):
 
     def test_add_missing_file_exits_one(self) -> None:
         entry = self._seed_entry("entry")
-        rc, _, err = self._run(
-            "review", "add", "@/no/such/review.txt", "--entry", str(entry.id)
-        )
+        rc, _, err = self._run("review", "add", "@/no/such/review.txt", "--entry", str(entry.id))
         self.assertEqual(rc, 1)
         self.assertIn("cannot read body", err)
 
@@ -242,9 +256,7 @@ class ScopedAddTests(ReviewTestBase):
         self.entry = self._seed_entry("Pushed back", people=("alice",), tags=("conflict",))
 
     def _add(self, *args: str) -> db.Review:
-        rc, _, err = self._run(
-            "review", "add", "body", "--entry", str(self.entry.id), *args
-        )
+        rc, _, err = self._run("review", "add", "body", "--entry", str(self.entry.id), *args)
         self.assertEqual(rc, 0, err)
         with closing(db.connect(self.db_path)) as conn:
             reviews = db.list_reviews(conn, limit=1)
@@ -263,6 +275,29 @@ class ScopedAddTests(ReviewTestBase):
         self.assertEqual(review.scope_kind, "tag")
         self.assertEqual(review.scope_tag, "conflict")
         self.assertIsNone(review.scope_person_handle)
+
+    def test_entries_outside_the_scope_warn_but_still_store(self) -> None:
+        self._seed_person("bob")
+        self._seed_entry("Unrelated", people=("bob",))
+        for args, warned in (
+            (("--person", "alice"), False),
+            (("--tag", "conflict"), False),
+            (("--since", "2000-01-01"), False),
+            (("--person", "bob"), True),
+            (("--tag", "other"), True),
+            (("--until", "2000-01-01"), True),
+        ):
+            with self.subTest(args=args):
+                if args == ("--tag", "other"):
+                    self._seed_entry("tagged", tags=("other",))
+                rc, _, err = self._run(
+                    "review", "add", "body", "--entry", str(self.entry.id), *args
+                )
+                self.assertEqual(rc, 0, err)
+                if warned:
+                    self.assertIn(f"1 covered entry ({self.entry.id}) falls outside", err)
+                else:
+                    self.assertNotIn("outside", err)
 
     def test_date_bounds_store_range_scope(self) -> None:
         review = self._add("--since", "2026-07-01", "--until", "2026-09-01")
@@ -308,7 +343,7 @@ class ScopedAddTests(ReviewTestBase):
         self.assertEqual(review.scope_kind, "latest")
         self.assertEqual(review.scope_limit, 30)
 
-    def test_scope_contradicting_the_axis_flag_exits_one_without_writing(self) -> None:
+    def test_scope_contradicting_the_axis_flag_exits_two_without_writing(self) -> None:
         rc, _, err = self._run(
             "review",
             "add",
@@ -320,13 +355,13 @@ class ScopedAddTests(ReviewTestBase):
             "--scope",
             "tag",
         )
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--scope tag", err)
         self.assertIn("--person", err)
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.list_reviews(conn), ())
 
-    def test_conflicting_axis_flags_exit_one_without_writing(self) -> None:
+    def test_conflicting_axis_flags_exit_two_without_writing(self) -> None:
         rc, _, err = self._run(
             "review",
             "add",
@@ -338,7 +373,7 @@ class ScopedAddTests(ReviewTestBase):
             "--tag",
             "conflict",
         )
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--person", err)
         self.assertIn("--tag", err)
         with closing(db.connect(self.db_path)) as conn:
@@ -348,8 +383,9 @@ class ScopedAddTests(ReviewTestBase):
         composed = mock.Mock()
         tty = mock.Mock()
         tty.isatty.return_value = True
-        with mock.patch.object(cli_reviews.sys, "stdin", tty), mock.patch.object(
-            cli_reviews, "compose_in_editor", composed
+        with (
+            mock.patch.object(cli_reviews.sys, "stdin", tty),
+            mock.patch.object(cli_reviews, "compose_in_editor", composed),
         ):
             rc, _, err = self._run(
                 "review",
@@ -361,7 +397,7 @@ class ScopedAddTests(ReviewTestBase):
                 "--tag",
                 "conflict",
             )
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("--person", err)
         composed.assert_not_called()
 
@@ -387,8 +423,9 @@ class ScopedAddTests(ReviewTestBase):
         composed = mock.Mock()
         tty = mock.Mock()
         tty.isatty.return_value = True
-        with mock.patch.object(cli_reviews.sys, "stdin", tty), mock.patch.object(
-            cli_reviews, "compose_in_editor", composed
+        with (
+            mock.patch.object(cli_reviews.sys, "stdin", tty),
+            mock.patch.object(cli_reviews, "compose_in_editor", composed),
         ):
             rc, _, err = self._run(
                 "review",
@@ -416,6 +453,16 @@ class ScopedAddTests(ReviewTestBase):
         )
         self.assertEqual(rc, 1)
         self.assertIn("nobody", err)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.list_reviews(conn), ())
+
+    def test_unknown_tag_exits_one_without_writing(self) -> None:
+        rc, _, err = self._run(
+            "review", "add", "body", "--entry", str(self.entry.id), "--tag", "nosuch"
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("tag 'nosuch' not found", err)
+        self.assertNotIn("warning", err)
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.list_reviews(conn), ())
 

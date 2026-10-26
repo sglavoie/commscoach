@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import sqlite3
 import stat
 import tempfile
 import unittest
@@ -46,9 +47,7 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(cli.read_body("-", stdin=stdin), "from stdin\n")
 
     def test_read_body_reads_file_for_at_prefix(self) -> None:
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".txt", delete=False, encoding="utf-8"
-        ) as fh:
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as fh:
             fh.write("file contents")
             tmp_path = fh.name
         try:
@@ -64,7 +63,8 @@ class HelperTests(unittest.TestCase):
         compose = mock.Mock()
         with self.assertRaisesRegex(
             db.DBError,
-            "body required: pass BODY, '-' for stdin, or '@PATH'",
+            "body required when stdin is not a terminal:"
+            " pass the text, '-' to read stdin, or '@PATH'",
         ):
             read_body_arg(
                 None,
@@ -75,6 +75,22 @@ class HelperTests(unittest.TestCase):
                 compose=compose,
             )
         compose.assert_not_called()
+
+    def test_read_body_arg_non_tty_hint_names_the_flag(self) -> None:
+        with self.assertRaisesRegex(
+            db.DBError,
+            "notes required when stdin is not a terminal:"
+            " pass --notes TEXT, --notes - to read stdin, or --notes @PATH",
+        ):
+            read_body_arg(
+                None,
+                what="notes",
+                template="",
+                preamble="instructions",
+                isatty=lambda: False,
+                compose=mock.Mock(),
+                flag="--notes",
+            )
 
     def test_read_body_arg_composes_on_tty(self) -> None:
         compose = mock.Mock(return_value="composed")
@@ -87,7 +103,7 @@ class HelperTests(unittest.TestCase):
             compose=compose,
         )
         self.assertEqual(result, "composed")
-        compose.assert_called_once_with(template="seed", preamble="instructions")
+        compose.assert_called_once_with(template="seed", preamble="instructions", what="body")
 
     def test_confirm_assume_yes_skips_prompt(self) -> None:
         calls: list[str] = []
@@ -99,28 +115,27 @@ class HelperTests(unittest.TestCase):
         self.assertTrue(cli.confirm("ok?", assume_yes=True, input_fn=fake_input))
         self.assertEqual(calls, [])
 
+    def test_confirm_declines_without_reading_a_non_terminal_stdin(self) -> None:
+        buf = io.StringIO()
+        with mock.patch("builtins.input", side_effect=AssertionError("must not read")):
+            result = cli.confirm("delete?", stream=buf, isatty=lambda: False)
+        self.assertFalse(result)
+        self.assertEqual(buf.getvalue(), "delete? [y/N] \n")
+
     def test_confirm_y_returns_true(self) -> None:
-        result = cli.confirm(
-            "ok?", stream=io.StringIO(), input_fn=lambda _: "y"
-        )
+        result = cli.confirm("ok?", stream=io.StringIO(), input_fn=lambda _: "y")
         self.assertTrue(result)
 
     def test_confirm_yes_returns_true(self) -> None:
-        result = cli.confirm(
-            "ok?", stream=io.StringIO(), input_fn=lambda _: "YES"
-        )
+        result = cli.confirm("ok?", stream=io.StringIO(), input_fn=lambda _: "YES")
         self.assertTrue(result)
 
     def test_confirm_n_returns_false(self) -> None:
-        result = cli.confirm(
-            "ok?", stream=io.StringIO(), input_fn=lambda _: "no"
-        )
+        result = cli.confirm("ok?", stream=io.StringIO(), input_fn=lambda _: "no")
         self.assertFalse(result)
 
     def test_confirm_empty_returns_false(self) -> None:
-        result = cli.confirm(
-            "ok?", stream=io.StringIO(), input_fn=lambda _: ""
-        )
+        result = cli.confirm("ok?", stream=io.StringIO(), input_fn=lambda _: "")
         self.assertFalse(result)
 
     def test_confirm_eof_returns_false(self) -> None:
@@ -151,10 +166,10 @@ class ResolveDBPathTests(unittest.TestCase):
     def test_falls_through_to_default_when_neither_set(self) -> None:
         args = mock.Mock(spec=["db"], db=None)
         expected = Path("/tmp/default.sqlite3")
-        with mock.patch.dict(os.environ, {}, clear=False), mock.patch.object(
-            paths, "default_db_path", return_value=expected
-        ), mock.patch.object(
-            paths, "LEGACY_ICLOUD_DB_PATH", Path("/tmp/missing-legacy.sqlite3")
+        with (
+            mock.patch.dict(os.environ, {}, clear=False),
+            mock.patch.object(paths, "default_db_path", return_value=expected),
+            mock.patch.object(paths, "LEGACY_ICLOUD_DB_PATH", Path("/tmp/missing-legacy.sqlite3")),
         ):
             os.environ.pop(paths.ENV_VAR, None)
             self.assertEqual(cli.resolve_db_path(args), expected)
@@ -186,12 +201,8 @@ class InitCommandTests(unittest.TestCase):
             rc = cli.main(["--db", str(self.db_path), "init"])
         self.assertEqual(rc, 0)
         self.assertTrue(self.db_path.exists())
-        self.assertEqual(
-            stat.S_IMODE(self.db_path.stat().st_mode), paths.DB_FILE_MODE
-        )
-        self.assertEqual(
-            stat.S_IMODE(self.db_path.parent.stat().st_mode), paths.DATA_DIR_MODE
-        )
+        self.assertEqual(stat.S_IMODE(self.db_path.stat().st_mode), paths.DB_FILE_MODE)
+        self.assertEqual(stat.S_IMODE(self.db_path.parent.stat().st_mode), paths.DATA_DIR_MODE)
 
     def test_init_text_output_includes_path(self) -> None:
         buf = io.StringIO()
@@ -219,8 +230,9 @@ class InitCommandTests(unittest.TestCase):
 
     def test_init_honors_env_var_when_no_cli_db(self) -> None:
         buf = io.StringIO()
-        with redirect_stdout(buf), mock.patch.dict(
-            os.environ, {paths.ENV_VAR: str(self.db_path)}, clear=False
+        with (
+            redirect_stdout(buf),
+            mock.patch.dict(os.environ, {paths.ENV_VAR: str(self.db_path)}, clear=False),
         ):
             rc = cli.main(["init"])
         self.assertEqual(rc, 0)
@@ -258,15 +270,49 @@ class ExitCodeTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("simulated semantic failure", err_buf.getvalue())
 
-    def test_keyboard_interrupt_maps_to_exit_one(self) -> None:
+    def test_keyboard_interrupt_maps_to_exit_130(self) -> None:
         def boom(_args: object) -> int:
             raise KeyboardInterrupt()
 
         err_buf = io.StringIO()
         with mock.patch.object(cli_app, "cmd_init", boom), redirect_stderr(err_buf):
             rc = cli.main(["init"])
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 130)
         self.assertIn("interrupted", err_buf.getvalue())
+
+    def test_sqlite_error_maps_to_exit_one_with_message(self) -> None:
+        def boom(_args: object) -> int:
+            raise sqlite3.OperationalError("database is locked")
+
+        err_buf = io.StringIO()
+        with mock.patch.object(cli_app, "cmd_init", boom), redirect_stderr(err_buf):
+            rc = cli.main(["init"])
+        self.assertEqual(rc, 1)
+        self.assertIn("database error: database is locked", err_buf.getvalue())
+
+    def test_broken_pipe_maps_to_exit_one_quietly(self) -> None:
+        def boom(_args: object) -> int:
+            raise BrokenPipeError()
+
+        err_buf = io.StringIO()
+        with (
+            mock.patch.object(cli_app, "cmd_init", boom),
+            mock.patch.object(cli_app, "_silence_stdout") as silence,
+            redirect_stderr(err_buf),
+        ):
+            rc = cli.main(["init"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(err_buf.getvalue(), "")
+        silence.assert_called_once()
+
+    def test_empty_db_flag_is_argparse_error(self) -> None:
+        for argv in (["--db", "", "entry", "list"], ["entry", "list", "--db", " "]):
+            with self.subTest(argv=argv):
+                err_buf = io.StringIO()
+                with redirect_stderr(err_buf), self.assertRaises(SystemExit) as ctx:
+                    cli.main(argv)
+                self.assertEqual(ctx.exception.code, 2)
+                self.assertIn("--db: must not be empty", err_buf.getvalue())
 
     def test_unexpected_exception_propagates(self) -> None:
         def boom(_args: object) -> int:
@@ -321,8 +367,25 @@ class OpenDBTests(unittest.TestCase):
         with redirect_stderr(err_buf):
             rc = cli.main(["--db", str(db_path), "entry", "list"])
         self.assertEqual(rc, 1)
-        self.assertIn("run 'commscoach init' first", err_buf.getvalue())
+        self.assertIn(f"run 'commscoach --db {db_path} init' first", err_buf.getvalue())
         self.assertFalse(db_path.exists())
+
+    def test_follow_up_hints_name_the_targeted_database(self) -> None:
+        db_path = self.tmpdir / "hints.sqlite3"
+        db.init_db(db_path)
+        for argv, hint in (
+            (["entry", "search", "--tag", "nosuch"], "'commscoach --db {db} tag list'"),
+            (["context", "1"], "'commscoach --db {db} person self HANDLE'"),
+        ):
+            with self.subTest(argv=argv):
+                if argv[0] == "context":
+                    with closing(db.connect(db_path)) as conn:
+                        db.create_entry(conn, "body")
+                err_buf = io.StringIO()
+                with redirect_stderr(err_buf):
+                    rc = cli.main(["--db", str(db_path), *argv])
+                self.assertEqual(rc, 1)
+                self.assertIn(hint.format(db=db_path), err_buf.getvalue())
 
     def test_uninitialized_db_exits_one_with_init_guidance(self) -> None:
         db_path = self.tmpdir / "empty.sqlite3"
@@ -331,23 +394,21 @@ class OpenDBTests(unittest.TestCase):
         with redirect_stderr(err_buf):
             rc = cli.main(["--db", str(db_path), "entry", "list"])
         self.assertEqual(rc, 1)
-        self.assertIn("run 'commscoach init' first", err_buf.getvalue())
+        self.assertIn(f"run 'commscoach --db {db_path} init' first", err_buf.getvalue())
 
     def test_v1_db_exits_one_with_init_guidance(self) -> None:
         db_path = self.tmpdir / "v1.sqlite3"
         paths.ensure_data_dir(db_path)
         with closing(db.connect(db_path)) as conn:
             conn.executescript(db_schema.SCHEMA_V1_SQL)
-            conn.execute(
-                "INSERT INTO _meta (key, value) VALUES ('schema_version', '1')"
-            )
+            conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', '1')")
             conn.commit()
 
         err_buf = io.StringIO()
         with redirect_stderr(err_buf):
             rc = cli.main(["--db", str(db_path), "entry", "list"])
         self.assertEqual(rc, 1)
-        self.assertIn("run 'commscoach init' first", err_buf.getvalue())
+        self.assertIn(f"run 'commscoach --db {db_path} init' first", err_buf.getvalue())
 
 
 class MainModuleTests(unittest.TestCase):

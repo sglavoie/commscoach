@@ -23,8 +23,9 @@ _DB_CHECKS = (
     "unparsable_occurred_at",
     "row_counts",
     "review_scope",
+    "addressable_names",
 )
-# ``review_scope`` is appended LAST on purpose. ``run_checks`` splices
+# ``review_scope`` and ``addressable_names`` are appended LAST on purpose. ``run_checks`` splices
 # ``sync_artifacts`` in at a hard-coded index 6 on the missing/not-downloaded
 # paths, which is exactly past the fourth DB check; inserting a new name
 # anywhere earlier in this tuple would silently reorder the emitted results
@@ -71,6 +72,17 @@ def _permissions_check(db_path: Path) -> dict[str, Any]:
         "database": oct(file_mode),
         "directory": oct(dir_mode),
     }
+    # A directory chosen with --db keeps its own permissions (see
+    # paths.ensure_data_dir), so only the default data directory must be 0700.
+    if not paths.within_default_data_dir(db_path.parent):
+        if file_mode == paths.DB_FILE_MODE:
+            return _result(
+                "permissions",
+                "ok",
+                "database is 0600 (directory permissions are yours to manage)",
+                details=details,
+            )
+        return _result("permissions", "warn", "expected database mode 0600", details=details)
     if file_mode == paths.DB_FILE_MODE and dir_mode == paths.DATA_DIR_MODE:
         return _result(
             "permissions", "ok", "database is 0600 and directory is 0700", details=details
@@ -113,8 +125,7 @@ def _schema_version_check(conn: sqlite3.Connection) -> dict[str, Any]:
         tables = {
             row[0]
             for row in conn.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
             )
         }
         version = db.get_schema_version(conn) if "_meta" in tables else None
@@ -227,8 +238,7 @@ def _review_scope_check(conn: sqlite3.Connection) -> dict[str, Any]:
             "review_scope", "ok", "every person-scoped review still resolves to a person"
         )
     dangling = [
-        {"review_id": row["id"], "scope_person_handle": row["scope_person_handle"]}
-        for row in rows
+        {"review_id": row["id"], "scope_person_handle": row["scope_person_handle"]} for row in rows
     ]
     return _result(
         "review_scope",
@@ -237,6 +247,46 @@ def _review_scope_check(conn: sqlite3.Connection) -> dict[str, Any]:
         "retained history, not corruption -- the handle is kept so the review "
         "still says who it was about",
         details=dangling,
+    )
+
+
+def _addressable_names_check(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Warn about handles and tags created before the CLI rejected them.
+
+    A handle with '@', a comma, or whitespace, or a tag with a comma, cannot be
+    typed back the way it is displayed (``--person``/``--tag`` split on
+    commas and ``@`` is stripped), so the user should rename it. Neither can
+    the second of two handles that differ only by non-ASCII case (``Émile``
+    and ``émile``), which older releases allowed.
+    """
+    try:
+        handles = conn.execute("SELECT handle FROM people ORDER BY id").fetchall()
+        tags = conn.execute("SELECT name FROM tags WHERE name LIKE '%,%' ORDER BY id").fetchall()
+        collisions = db.handle_collisions(conn)
+    except sqlite3.Error as exc:
+        return _result("addressable_names", "fail", f"cannot inspect handles and tags: {exc}")
+    details: list[dict[str, Any]] = []
+    for row in handles:
+        try:
+            if db.validate_handle(row["handle"]) == row["handle"]:
+                continue
+        except db.DBError:
+            pass
+        details.append({"handle": row["handle"], "fix": "person edit HANDLE --handle NEW"})
+    details.extend({"tag": row["name"], "fix": "tag rename NAME NEW"} for row in tags)
+    details.extend(
+        {"handle": handle, "same_as": group[0], "fix": "person edit HANDLE --handle NEW"}
+        for group in collisions
+        for handle in group[1:]
+    )
+    if not details:
+        return _result("addressable_names", "ok", "every handle and tag can be typed back")
+    return _result(
+        "addressable_names",
+        "warn",
+        f"{len(details)} handle(s) or tag(s) contain '@', commas, or whitespace,"
+        " or share another handle's identity, and are hard to address; rename them",
+        details=details,
     )
 
 
@@ -297,14 +347,17 @@ def run_checks(db_path: Path, *, quick: bool = False) -> list[dict[str, Any]]:
         checks.append(_unparsable_occurred_at_check(conn))
         checks.append(_row_counts_check(conn))
         checks.append(_review_scope_check(conn))
+        checks.append(_addressable_names_check(conn))
     return checks
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     db_path = resolve_db_path(args)
     checks = run_checks(db_path, quick=args.quick)
-    overall = "fail" if any(item["status"] == "fail" for item in checks) else (
-        "warn" if any(item["status"] == "warn" for item in checks) else "ok"
+    overall = (
+        "fail"
+        if any(item["status"] == "fail" for item in checks)
+        else ("warn" if any(item["status"] == "warn" for item in checks) else "ok")
     )
     if args.json:
         print_json({"db_path": str(db_path), "status": overall, "checks": checks})

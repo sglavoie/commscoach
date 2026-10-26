@@ -35,9 +35,14 @@ class GoalOutcomeSearchTests(GoalTestBase):
         goal = self._seed_goal()
         with closing(db.connect(self.db_path)) as conn:
             db.close_goal(conn, goal.id, outcome="Original", dropped=True)
-        with mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
-            cli_goals, "compose_in_editor", return_value="Revised",
-        ) as compose:
+        with (
+            mock.patch("sys.stdin.isatty", return_value=True),
+            mock.patch.object(
+                cli_goals,
+                "compose_in_editor",
+                return_value="Revised",
+            ) as compose,
+        ):
             rc, out, err = self._run("goal", "edit", str(goal.id), "--outcome", "--json")
         self.assertEqual(rc, 0, err)
         self.assertEqual(compose.call_args.kwargs["template"], "Original")
@@ -48,19 +53,42 @@ class GoalOutcomeSearchTests(GoalTestBase):
         rc, out, err = self._run("goal", "edit", str(goal.id), "--outcome", f"@{source}", "--json")
         self.assertEqual(rc, 0, err)
         self.assertEqual(json.loads(out)["outcome"], "From file")
-        rc, out, err = self._run("goal", "edit", str(goal.id), "--outcome", "-", "--json", stdin=io.StringIO("From stdin"))
+        rc, out, err = self._run(
+            "goal",
+            "edit",
+            str(goal.id),
+            "--outcome",
+            "-",
+            "--json",
+            stdin=io.StringIO("From stdin"),
+        )
         self.assertEqual(rc, 0, err)
         self.assertEqual(json.loads(out)["outcome"], "From stdin")
 
     def test_edit_validates_before_opening_any_editor(self) -> None:
         goal = self._seed_goal()
         for field in ("--detail", "--outcome"):
-            for flags in (("--title", " "), ("--person", "missing"), ("--outcome", "--clear-outcome")):
-                with self.subTest(field=field, flags=flags), mock.patch.object(
-                    cli_goals, "compose_in_editor",
-                ) as compose:
-                    rc, _, _ = self._run("goal", "edit", str(goal.id), field, *flags)
-                    self.assertEqual(rc, 1)
+            for flags in (
+                ("--title", " "),
+                ("--person", "missing"),
+                ("--outcome", "--clear-outcome"),
+            ):
+                with (
+                    self.subTest(field=field, flags=flags),
+                    mock.patch.object(
+                        cli_goals,
+                        "compose_in_editor",
+                    ) as compose,
+                ):
+                    if field == flags[0]:
+                        # A repeated --outcome is an argparse usage error.
+                        with self.assertRaises(SystemExit) as raised:
+                            self._run("goal", "edit", str(goal.id), field, *flags)
+                        self.assertEqual(raised.exception.code, 2)
+                    else:
+                        rc, _, _ = self._run("goal", "edit", str(goal.id), field, *flags)
+                        # Conflicting flags are usage errors, like argparse's own.
+                        self.assertEqual(rc, 2 if "--clear-outcome" in flags else 1)
                     compose.assert_not_called()
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.get_goal(conn, goal.id), goal)
@@ -69,28 +97,34 @@ class GoalOutcomeSearchTests(GoalTestBase):
         self._seed_person("alice")
         with closing(db.connect(self.db_path)) as conn:
             for _ in range(3):
-                goal = db.create_goal(conn, "Try 10%_! less", detail="10%_! detail", person_handle="alice")
+                goal = db.create_goal(
+                    conn, "Try 10%_! less", detail="10%_! detail", person_handle="alice"
+                )
                 db.close_goal(conn, goal.id, outcome="10%_! outcome")
             db.create_goal(conn, "Try 10%_! less", person_handle="alice")
             goal = db.create_goal(conn, "Try 10%_! less")
             db.close_goal(conn, goal.id)
             goal = db.create_goal(conn, "Try 100xyz! less", person_handle="alice")
             db.close_goal(conn, goal.id)
-        for command, total in ((('search', '--query', '10%_!'), 3), (('list',), 4)):
+        for command, total in ((("search", "--query", "10%_!"), 3), (("list",), 4)):
             flags = ("goal", *command, "--status", "done", "--person", "ALICE")
             for limit in (0, 1, total, total + 1):
                 with self.subTest(command=command, limit=limit):
                     rc, out, err = self._run(*flags, "--limit", str(limit), "--oldest-first")
                     self.assertEqual(rc, 0, err)
                     if limit < total:
-                        self.assertIn(f"Showing {limit} of {total} matching goals.", out)
+                        self.assertIn(f"Showing {limit} of {total} matching goals.", err)
                     else:
-                        self.assertNotIn("Showing", out)
+                        self.assertNotIn("Showing", out + err)
                     rc, out, err = self._run(*flags, "--limit", str(limit), "--json")
                     self.assertEqual(rc, 0, err)
                     self.assertEqual(len(json.loads(out)), min(limit, total))
-        self.assertNotIn("Showing", self._run("goal", "list", "--status", "all")[1])
+        self.assertNotIn("Showing", "".join(self._run("goal", "list", "--status", "all")[1:]))
         self.assertEqual(self._run("goal", "search", "--query", "missing")[1], "(no goals)\n")
+        # Active goals are goal list's default view, so no filter is "matching".
+        rc, _, err = self._run("goal", "list", "--limit", "0")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Showing 0 of 1 goals.", err)
 
     def test_outcome_list_and_search_show_full_text_without_duplicate_excerpt(self) -> None:
         with closing(db.connect(self.db_path)) as conn:
@@ -100,8 +134,11 @@ class GoalOutcomeSearchTests(GoalTestBase):
             db.close_goal(conn, empty.id)
             dropped = db.create_goal(conn, "Practice dropped")
             db.close_goal(conn, dropped.id, dropped=True, outcome="No longer relevant")
-        for command in (("list", "--status", "all"), ("search", "--query", "Practice"),
-                        ("search", "--query", "Worked")):
+        for command in (
+            ("list", "--status", "all"),
+            ("search", "--query", "Practice"),
+            ("search", "--query", "Worked"),
+        ):
             with self.subTest(command=command):
                 rc, out, err = self._run("goal", *command, "--with-outcome", "--with-detail")
                 self.assertEqual(rc, 0, err)
@@ -122,7 +159,9 @@ class GoalOutcomeSearchTests(GoalTestBase):
         for command in (("list",), ("search", "--query", "Practice")):
             for output in ((), ("--json",)):
                 with self.subTest(command=command, output=output):
-                    rc, out, err = self._run("goal", *command, "--person", "typo", "--limit", "0", *output)
+                    rc, out, err = self._run(
+                        "goal", *command, "--person", "typo", "--limit", "0", *output
+                    )
                     self.assertEqual(rc, 1)
                     self.assertIn("typo", err)
                     self.assertEqual(out, "")
@@ -145,7 +184,9 @@ class GoalOutcomeSearchTests(GoalTestBase):
     def test_search_finds_outcomes_and_shows_matching_passages(self) -> None:
         with closing(db.connect(self.db_path)) as conn:
             goal = db.create_goal(conn, "Practice", detail="Details")
-            db.close_goal(conn, goal.id, outcome="Unrelated introduction. " * 30 + "Saved 10% effort!")
+            db.close_goal(
+                conn, goal.id, outcome="Unrelated introduction. " * 30 + "Saved 10% effort!"
+            )
             db.create_goal(conn, "Saved 100% effort")
         rc, out, err = self._run("goal", "search", "--query", "10%")
         self.assertEqual(rc, 0, err)
@@ -156,9 +197,13 @@ class GoalOutcomeSearchTests(GoalTestBase):
         self.assertEqual(rc, 0, err)
         self.assertEqual([row["id"] for row in json.loads(out)], [goal.id])
         self.assertTrue(json.loads(out)[0]["outcome"].startswith("Unrelated"))
-        self.assertEqual(self._run("goal", "search", "--query", "10%", "--status", "active")[1], "(no goals)\n")
+        self.assertEqual(
+            self._run("goal", "search", "--query", "10%", "--status", "active")[1], "(no goals)\n"
+        )
         self.assertEqual(self._run("goal", "search", "--query", "   ")[0], 1)
-        self.assertEqual(self._run("goal", "search", "--query", "10%", "--limit", "0", "--json")[1], "[]\n")
+        self.assertEqual(
+            self._run("goal", "search", "--query", "10%", "--limit", "0", "--json")[1], "[]\n"
+        )
 
     def test_editor_prefills_goal_detail_and_outcome(self) -> None:
         goal = self._seed_goal()
@@ -171,11 +216,20 @@ class GoalOutcomeSearchTests(GoalTestBase):
                         elif original is not None:
                             db.close_goal(conn, goal.id, outcome=original)
                         before = db.get_goal(conn, goal.id)
-                    with mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
-                        cli_goals, "compose_in_editor", return_value="Revised text",
-                    ) as compose:
+                    with (
+                        mock.patch("sys.stdin.isatty", return_value=True),
+                        mock.patch.object(
+                            cli_goals,
+                            "compose_in_editor",
+                            return_value="Revised text",
+                        ) as compose,
+                    ):
                         rc, out, err = self._run(
-                            "goal", command, str(goal.id), f"--{field}", "--json",
+                            "goal",
+                            command,
+                            str(goal.id),
+                            f"--{field}",
+                            "--json",
                         )
                     self.assertEqual(rc, 0, err)
                     self.assertEqual(compose.call_args.kwargs["template"], original or "")
@@ -189,12 +243,24 @@ class GoalOutcomeSearchTests(GoalTestBase):
     def test_add_detail_editor_saves_goal_with_references(self) -> None:
         person = self._seed_person()
         review = self._seed_review()
-        with mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
-            cli_goals, "compose_in_editor", return_value="Practice in three meetings",
-        ) as compose:
+        with (
+            mock.patch("sys.stdin.isatty", return_value=True),
+            mock.patch.object(
+                cli_goals,
+                "compose_in_editor",
+                return_value="Practice in three meetings",
+            ) as compose,
+        ):
             rc, out, err = self._run(
-                "goal", "add", "Lead with the ask", "--detail", "--person", "ALEX",
-                "--review", str(review.id), "--json",
+                "goal",
+                "add",
+                "Lead with the ask",
+                "--detail",
+                "--person",
+                "ALEX",
+                "--review",
+                str(review.id),
+                "--json",
             )
         self.assertEqual(rc, 0, err)
         self.assertEqual(compose.call_args.kwargs["template"], "")
@@ -211,9 +277,14 @@ class GoalOutcomeSearchTests(GoalTestBase):
             (("Practice", "--db", str(self.tmpdir / "missing.sqlite3")), "init"),
         )
         for flags, message in cases:
-            with self.subTest(flags=flags), mock.patch("sys.stdin.isatty", return_value=True), mock.patch.object(
-                cli_goals, "compose_in_editor",
-            ) as compose:
+            with (
+                self.subTest(flags=flags),
+                mock.patch("sys.stdin.isatty", return_value=True),
+                mock.patch.object(
+                    cli_goals,
+                    "compose_in_editor",
+                ) as compose,
+            ):
                 rc, out, err = self._run("goal", "add", *flags, "--detail")
                 self.assertEqual(rc, 1)
                 self.assertEqual(out, "")
@@ -223,9 +294,13 @@ class GoalOutcomeSearchTests(GoalTestBase):
             self.assertEqual(db.list_goals(conn), ())
 
     def test_add_detail_editor_requires_tty_but_omitted_detail_stays_optional(self) -> None:
-        with mock.patch("sys.stdin.isatty", return_value=False), mock.patch.object(
-            cli_goals, "compose_in_editor",
-        ) as compose:
+        with (
+            mock.patch("sys.stdin.isatty", return_value=False),
+            mock.patch.object(
+                cli_goals,
+                "compose_in_editor",
+            ) as compose,
+        ):
             rc, _, err = self._run("goal", "add", "Practice", "--detail")
             self.assertEqual(rc, 1)
             self.assertIn("detail required", err)
@@ -241,9 +316,14 @@ class GoalOutcomeSearchTests(GoalTestBase):
                 (goal.id, False, f"{field} required"),
                 (9999, True, "9999"),
             ):
-                with self.subTest(command=command, goal_id=goal_id), mock.patch(
-                    "sys.stdin.isatty", return_value=tty,
-                ), mock.patch.object(cli_goals, "compose_in_editor") as compose:
+                with (
+                    self.subTest(command=command, goal_id=goal_id),
+                    mock.patch(
+                        "sys.stdin.isatty",
+                        return_value=tty,
+                    ),
+                    mock.patch.object(cli_goals, "compose_in_editor") as compose,
+                ):
                     rc, out, err = self._run("goal", command, str(goal_id), f"--{field}")
                     self.assertEqual(rc, 1)
                     self.assertEqual(out, "")
@@ -256,9 +336,13 @@ class GoalOutcomeSearchTests(GoalTestBase):
         goal = self._seed_goal()
         with mock.patch.object(cli_goals, "compose_in_editor") as compose:
             rc, _, err = self._run(
-                "goal", "edit", str(goal.id), "--detail", "--clear-detail",
+                "goal",
+                "edit",
+                str(goal.id),
+                "--detail",
+                "--clear-detail",
             )
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 2)
         self.assertIn("cannot be combined", err)
         compose.assert_not_called()
 

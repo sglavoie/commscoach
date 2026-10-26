@@ -76,6 +76,8 @@ commscoach context 42 --json
 commscoach entry list --db ~/journal.sqlite3 --json
 ```
 
+Confirmation prompts only read answers from a terminal; when stdin is a pipe or file they decline, so scripts and agents pass `--yes`.
+
 Use `commscoach --help` for top-level help and `commscoach <command> --help`
 for subcommand-specific options.
 
@@ -112,7 +114,10 @@ uv venv
 uv sync
 uv run commscoach --help
 uv run pytest -q
+uv run ruff check . && uv run ruff format --check .
 ```
+
+CI runs the same lint, format, and test checks on Linux and macOS for Python 3.11–3.14, then builds the wheel and runs the installed `commscoach --version`.
 
 ## License
 

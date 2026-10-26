@@ -13,8 +13,12 @@ class ReviewSearchTests(ReviewTestBase):
         person = self._seed_person("alice")
         entries = [self._seed_entry(people=("alice",)).id for _ in range(2)]
         for _ in range(3):
-            self._seed_review("Try 10%_! less", entries, scope_kind="person", scope_person_handle="alice")
-        self._seed_review("Try 100xyz! less", entries, scope_kind="person", scope_person_handle="alice")
+            self._seed_review(
+                "Try 10%_! less", entries, scope_kind="person", scope_person_handle="alice"
+            )
+        self._seed_review(
+            "Try 100xyz! less", entries, scope_kind="person", scope_person_handle="alice"
+        )
         self._seed_review("Try 10%_! less", entries, scope_kind="tag", scope_tag="Meeting")
         self._seed_review("Try 10%_! less", entries)
         with closing(db.connect(self.db_path)) as conn:
@@ -25,18 +29,26 @@ class ReviewSearchTests(ReviewTestBase):
                 rc, out, err = self._run(*flags, "--limit", str(limit))
                 self.assertEqual(rc, 0, err)
                 if limit < 3:
-                    self.assertIn(f"Showing {limit} of 3 matching reviews.", out)
+                    self.assertIn(f"Showing {limit} of 3 matching reviews.", err)
                 else:
-                    self.assertNotIn("Showing", out)
+                    self.assertNotIn("Showing", out + err)
                 rc, out, err = self._run(*flags, "--limit", str(limit), "--json")
                 self.assertEqual(rc, 0, err)
                 self.assertEqual(len(json.loads(out)), min(limit, 3))
         rc, out, err = self._run(
-            "review", "search", "--query", "10%_!", "--scope", "tag",
-            "--tag", "MEETING", "--limit", "0",
+            "review",
+            "search",
+            "--query",
+            "10%_!",
+            "--scope",
+            "tag",
+            "--tag",
+            "MEETING",
+            "--limit",
+            "0",
         )
         self.assertEqual(rc, 0, err)
-        self.assertIn("Showing 0 of 1 matching reviews.", out)
+        self.assertIn("Showing 0 of 1 matching reviews.", err)
         self.assertEqual(self._run(*flags, "--tag", "meeting")[1], "(no reviews)\n")
 
     def test_search_shows_matching_excerpt_and_full_json(self):
@@ -73,10 +85,16 @@ class ReviewSearchTests(ReviewTestBase):
         entry = self._seed_entry(people=("alice",))
         self._seed_review("Ask clearly", [entry.id])
         scoped = self._seed_review(
-            "Ask clearly", [entry.id], scope_kind="person", scope_person_handle="alice",
+            "Ask clearly",
+            [entry.id],
+            scope_kind="person",
+            scope_person_handle="alice",
         )
         tagged = self._seed_review(
-            "Ask clearly", [entry.id], scope_kind="tag", scope_tag="Conflict",
+            "Ask clearly",
+            [entry.id],
+            scope_kind="tag",
+            scope_tag="Conflict",
         )
         with closing(db.connect(self.db_path)) as conn:
             db.delete_person(conn, person.id)
@@ -84,12 +102,14 @@ class ReviewSearchTests(ReviewTestBase):
             (("--person", "ALICE", "--scope", "person"), [scoped.id]),
             (("--tag", "CONFLICT", "--scope", "tag"), [tagged.id]),
             (("--person", "alice", "--tag", "conflict"), []),
-            (("--person", "unknown"), []),
         ):
             with self.subTest(flags=flags):
                 rc, out, err = self._run("review", "search", "--query", "ask", *flags, "--json")
                 self.assertEqual(rc, 0, err)
                 self.assertEqual([r["id"] for r in json.loads(out)], expected)
+        rc, _, err = self._run("review", "search", "--query", "ask", "--person", "unknown")
+        self.assertEqual(rc, 1)
+        self.assertIn("person 'unknown' not found", err)
 
     def test_empty_results_zero_limit_and_invalid_queries(self):
         entry = self._seed_entry()

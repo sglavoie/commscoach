@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Iterable
+import unicodedata
+from collections.abc import Iterable
+from typing import Any
 
 from ..models import Tag
+from . import common
 from .errors import DBError, DuplicateTagError, TagNotFoundError
 
 
 def normalize_tag(name: str) -> str:
-    """Normalize a tag for storage: stripped, lowercased."""
-    return name.strip().lower()
+    """Normalize a tag for storage: NFC, stripped, lowercased, without a leading ``#``.
+
+    Tags display as ``#tag``, so ``--tag '#tag'`` names the same tag, the way
+    ``@handle`` names a person. NFC makes a precomposed ``é`` and ``e`` plus a
+    combining accent, which look identical, the same tag.
+    """
+    return unicodedata.normalize("NFC", name).strip().lstrip("#").strip().lower()
 
 
 def normalize_tag_list(tags: Iterable[str]) -> list[str]:
@@ -35,14 +43,23 @@ def upsert_tag(conn: sqlite3.Connection, name: str) -> int:
     return row["id"]
 
 
-def gc_orphan_tags(conn: sqlite3.Connection) -> None:
-    """Drop tag rows that no entry references anymore.
+def linked_tag_ids(conn: sqlite3.Connection, entry_id: int) -> list[int]:
+    """Return the ids of the tags currently linked to an entry."""
+    rows = conn.execute("SELECT tag_id FROM entry_tags WHERE entry_id = ?", (entry_id,))
+    return [row["tag_id"] for row in rows]
 
-    Called after entry deletion or tag replacement so the ``tags`` table stays
-    in sync with active links instead of accumulating dead names.
+
+def gc_orphan_tags(conn: sqlite3.Connection, tag_ids: Iterable[int]) -> None:
+    """Drop the given tag rows if no entry references them anymore.
+
+    Called after entry deletion or tag replacement with the ids that change
+    just unlinked, so dead names do not accumulate. The sweep is scoped to
+    those ids: an unused tag from an import stays until ``tag rm`` removes it.
     """
-    conn.execute(
-        "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM entry_tags)"
+    conn.executemany(
+        "DELETE FROM tags WHERE id = ?"
+        " AND NOT EXISTS (SELECT 1 FROM entry_tags WHERE tag_id = tags.id)",
+        [(tag_id,) for tag_id in set(tag_ids)],
     )
 
 
@@ -58,6 +75,20 @@ def _find_tag_id(conn: sqlite3.Connection, name: str) -> int | None:
     """Return the id of a normalized tag name, or ``None`` when absent."""
     row = conn.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()
     return None if row is None else row["id"]
+
+
+def get_tag(conn: sqlite3.Connection, name: str, *, hint: str | None = None) -> Tag:
+    """Load a tag by name with its entry count, raising ``TagNotFoundError``."""
+    tag_name = _require_name(name)
+    tag_id = _find_tag_id(conn, tag_name)
+    if tag_id is None:
+        raise TagNotFoundError(tag_name, hint=hint)
+    return _get_tag(conn, tag_id)
+
+
+def count_tags(conn: sqlite3.Connection) -> int:
+    """Return how many tags exist, for ``tag list --limit`` footers."""
+    return conn.execute("SELECT COUNT(*) FROM tags").fetchone()[0]
 
 
 def _get_tag(conn: sqlite3.Connection, tag_id: int) -> Tag:
@@ -82,7 +113,7 @@ def list_tags(
     """Return every tag with its entry count, most-used first then by name.
 
     The ``LEFT JOIN`` keeps tags no entry references. Those are unreachable
-    through normal entry CRUD (``gc_orphan_tags`` drops them) but a direct
+    through normal entry CRUD (``gc_orphan_tags`` drops the ones an edit unlinks) but a direct
     insert or an import can produce them, and a listing that hides rows would
     make ``tag rm`` look broken.
     """
@@ -93,7 +124,7 @@ def list_tags(
         " COUNT(et.entry_id) AS entry_count"
         " FROM tags t LEFT JOIN entry_tags et ON et.tag_id = t.id"
         " GROUP BY t.id"
-        " ORDER BY entry_count DESC, t.name ASC"
+        " ORDER BY entry_count DESC, search_fold(t.name), t.name"
     )
     params: list[Any] = []
     if limit is not None:
@@ -101,11 +132,11 @@ def list_tags(
         params.append(limit)
     rows = conn.execute(sql, params).fetchall()
     return tuple(
-        Tag(id=row["id"], name=row["name"], entry_count=row["entry_count"])
-        for row in rows
+        Tag(id=row["id"], name=row["name"], entry_count=row["entry_count"]) for row in rows
     )
 
 
+@common.writes
 def rename_tag(conn: sqlite3.Connection, old: str, new: str) -> Tag:
     """Rename a tag in place, keeping every entry link.
 
@@ -118,6 +149,9 @@ def rename_tag(conn: sqlite3.Connection, old: str, new: str) -> Tag:
     """
     old_name = _require_name(old)
     new_name = _require_name(new, what="new tag name")
+    if "," in new_name:
+        # --tag splits on commas, so such a name could never be attached again.
+        raise DBError(f"new tag name {new_name!r} must not contain a comma")
     tag_id = _find_tag_id(conn, old_name)
     if tag_id is None:
         raise TagNotFoundError(old_name)
@@ -130,7 +164,7 @@ def rename_tag(conn: sqlite3.Connection, old: str, new: str) -> Tag:
         # lowercases anyway, so the stored name cannot actually change.
         assert old_name == new_name
         return _get_tag(conn, tag_id)
-    with conn:
+    with common.write_transaction(conn):
         conn.execute("UPDATE tags SET name = ? WHERE id = ?", (new_name, tag_id))
         conn.execute(
             "UPDATE reviews SET scope_tag = ? WHERE scope_tag = ?",
@@ -139,6 +173,7 @@ def rename_tag(conn: sqlite3.Connection, old: str, new: str) -> Tag:
     return _get_tag(conn, tag_id)
 
 
+@common.writes
 def merge_tags(conn: sqlite3.Connection, source: str, dest: str) -> Tag:
     """Fold every ``source`` entry link into ``dest`` and drop ``source``.
 
@@ -162,7 +197,7 @@ def merge_tags(conn: sqlite3.Connection, source: str, dest: str) -> Tag:
             dest_name,
             hint="use 'commscoach tag rename' to rename a tag to a new name",
         )
-    with conn:
+    with common.write_transaction(conn):
         # OR IGNORE is required: an entry carrying both tags already owns the
         # (entry_id, dest_id) primary key, and the re-point would collide.
         conn.execute(
@@ -181,6 +216,39 @@ def merge_tags(conn: sqlite3.Connection, source: str, dest: str) -> Tag:
     return _get_tag(conn, dest_id)
 
 
+def renormalize_tag_names(conn: sqlite3.Connection) -> None:
+    """Bring stored tag names up to the current ``normalize_tag`` rules.
+
+    Names stored under older rules (decomposed accents, a leading ``#``) are
+    renamed, or folded into the tag they now equal. Review scopes are
+    normalized on their own, since one may name a tag deleted since. The
+    caller owns the transaction.
+    """
+    for row in conn.execute("SELECT id, name FROM tags ORDER BY id").fetchall():
+        old_name, new_name = row["name"], normalize_tag(row["name"])
+        if new_name == old_name or not new_name:
+            continue
+        dest_id = _find_tag_id(conn, new_name)
+        if dest_id is None:
+            conn.execute("UPDATE tags SET name = ? WHERE id = ?", (new_name, row["id"]))
+        else:
+            conn.execute(
+                "UPDATE OR IGNORE entry_tags SET tag_id = ? WHERE tag_id = ?",
+                (dest_id, row["id"]),
+            )
+            conn.execute("DELETE FROM entry_tags WHERE tag_id = ?", (row["id"],))
+            conn.execute("DELETE FROM tags WHERE id = ?", (row["id"],))
+    for row in conn.execute(
+        "SELECT DISTINCT scope_tag FROM reviews WHERE scope_tag IS NOT NULL"
+    ).fetchall():
+        old_name, new_name = row["scope_tag"], normalize_tag(row["scope_tag"])
+        if new_name != old_name and new_name:
+            conn.execute(
+                "UPDATE reviews SET scope_tag = ? WHERE scope_tag = ?", (new_name, old_name)
+            )
+
+
+@common.writes
 def delete_tag(conn: sqlite3.Connection, name: str) -> int:
     """Unlink a tag from every entry and drop it. Returns the unlink count.
 
@@ -196,7 +264,7 @@ def delete_tag(conn: sqlite3.Connection, name: str) -> int:
     tag_id = _find_tag_id(conn, tag_name)
     if tag_id is None:
         raise TagNotFoundError(tag_name)
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute("DELETE FROM entry_tags WHERE tag_id = ?", (tag_id,))
         unlinked = cur.rowcount
         conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))

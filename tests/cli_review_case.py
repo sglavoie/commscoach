@@ -60,9 +60,7 @@ class ReviewTestBase(unittest.TestCase):
         people: tuple[str, ...] = (),
     ) -> db.Entry:
         with closing(db.connect(self.db_path)) as conn:
-            return db.create_entry(
-                conn, body, occurred_at=occurred_at, tags=tags, people=people
-            )
+            return db.create_entry(conn, body, occurred_at=occurred_at, tags=tags, people=people)
 
     def _seed_feedback(self, entry_id: int, body: str) -> db.Feedback:
         with closing(db.connect(self.db_path)) as conn:

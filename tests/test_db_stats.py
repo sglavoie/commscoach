@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 
 from commscoach import db
 
 from .db_case import DBTestCase
+from .timezone_case import local_timezone
 
 
 class StatsTests(DBTestCase):
@@ -72,7 +74,8 @@ class StatsTests(DBTestCase):
             self._add_entry(timestamp)
         self.conn.commit()
 
-        stats = db.get_stats(self.conn)
+        with local_timezone("UTC"):
+            stats = db.get_stats(self.conn, today=date(2026, 1, 28))
 
         self.assertEqual(stats.entries_per_week, 0.8)
         self.assertEqual(stats.current_weekly_streak, 2)
@@ -88,6 +91,68 @@ class StatsTests(DBTestCase):
             ),
         )
 
+    def test_stats_read_one_snapshot_and_leave_no_open_transaction(self) -> None:
+        self._add_entry("2026-01-05T09:00:00+00:00")
+        self.conn.commit()
+        stats = db.get_stats(self.conn)
+        self.assertEqual(stats.entry_count, 1)
+        self.assertFalse(self.conn.in_transaction)
+
+    def test_streak_that_ended_before_last_week_is_not_current(self) -> None:
+        for timestamp in ("2026-01-05T09:00:00+00:00", "2026-01-12T09:00:00+00:00"):
+            self._add_entry(timestamp)
+        self.conn.commit()
+
+        with local_timezone("UTC"):
+            ongoing = db.get_stats(self.conn, today=date(2026, 1, 21))
+            ended = db.get_stats(self.conn, today=date(2026, 3, 1))
+            windowed = db.get_stats(self.conn, until="2026-01-18", today=date(2026, 3, 1))
+
+        self.assertEqual(ongoing.current_weekly_streak, 2)
+        self.assertEqual(ended.current_weekly_streak, 0)
+        self.assertEqual(ended.longest_weekly_streak, 2)
+        self.assertEqual(windowed.current_weekly_streak, 2)
+
+    def test_top_sources_group_case_insensitively(self) -> None:
+        for source in ("Slack", "slack", "SLACK", "email"):
+            self._add_entry("2026-01-05T09:00:00+00:00", source=source)
+        self.conn.commit()
+        stats = db.get_stats(self.conn)
+        self.assertEqual(stats.top_sources, (("SLACK", 3), ("email", 1)))
+
+    def test_top_sources_group_non_ascii_case_together(self) -> None:
+        for source in ("ÉQUIPE", "équipe", "Équipe", "equipe"):
+            self._add_entry("2026-01-05T09:00:00+00:00", source=source)
+        self.conn.commit()
+        stats = db.get_stats(self.conn)
+        self.assertEqual(stats.top_sources, (("ÉQUIPE", 3), ("equipe", 1)))
+
+    def test_future_dated_entry_does_not_reset_current_streak(self) -> None:
+        for timestamp in (
+            "2026-01-05T09:00:00+00:00",
+            "2026-01-12T09:00:00+00:00",
+            "2026-01-19T09:00:00+00:00",
+            "2026-02-09T09:00:00+00:00",  # three weeks ahead of "today"
+        ):
+            self._add_entry(timestamp)
+        self.conn.commit()
+
+        with local_timezone("UTC"):
+            stats = db.get_stats(self.conn, today=date(2026, 1, 21))
+
+        self.assertEqual(stats.current_weekly_streak, 3)
+        self.assertEqual(stats.longest_weekly_streak, 3)
+
+    def test_weeks_follow_the_local_calendar(self) -> None:
+        # Sunday 2026-01-11 21:00 in New York is already Monday in UTC.
+        self._add_entry("2026-01-12T02:00:00+00:00")
+        self.conn.commit()
+
+        with local_timezone("America/New_York"):
+            stats = db.get_stats(self.conn, today=date(2026, 1, 11))
+
+        self.assertEqual(stats.weekly_buckets, (("2026-01-05", 1),))
+
     def test_top_dimensions_are_ranked_and_truncated(self) -> None:
         alice = self._add_person("alice")
         bob = self._add_person("bob")
@@ -102,9 +167,7 @@ class StatsTests(DBTestCase):
             source="slack",
             people=(alice, bob),
         )
-        focus_id = self.conn.execute(
-            "SELECT id FROM tags WHERE name = 'focus'"
-        ).fetchone()[0]
+        focus_id = self.conn.execute("SELECT id FROM tags WHERE name = 'focus'").fetchone()[0]
         self.conn.execute(
             "INSERT INTO entry_tags (entry_id, tag_id) VALUES (?, ?)",
             (second, focus_id),
@@ -129,9 +192,7 @@ class StatsTests(DBTestCase):
     def test_window_filters_entries_links_reviews_and_goal_events(self) -> None:
         alice = self._add_person("alice")
         bob = self._add_person("bob")
-        old_entry = self._add_entry(
-            "2026-01-01T10:00:00+00:00", tags=("old",), people=(alice,)
-        )
+        old_entry = self._add_entry("2026-01-01T10:00:00+00:00", tags=("old",), people=(alice,))
         current_entry = self._add_entry(
             "2026-02-10T10:00:00+00:00", tags=("current",), people=(bob,)
         )
@@ -170,9 +231,7 @@ class StatsTests(DBTestCase):
         )
         self.conn.commit()
 
-        stats = db.get_stats(
-            self.conn, since="2026-02-01", until="2026-02-28"
-        )
+        stats = db.get_stats(self.conn, since="2026-02-01", until="2026-02-28")
 
         self.assertEqual(stats.entry_count, 1)
         self.assertEqual(stats.people_count, 1)

@@ -24,9 +24,7 @@ def patch_timestamps(*values: str) -> Any:
     Opaque fakes such as ``"e0"`` are not valid operands for date-filter tests;
     those tests must supply canonical ISO timestamps.
     """
-    return mock.patch.object(
-        common, "utcnow_iso", side_effect=iter(values).__next__
-    )
+    return mock.patch.object(common, "utcnow_iso", side_effect=iter(values).__next__)
 
 
 class DBTestCase(unittest.TestCase):

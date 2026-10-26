@@ -25,9 +25,7 @@ class NormalizeTagTests(unittest.TestCase):
 
 class NormalizeTagListTests(unittest.TestCase):
     def test_splits_on_commas_and_preserves_first_seen_order(self) -> None:
-        self.assertEqual(
-            normalize_tag_list(["Ops, conflict", "ops"]), ["ops", "conflict"]
-        )
+        self.assertEqual(normalize_tag_list(["Ops, conflict", "ops"]), ["ops", "conflict"])
 
     def test_drops_empties(self) -> None:
         self.assertEqual(normalize_tag_list(["ops,,  ,"]), ["ops"])
@@ -45,17 +43,30 @@ class UpsertTagTests(DBTestCase):
 
 
 class GcOrphanTagsTests(DBTestCase):
-    def test_drops_tags_no_entry_references(self) -> None:
+    def test_drops_only_the_given_unreferenced_tags(self) -> None:
         entry = db.create_entry(self.conn, "a", tags=("kept",))
-        upsert_tag(self.conn, "orphan")
+        kept_id = db.list_tags(self.conn)[0].id
+        orphan_id = upsert_tag(self.conn, "orphan")
+        upsert_tag(self.conn, "imported")
         self.conn.commit()
 
-        gc_orphan_tags(self.conn)
+        gc_orphan_tags(self.conn, [kept_id, orphan_id])
         self.conn.commit()
 
-        names = [tag.name for tag in db.list_tags(self.conn)]
-        self.assertEqual(names, ["kept"])
+        names = sorted(tag.name for tag in db.list_tags(self.conn))
+        self.assertEqual(names, ["imported", "kept"])
         self.assertEqual(db.get_entry(self.conn, entry.id).tags, ("kept",))
+
+    def test_entry_edit_and_delete_keep_unrelated_unused_tags(self) -> None:
+        entry = db.create_entry(self.conn, "a", tags=("old",))
+        upsert_tag(self.conn, "imported")
+        self.conn.commit()
+
+        db.update_entry(self.conn, entry.id, tags=["new"])
+        self.assertEqual(sorted(t.name for t in db.list_tags(self.conn)), ["imported", "new"])
+
+        db.delete_entry(self.conn, entry.id)
+        self.assertEqual([t.name for t in db.list_tags(self.conn)], ["imported"])
 
 
 class ListTagsTests(DBTestCase):
@@ -72,7 +83,7 @@ class ListTagsTests(DBTestCase):
 
     def test_includes_a_tag_no_entry_references(self) -> None:
         db.create_entry(self.conn, "a", tags=("conflict",))
-        # Only reachable by direct insert: entry CRUD runs gc_orphan_tags.
+        # Reachable by direct insert or import; entry CRUD only drops tags it unlinks.
         upsert_tag(self.conn, "unused")
         self.conn.commit()
 
@@ -238,9 +249,7 @@ class MergeTagsTests(DBTestCase):
         self.assertEqual(db.get_review(self.conn, source_scoped.id).scope_tag, "conflict")
         self.assertEqual(db.get_review(self.conn, dest_scoped.id).scope_tag, "conflict")
         self.assertEqual(
-            sorted(
-                review.body for review in db.list_reviews(self.conn, tag="conflict")
-            ),
+            sorted(review.body for review in db.list_reviews(self.conn, tag="conflict")),
             ["real theme", "typo theme"],
         )
 

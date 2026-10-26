@@ -7,8 +7,9 @@ The package is split by table:
   :mod:`commscoach.db.feedback`, and :mod:`commscoach.db.reviews` own CRUD.
 - :mod:`commscoach.db.context` aggregates the skill-facing read models.
 
-Each public mutator opens its own transaction via ``with conn:`` so callers do
-not need to manage transactions explicitly.
+Each public mutator runs, lookups included, in one ``BEGIN IMMEDIATE``
+transaction (:func:`commscoach.db.common.write_transaction`) so callers do not
+need to manage transactions explicitly.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from .dump import (
     FORMAT_VERSION,
     DatabaseNotEmptyError,
     DumpFormatError,
+    dump_row_counts,
     dump_to_dict,
     load_from_dict,
     validate_dump,
@@ -58,6 +60,7 @@ from .errors import (
     EntryNotFoundError,
     FeedbackNotFoundError,
     GoalNotFoundError,
+    InitRequiredError,
     MissingSelfError,
     PersonNotFoundError,
     ReviewNotFoundError,
@@ -67,15 +70,15 @@ from .feedback import (
     count_search_feedback,
     create_feedback,
     delete_feedback,
-    get_feedback,
     feedback_entry_ids,
+    get_feedback,
     list_feedback,
     search_feedback,
     update_feedback,
 )
 from .goals import (
-    count_goals,
     close_goal,
+    count_goals,
     create_goal,
     delete_goal,
     get_goal,
@@ -91,17 +94,19 @@ from .notes import (
 from .people import (
     create_person,
     delete_person,
-    get_person,
     get_people_activity,
+    get_person,
     get_person_by_handle,
     get_self_person,
+    handle_collisions,
     list_people,
     set_self,
     update_person,
+    validate_handle,
 )
 from .reviews import (
-    count_reviews,
     SCOPE_KINDS,
+    count_reviews,
     create_review,
     delete_review,
     get_review,
@@ -119,7 +124,9 @@ from .schema import (
 )
 from .stats import get_stats
 from .tags import (
+    count_tags,
     delete_tag,
+    get_tag,
     list_tags,
     merge_tags,
     rename_tag,
@@ -142,6 +149,7 @@ __all__ = [
     "FORMAT_VERSION",
     "Goal",
     "GoalNotFoundError",
+    "InitRequiredError",
     "MissingSelfError",
     "Person",
     "PersonActivity",
@@ -162,6 +170,7 @@ __all__ = [
     "count_search_feedback",
     "count_goals",
     "count_reviews",
+    "count_tags",
     "close_goal",
     "clear_person_note",
     "create_entry",
@@ -184,6 +193,7 @@ __all__ = [
     "get_person",
     "get_people_activity",
     "get_person_by_handle",
+    "handle_collisions",
     "get_person_note",
     "get_person_notes",
     "get_review",
@@ -191,6 +201,7 @@ __all__ = [
     "get_schema_version",
     "get_self_person",
     "get_stats",
+    "get_tag",
     "init_db",
     "list_entries",
     "list_entries_with_person",
@@ -199,6 +210,7 @@ __all__ = [
     "list_people",
     "list_reviews",
     "list_tags",
+    "dump_row_counts",
     "load_from_dict",
     "merge_tags",
     "prune_backups",
@@ -212,6 +224,7 @@ __all__ = [
     "update_feedback",
     "update_goal",
     "update_person",
+    "validate_handle",
     "update_review",
     "validate_backup_source",
     "validate_dump",

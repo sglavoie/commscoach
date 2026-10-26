@@ -43,8 +43,7 @@ class TagNotFoundError(DBError):
 class DuplicateTagError(DBError):
     def __init__(self, name: str) -> None:
         super().__init__(
-            f"tag {name!r} already exists;"
-            " use 'commscoach tag merge' to combine the two"
+            f"tag {name!r} already exists; use 'commscoach tag merge' to combine the two"
         )
         self.name = name
 
@@ -66,6 +65,18 @@ class DuplicateSelfError(DBError):
         super().__init__("another person is already marked self")
 
 
+class InitRequiredError(DBError):
+    """The store is missing, outdated, or set up for another build; ``init`` fixes it."""
+
+    def __init__(self, command: str = "commscoach init", *, reason: str | None = None) -> None:
+        hint = f"run '{command}' first"
+        super().__init__(f"{reason}; {hint}" if reason else hint)
+        self.reason = reason
+
+
 class MissingSelfError(DBError):
     def __init__(self) -> None:
-        super().__init__("no self person configured")
+        super().__init__(
+            "no self person configured; run 'commscoach person self HANDLE'"
+            " (or 'commscoach person add HANDLE --self')"
+        )

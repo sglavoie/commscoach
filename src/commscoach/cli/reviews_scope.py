@@ -8,12 +8,11 @@ from dataclasses import dataclass
 from .. import db
 from ..db.tags import normalize_tag
 from .common import (
+    UsageError,
     add_date_bounds,
+    handle_arg,
     parse_date_bounds,
 )
-
-
-
 
 #: Each axis flag as ``(flag, argparse dest, scope kind it derives)``, in the
 #: order the flags are declared so a conflict message names them predictably.
@@ -73,6 +72,7 @@ def add_scope_flags(parser: argparse.ArgumentParser) -> None:
         "--person",
         default=None,
         dest="scope_person",
+        type=handle_arg,
         metavar="HANDLE",
         help="Scope to entries involving HANDLE (scope kind 'person').",
     )
@@ -91,8 +91,9 @@ def resolve_scope(args: argparse.Namespace) -> Scope:
 
     Argparse's mutually-exclusive groups cannot express "``--since`` and
     ``--until`` together, but neither alongside ``--person``", so the conflict
-    is rejected here as a ``db.DBError`` (exit 1) naming every flag involved --
-    the same way ``cmd_entry_edit`` rejects ``--clear-tags`` with ``--tag``.
+    is rejected here as a ``UsageError`` (exit 2) naming every flag involved --
+    the same way ``cmd_entry_edit`` rejects ``--clear-tags`` with ``--tag``. An
+    explicit ``--scope`` that disagrees with the axis flags is a usage error too.
 
     A reversed closed range is rejected here rather than left to the DB layer
     because ``cmd_review_add`` resolves the scope *before* ``read_body_arg``:
@@ -100,27 +101,20 @@ def resolve_scope(args: argparse.Namespace) -> Scope:
     and only then being told the flags were incoherent.
     """
     supplied = [
-        (flag, kind)
-        for flag, dest, kind in _SCOPE_FLAGS
-        if getattr(args, dest) is not None
+        (flag, kind) for flag, dest, kind in _SCOPE_FLAGS if getattr(args, dest) is not None
     ]
     flags = [flag for flag, _ in supplied]
     kinds = {kind for _, kind in supplied}
     if len(kinds) > 1:
-        raise db.DBError(
-            f"{flags[0]} cannot be combined with {', '.join(flags[1:])}"
-        )
+        raise UsageError(f"{flags[0]} cannot be combined with {', '.join(flags[1:])}")
     derived = next(iter(kinds), "latest")
 
     requested = getattr(args, "scope_kind", None)
     if requested is not None and requested != derived:
         if not flags:
-            raise db.DBError(
-                f"--scope {requested} requires {_SCOPE_REQUIRES[requested]}"
-            )
-        raise db.DBError(
-            f"--scope {requested} does not match "
-            f"{', '.join(flags)} (scope '{derived}')"
+            raise UsageError(f"--scope {requested} requires {_SCOPE_REQUIRES[requested]}")
+        raise UsageError(
+            f"--scope {requested} does not match {', '.join(flags)} (scope '{derived}')"
         )
 
     since, until = parse_date_bounds(args) if derived == "range" else (None, None)

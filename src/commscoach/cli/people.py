@@ -5,16 +5,22 @@ from __future__ import annotations
 import argparse
 import shlex
 import sys
+from collections.abc import Iterable
 from dataclasses import asdict
-from typing import Any, Iterable
+from typing import Any
 
 from .. import db
+from ..db.common import handle_key
 from .common import (
+    command_prefix,
     confirm,
+    edit_verb,
     first_prose_line,
     format_stamp,
+    handle_arg,
     non_negative_int,
     open_db,
+    plural,
     print_json,
     read_body_arg,
     read_body_or_raise,
@@ -24,7 +30,11 @@ from .editor import compose_in_editor
 from .feedback import _format_feedback_human
 from .reviews_format import format_review_human
 from .serializers import (
-    entry_to_dict, feedback_to_dict, goal_to_dict, person_to_dict, review_to_dict,
+    entry_to_dict,
+    feedback_to_dict,
+    goal_to_dict,
+    person_to_dict,
+    review_to_dict,
 )
 
 _EDIT_NOTES = object()
@@ -34,18 +44,39 @@ NOTES_PREAMBLE = (
 )
 
 
-def ensure_people(
+def confirm_new_people(
     conn: Any,
     handles: Iterable[str],
     *,
     assume_yes: bool,
-) -> None:
-    """Confirm and create any people handles that do not already exist."""
+    command: list[str] | None = None,
+) -> list[str]:
+    """Confirm creating any people handles that do not already exist; return them.
+
+    Nothing is written here, so a command can ask before opening the editor
+    and create the people in the same transaction as the entry linking them:
+    a later failure then leaves no stray people behind. ``command`` is the
+    ``command_prefix`` used in the follow-up hint, so it names the same
+    ``--db`` the user is working with.
+    """
+    missing: dict[str, str] = {}
     for handle in handles:
-        if db.get_person_by_handle(conn, handle) is not None:
+        if handle_key(handle) in missing or db.get_person_by_handle(conn, handle) is not None:
             continue
+        db.validate_handle(handle)
         if not confirm(f"Create person @{handle}?", assume_yes=assume_yes):
-            raise db.PersonNotFoundError(handle)
+            prefix = command if command is not None else ["commscoach"]
+            raise db.DBError(
+                f"person @{handle} does not exist; pass --yes to create it, or run "
+                f"{shlex.join([*prefix, 'person', 'add', handle])} first"
+            )
+        missing[handle_key(handle)] = handle
+    return list(missing.values())
+
+
+def create_people(conn: Any, handles: Iterable[str]) -> None:
+    """Create the people :func:`confirm_new_people` returned."""
+    for handle in handles:
         db.create_person(conn, handle, name=None)
 
 
@@ -54,9 +85,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "person",
         help="Manage people (counterparties and self).",
     )
-    person_sub = person_parser.add_subparsers(
-        dest="person_command", metavar="SUBCOMMAND"
-    )
+    person_sub = person_parser.add_subparsers(dest="person_command", metavar="SUBCOMMAND")
 
     def _show_person_help(_args: argparse.Namespace) -> int:
         person_parser.print_help()
@@ -65,10 +94,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     person_parser.set_defaults(func=_show_person_help)
 
     add = person_sub.add_parser("add", help="Create a new person.")
-    add.add_argument("handle", help="Unique handle (case-insensitive).")
     add.add_argument(
-        "--name", default=None, help="Optional human-readable display name."
+        "handle",
+        type=handle_arg,
+        help="Unique handle (case-insensitive; a leading @ is dropped; no spaces or commas).",
     )
+    add.add_argument("--name", default=None, help="Optional human-readable display name.")
     add.add_argument(
         "--self",
         dest="is_self",
@@ -78,50 +109,67 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add.set_defaults(func=cmd_person_add)
 
     show = person_sub.add_parser("show", help="Show one person by handle.")
-    show.add_argument("handle", metavar="HANDLE")
+    show.add_argument("handle", type=handle_arg, metavar="HANDLE")
     show.add_argument(
-        "--recent", type=non_negative_int, default=None, metavar="N",
+        "--recent",
+        type=non_negative_int,
+        default=None,
+        metavar="N",
         help="Also show the latest N interactions and all active goals linked to this person.",
     )
     show.add_argument(
-        "--with-feedback", action="store_true",
+        "--with-feedback",
+        action="store_true",
         help="Include full feedback for each recent interaction; requires --recent N.",
     )
     show.add_argument(
-        "--reviews", type=non_negative_int, default=None, metavar="N",
+        "--reviews",
+        type=non_negative_int,
+        default=None,
+        metavar="N",
         help="Also show the latest N person-scoped reviews in full.",
     )
     show.set_defaults(func=cmd_person_show)
 
     prep = person_sub.add_parser(
-        "prep", help="Prepare for a conversation with notes, goals, feedback, and reviews.",
+        "prep",
+        help="Prepare for a conversation with notes, goals, feedback, and reviews.",
     )
-    prep.add_argument("handle", metavar="HANDLE")
+    prep.add_argument("handle", type=handle_arg, metavar="HANDLE")
     prep.add_argument(
-        "--brief", action="store_true",
+        "--brief",
+        action="store_true",
         help="Preview notes, up to five goals, latest feedback, and reviews; JSON stays complete.",
     )
     prep.add_argument(
-        "--recent", type=non_negative_int, default=5, metavar="N",
+        "--recent",
+        type=non_negative_int,
+        default=5,
+        metavar="N",
         help="Number of recent interactions, with full feedback (default: 5).",
     )
     prep.add_argument(
-        "--reviews", type=non_negative_int, default=2, metavar="N",
+        "--reviews",
+        type=non_negative_int,
+        default=2,
+        metavar="N",
         help="Number of person-scoped reviews (default: 2).",
     )
     prep.add_argument(
-        "--include-general-goals", action="store_true",
+        "--include-general-goals",
+        action="store_true",
         help="Also include active goals that are not linked to a person.",
     )
     prep.set_defaults(func=cmd_person_show, with_feedback=True)
 
-    edit = person_sub.add_parser(
-        "edit", help="Update handle, name, or private notes for a person."
+    edit = person_sub.add_parser("edit", help="Update handle, name, or private notes for a person.")
+    edit.add_argument(
+        "handle", type=handle_arg, metavar="HANDLE", help="Existing handle to update."
     )
-    edit.add_argument("handle", metavar="HANDLE", help="Existing handle to update.")
     edit.add_argument(
         "--handle",
         dest="new_handle",
+        type=handle_arg,
         default=None,
         metavar="NEW_HANDLE",
         help="Rename the person's handle.",
@@ -147,12 +195,22 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     edit.set_defaults(func=cmd_person_edit)
 
-    lst = person_sub.add_parser(
-        "list", help="List people (self first, then handle-alphabetical)."
-    )
-    lst.add_argument("--query", metavar="TEXT", help="Match a literal name or handle substring.")
+    lst = person_sub.add_parser("list", help="List people (self first, then handle-alphabetical).")
     lst.add_argument(
-        "--with-activity", action="store_true",
+        "--query",
+        metavar="TEXT",
+        help="Match a literal name or handle substring (a leading @ is ignored).",
+    )
+    lst.add_argument(
+        "--limit",
+        type=non_negative_int,
+        default=None,
+        metavar="N",
+        help="Cap the number of people returned.",
+    )
+    lst.add_argument(
+        "--with-activity",
+        action="store_true",
         help="Include last logged interaction, interaction count, and active goal count.",
     )
     lst.set_defaults(func=cmd_person_list)
@@ -161,13 +219,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "rm",
         help="Delete a person and their entry links (entries themselves remain).",
     )
-    rm.add_argument("handle", metavar="HANDLE")
+    rm.add_argument("handle", type=handle_arg, metavar="HANDLE")
     rm.set_defaults(func=cmd_person_rm)
 
     self_cmd = person_sub.add_parser(
         "self", help="Promote a person to global self (atomically demotes any prior self)."
     )
-    self_cmd.add_argument("handle", metavar="HANDLE")
+    self_cmd.add_argument("handle", type=handle_arg, metavar="HANDLE")
     self_cmd.set_defaults(func=cmd_person_self)
 
 
@@ -241,29 +299,42 @@ def cmd_person_show(args: argparse.Namespace) -> int:
         note = db.get_person_note(conn, person.id)
         reviews = (
             db.list_reviews(
-                conn, limit=args.reviews, scope_kind="person", person_handle=person.handle,
+                conn,
+                limit=args.reviews,
+                scope_kind="person",
+                person_handle=person.handle,
             )
-            if args.reviews is not None else ()
+            if args.reviews is not None
+            else ()
         )
         if args.recent is not None:
             entries = db.search_entries(
-                conn, person_handle=person.handle, limit=args.recent,
+                conn,
+                person_handle=person.handle,
+                limit=args.recent,
             )
             goals = db.list_goals(
-                conn, person_handle=person.handle,
+                conn,
+                person_handle=person.handle,
                 include_general=getattr(args, "include_general_goals", False),
+            )
+            hidden_general = (
+                conn.execute(
+                    "SELECT COUNT(*) FROM goals WHERE status = 'active' AND person_id IS NULL"
+                ).fetchone()[0]
+                if args.person_command == "prep" and not args.include_general_goals
+                else 0
             )
             feedback = (
                 {entry.id: db.list_feedback(conn, entry.id) for entry in entries}
-                if args.with_feedback else {}
+                if args.with_feedback
+                else {}
             )
-            coached = set()
-            if not args.json:
-                coached = (
-                    {entry_id for entry_id, notes in feedback.items() if notes}
-                    if args.with_feedback
-                    else db.feedback_entry_ids(conn, (e.id for e in entries))
-                )
+            coached = (
+                {entry_id for entry_id, notes in feedback.items() if notes}
+                if args.with_feedback
+                else db.feedback_entry_ids(conn, (e.id for e in entries))
+            )
     if args.json:
         payload = {
             **person_to_dict(person),
@@ -273,8 +344,12 @@ def cmd_person_show(args: argparse.Namespace) -> int:
             payload["recent_entries"] = [
                 {
                     **entry_to_dict(entry),
-                    **({"feedback": [feedback_to_dict(note) for note in feedback[entry.id]]}
-                       if args.with_feedback else {}),
+                    "has_feedback": entry.id in coached,
+                    **(
+                        {"feedback": [feedback_to_dict(note) for note in feedback[entry.id]]}
+                        if args.with_feedback
+                        else {}
+                    ),
                 }
                 for entry in entries
             ]
@@ -284,9 +359,7 @@ def cmd_person_show(args: argparse.Namespace) -> int:
         print_json(payload)
         return 0
     brief = getattr(args, "brief", False)
-    command = ["commscoach"]
-    if args.db:
-        command.extend(("--db", args.db))
+    command = command_prefix(args)
     _emit_person(args, person, note=note, include_notes=not brief)
     if brief and note is not None:
         print(f"\nNotes:\n{truncate(first_prose_line(note.body), width=180)}")
@@ -310,23 +383,40 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                 if not goals:
                     print("(no goals)")
                 if len(goals) > 5:
-                    full = [*command, "person", "prep", person.handle, "--recent", "0", "--reviews", "0"]
+                    full = [
+                        *command,
+                        "person",
+                        "prep",
+                        person.handle,
+                        "--recent",
+                        "0",
+                        "--reviews",
+                        "0",
+                    ]
                     if args.include_general_goals:
                         full.append("--include-general-goals")
                     print(f"  Showing 5 of {len(goals)} active goals.")
                     print(f"  All goals: {shlex.join(full)}")
             else:
                 _emit_goals(args, goals, with_detail=True)
+            if hidden_general:
+                full = [*command, "person", "prep", person.handle, "--include-general-goals"]
+                print(f"  {plural(hidden_general, 'general goal')} not shown: {shlex.join(full)}")
         print("\nRecent interactions:")
         if args.with_feedback and entries:
-            for entry in entries:
+            for index, entry in enumerate(entries):
+                if index:
+                    print()
                 emit_entries(args, (entry,), coached)
                 print("Feedback:")
                 if brief:
-                    print("\n".join(
-                        f"  Feedback [{note.id}]: {truncate(first_prose_line(note.body), width=180)}"
-                        for note in feedback[entry.id][-1:]
-                    ) or "(no feedback)")
+                    print(
+                        "\n".join(
+                            f"  Feedback [{note.id}]: {truncate(first_prose_line(note.body), width=180)}"
+                            for note in feedback[entry.id][-1:]
+                        )
+                        or "  (no feedback)"
+                    )
                     if len(feedback[entry.id]) > 1:
                         print(f"  Showing latest of {len(feedback[entry.id])} feedback notes.")
                     full = shlex.join([*command, "entry", "show", str(entry.id), "--with-feedback"])
@@ -336,7 +426,6 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                         "\n\n".join(_format_feedback_human(note) for note in feedback[entry.id])
                         or "(no feedback)"
                     )
-                print()
         else:
             emit_entries(args, entries, coached)
         if args.person_command != "prep":
@@ -345,11 +434,14 @@ def cmd_person_show(args: argparse.Namespace) -> int:
     if args.reviews is not None:
         print("\nRecent reviews:")
         if brief:
-            print("\n".join(
-                f"  Review [{review.id}]: {truncate(first_prose_line(review.body), width=180)}\n"
-                f"  Full review: {shlex.join([*command, 'review', 'show', str(review.id)])}"
-                for review in reviews
-            ) or "(no reviews)")
+            print(
+                "\n".join(
+                    f"  Review [{review.id}]: {truncate(first_prose_line(review.body), width=180)}\n"
+                    f"  Full review: {shlex.join([*command, 'review', 'show', str(review.id)])}"
+                    for review in reviews
+                )
+                or "(no reviews)"
+            )
         else:
             print("\n\n".join(format_review_human(review) for review in reviews) or "(no reviews)")
     return 0
@@ -363,20 +455,18 @@ def cmd_person_edit(args: argparse.Namespace) -> int:
         update_kwargs["name"] = args.name if args.name else None
     edit_notes = args.notes is _EDIT_NOTES
     note_body = (
-        read_body_or_raise(args.notes)
-        if args.notes is not None and not edit_notes else None
+        read_body_or_raise(args.notes) if args.notes is not None and not edit_notes else None
     )
 
     if not update_kwargs and note_body is None and not edit_notes and not args.clear_notes:
         raise db.DBError(
-            "person edit requires at least one of"
-            " --handle/--name/--notes/--clear-notes"
+            "person edit requires at least one of --handle/--name/--notes/--clear-notes"
         )
 
     with open_db(args) as conn:
         person = _resolve_existing_person(conn, args.handle)
+        note = db.get_person_note(conn, person.id)
         if edit_notes:
-            note = db.get_person_note(conn, person.id)
             note_body = read_body_arg(
                 None,
                 what="notes",
@@ -384,31 +474,38 @@ def cmd_person_edit(args: argparse.Namespace) -> int:
                 preamble=NOTES_PREAMBLE,
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
+                flag="--notes",
             )
-        updated = (
-            db.update_person(conn, person.id, **update_kwargs)
-            if update_kwargs
-            else person
-        )
+        updated = db.update_person(conn, person.id, **update_kwargs) if update_kwargs else person
+        notes_changed = False
         if note_body is not None:
-            db.set_person_note(conn, person.id, note_body)
+            saved = db.set_person_note(conn, person.id, note_body)
+            notes_changed = note is None or saved.updated_at != note.updated_at
         elif args.clear_notes:
-            db.clear_person_note(conn, person.id)
-    _emit_person(args, updated, human_prefix="updated")
+            notes_changed = db.clear_person_note(conn, person.id)
+        note = db.get_person_note(conn, person.id)
+    verb = "updated" if notes_changed else edit_verb(person.updated_at, updated.updated_at)
+    # JSON carries the saved notes, as person show does; the human line stays one line.
+    _emit_person(args, updated, human_prefix=verb, note=note, include_notes=args.json)
     return 0
 
 
 def cmd_person_list(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
-        people = db.list_people(conn, query=args.query)
+        # Handles display as @handle, so "@ali" should find @alice like "ali" does.
+        query = args.query.strip().removeprefix("@") if args.query is not None else None
+        matched = db.list_people(conn, query=query)
         activity = db.get_people_activity(conn) if args.with_activity else {}
+    people = matched[: args.limit] if args.limit is not None else matched
     if not args.with_activity:
         _emit_people(args, people)
     elif args.json:
-        print_json([
-            {**person_to_dict(person), "activity": asdict(activity[person.id])}
-            for person in people
-        ])
+        print_json(
+            [
+                {**person_to_dict(person), "activity": asdict(activity[person.id])}
+                for person in people
+            ]
+        )
     else:
         if not people:
             print("(no people)")
@@ -416,13 +513,16 @@ def cmd_person_list(args: argparse.Namespace) -> int:
             summary = activity[person.id]
             stamp = (
                 format_stamp(summary.last_logged_interaction)
-                if summary.last_logged_interaction else "(none)"
+                if summary.last_logged_interaction
+                else "(none)"
             )
             print(
                 f"{_format_person_human(person)} · last logged interaction: {stamp}"
                 f" · interactions: {summary.interaction_count}"
                 f" · active goals: {summary.active_goal_count}"
             )
+    if len(matched) > len(people):
+        print(f"Showing {len(people)} of {len(matched)} people.", file=sys.stderr)
     return 0
 
 
@@ -430,16 +530,20 @@ def cmd_person_rm(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         person = _resolve_existing_person(conn, args.handle)
         note_count = conn.execute(
-            "SELECT COUNT(*) FROM person_notes WHERE person_id = ?", (person.id,),
+            "SELECT COUNT(*) FROM person_notes WHERE person_id = ?",
+            (person.id,),
         ).fetchone()[0]
         entry_count = conn.execute(
-            "SELECT COUNT(*) FROM entry_people WHERE person_id = ?", (person.id,),
+            "SELECT COUNT(*) FROM entry_people WHERE person_id = ?",
+            (person.id,),
         ).fetchone()[0]
         goal_count = conn.execute(
-            "SELECT COUNT(*) FROM goals WHERE person_id = ?", (person.id,),
+            "SELECT COUNT(*) FROM goals WHERE person_id = ?",
+            (person.id,),
         ).fetchone()[0]
         review_count = conn.execute(
-            "SELECT COUNT(*) FROM reviews WHERE scope_person_id = ?", (person.id,),
+            "SELECT COUNT(*) FROM reviews WHERE scope_person_id = ?",
+            (person.id,),
         ).fetchone()[0]
         prompt = (
             f"Delete person @{person.handle}? This will delete {note_count} private "
@@ -450,9 +554,11 @@ def cmd_person_rm(args: argparse.Namespace) -> int:
             "Entries, feedback, goals, and reviews remain; person-scoped reviews keep the handle."
         )
         if person.is_self:
-            prompt += " This removes your self profile; coaching context requires a new self profile."
+            prompt += (
+                " This removes your self profile; coaching context requires a new self profile."
+            )
         if not confirm(prompt, assume_yes=args.yes):
-            raise db.DBError("aborted")
+            raise db.DBError("aborted; pass --yes to confirm without a prompt")
         deleted = db.delete_person(conn, person.id)
     if not deleted:
         raise db.PersonNotFoundError(args.handle)

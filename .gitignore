@@ -22,11 +22,12 @@ env/
 build/
 dist/
 
-# Local user data (SQLite DB lives in data/ by default; do not commit user data)
-data/*.sqlite3
-data/*.sqlite3-journal
-data/*.sqlite3-shm
-data/*.sqlite3-wal
+# Local user data. The default DB lives outside the repo
+# ($XDG_DATA_HOME/commscoach); this guards databases created here via --db.
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
 
 # Local export output
 *.md.bak

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from ..models import Entry, Person, Review
 from . import common
@@ -12,7 +13,7 @@ from .common import validate_range_bounds
 from .entries import get_entry
 from .errors import DBError, EntryNotFoundError, ReviewNotFoundError
 from .people import resolve_person_handles
-from .rows import hydrate_review
+from .rows import hydrate_review, hydrate_reviews
 
 #: Every scope axis a review may cover, mirroring the ``scope_kind`` CHECK in
 #: the ``reviews`` DDL. Re-exported through ``commscoach.db`` so the CLI can use
@@ -73,9 +74,7 @@ def _validate_scope(
     the lookup happens before any write.
     """
     if scope_kind not in SCOPE_KINDS:
-        raise DBError(
-            "review scope_kind must be one of: " + ", ".join(SCOPE_KINDS)
-        )
+        raise DBError("review scope_kind must be one of: " + ", ".join(SCOPE_KINDS))
     supplied = {
         "scope_person_handle": scope_person_handle,
         "scope_tag": scope_tag,
@@ -85,9 +84,7 @@ def _validate_scope(
     owned = _SCOPE_AXES[scope_kind]
     for name, value in supplied.items():
         if value is not None and name not in owned:
-            raise DBError(
-                f"review scope_kind '{scope_kind}' does not accept {name}"
-            )
+            raise DBError(f"review scope_kind '{scope_kind}' does not accept {name}")
 
     axes: dict[str, Any] = {
         "scope_person_handle": None,
@@ -106,17 +103,11 @@ def _validate_scope(
         axes["scope_tag"] = normalized
     elif scope_kind == "range":
         if scope_since is None and scope_until is None:
-            raise DBError(
-                "review scope_kind 'range' requires scope_since or scope_until"
-            )
+            raise DBError("review scope_kind 'range' requires scope_since or scope_until")
         if scope_since is not None:
-            axes["scope_since"] = _validate_scope_date(
-                scope_since, what="review scope_since"
-            )
+            axes["scope_since"] = _validate_scope_date(scope_since, what="review scope_since")
         if scope_until is not None:
-            axes["scope_until"] = _validate_scope_date(
-                scope_until, what="review scope_until"
-            )
+            axes["scope_until"] = _validate_scope_date(scope_until, what="review scope_until")
         validate_range_bounds(
             axes["scope_since"],
             axes["scope_until"],
@@ -126,6 +117,7 @@ def _validate_scope(
     return axes
 
 
+@common.writes
 def create_review(
     conn: sqlite3.Connection,
     body: str,
@@ -162,7 +154,7 @@ def create_review(
         axes["scope_person_handle"] = scope_person.handle
     entries = _resolve_review_entries(conn, entry_ids)
     now = common.utcnow_iso()
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute(
             "INSERT INTO reviews"
             " (body, scope_kind, scope_limit, scope_person_id,"
@@ -185,8 +177,7 @@ def create_review(
         review_id = cur.lastrowid
         for position, entry in enumerate(entries):
             conn.execute(
-                "INSERT INTO review_entries (review_id, entry_id, position)"
-                " VALUES (?, ?, ?)",
+                "INSERT INTO review_entries (review_id, entry_id, position) VALUES (?, ?, ?)",
                 (review_id, entry.id, position),
             )
     review = get_review(conn, review_id)
@@ -194,11 +185,13 @@ def create_review(
     return review
 
 
-def get_review(conn: sqlite3.Connection, review_id: int) -> Review | None:
+def get_review(
+    conn: sqlite3.Connection, review_id: int, *, with_entries: bool = True
+) -> Review | None:
     row = conn.execute("SELECT * FROM reviews WHERE id = ?", (review_id,)).fetchone()
     if row is None:
         return None
-    return hydrate_review(conn, row)
+    return hydrate_review(conn, row, with_entries=with_entries)
 
 
 def list_reviews(
@@ -209,6 +202,9 @@ def list_reviews(
     person_handle: str | None = None,
     tag: str | None = None,
     query: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    oldest_first: bool = False,
 ) -> tuple[Review, ...]:
     """Return stored reviews newest-first by creation time.
 
@@ -217,61 +213,90 @@ def list_reviews(
     ``scope_person_handle`` case-insensitively rather than the ``scope_person_id``
     FK, so reviews about a since-deleted person are still findable. ``tag``
     matches the normalized ``scope_tag``. ``query`` searches literal body
-    substrings, using the same matching rules as feedback search.
+    substrings, using the same matching rules as feedback search. ``since`` and
+    ``until`` bound when the review was written (``created_at``), inclusively.
     """
     if limit is not None and limit < 0:
         raise DBError("limit must be non-negative")
     filters, params = _review_filters(
-        scope_kind=scope_kind, person_handle=person_handle, tag=tag, query=query,
+        scope_kind=scope_kind,
+        person_handle=person_handle,
+        tag=tag,
+        query=query,
+        since=since,
+        until=until,
     )
-    sql = "SELECT * FROM reviews" + filters + " ORDER BY created_at DESC, id DESC"
+    direction = "ASC" if oldest_first else "DESC"
+    sql = "SELECT * FROM reviews" + filters + f" ORDER BY created_at {direction}, id {direction}"
     if limit is not None:
         sql += " LIMIT ?"
         params.append(limit)
     rows = conn.execute(sql, params).fetchall()
-    return tuple(hydrate_review(conn, row) for row in rows)
+    return hydrate_reviews(conn, rows)
 
 
 def count_reviews(
-    conn: sqlite3.Connection, *, scope_kind: str | None = None,
-    person_handle: str | None = None, tag: str | None = None,
+    conn: sqlite3.Connection,
+    *,
+    scope_kind: str | None = None,
+    person_handle: str | None = None,
+    tag: str | None = None,
     query: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> int:
     """Count stored reviews using the same filters as list_reviews."""
     filters, params = _review_filters(
-        scope_kind=scope_kind, person_handle=person_handle, tag=tag, query=query,
+        scope_kind=scope_kind,
+        person_handle=person_handle,
+        tag=tag,
+        query=query,
+        since=since,
+        until=until,
     )
     return conn.execute("SELECT COUNT(*) FROM reviews" + filters, params).fetchone()[0]
 
 
 def _review_filters(
-    *, scope_kind: str | None, person_handle: str | None,
-    tag: str | None, query: str | None,
+    *,
+    scope_kind: str | None,
+    person_handle: str | None,
+    tag: str | None,
+    query: str | None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> tuple[str, list[Any]]:
     where: list[str] = []
     params: list[Any] = []
+    common.validate_range_bounds(since, until, since_name="since", until_name="until")
+    if since is not None:
+        where.append("created_at >= ?")
+        params.append(common.date_bound_timestamp(since, name="since"))
+    if until is not None:
+        where.append("created_at <= ?")
+        params.append(common.date_bound_timestamp(until, name="until", upper=True))
     if query is not None:
         if not query.strip():
             raise DBError("query must be a non-empty string")
-        literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
-        where.append("body LIKE ? ESCAPE '!' COLLATE NOCASE")
-        params.append(f"%{literal}%")
+        where.append("search_fold(body) LIKE ? ESCAPE '!'")
+        params.append(common.contains_pattern(query))
     if scope_kind is not None:
         if scope_kind not in SCOPE_KINDS:
-            raise DBError(
-                "review scope_kind must be one of: " + ", ".join(SCOPE_KINDS)
-            )
+            raise DBError("review scope_kind must be one of: " + ", ".join(SCOPE_KINDS))
         where.append("scope_kind = ?")
         params.append(scope_kind)
     if person_handle is not None:
-        where.append("LOWER(scope_person_handle) = LOWER(?)")
+        if not person_handle.strip():
+            raise DBError("person handle must be a non-empty string")
+        where.append("handle_key(scope_person_handle) = handle_key(?)")
         params.append(person_handle)
     if tag is not None:
         where.append("scope_tag = ?")
-        params.append(tags_mod.normalize_tag(tag))
+        params.append(tags_mod._require_name(tag, what="tag"))
     return (" WHERE " + " AND ".join(where) if where else ""), params
 
 
+@common.writes
 def update_review(
     conn: sqlite3.Connection,
     review_id: int,
@@ -293,8 +318,10 @@ def update_review(
         return current
     if not body or not str(body).strip():
         raise DBError("review body must be a non-empty string")
+    if body == current.body:
+        return current
     now = common.utcnow_iso()
-    with conn:
+    with common.write_transaction(conn):
         conn.execute(
             "UPDATE reviews SET body = ?, updated_at = ? WHERE id = ?",
             (body, now, review_id),
@@ -304,8 +331,9 @@ def update_review(
     return review
 
 
+@common.writes
 def delete_review(conn: sqlite3.Connection, review_id: int) -> bool:
     """Delete a stored review. Returns ``True`` if a row was deleted."""
-    with conn:
+    with common.write_transaction(conn):
         cur = conn.execute("DELETE FROM reviews WHERE id = ?", (review_id,))
     return cur.rowcount > 0

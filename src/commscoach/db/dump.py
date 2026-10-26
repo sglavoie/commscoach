@@ -9,6 +9,8 @@ newer ``format_version`` is rejected because its representation may no longer
 be safe to interpret, while a ``schema_version`` mismatch emits a warning: a
 dump from one schema version restored into another is the normal migration
 path. Restores preserve IDs and run atomically with foreign-key enforcement on.
+Timestamps are validated on restore and normalized to UTC, matching what the
+CLI itself stores, so range filters and stats work on imported rows.
 """
 
 from __future__ import annotations
@@ -16,10 +18,15 @@ from __future__ import annotations
 import sqlite3
 import warnings
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
+from ..timeparse import in_supported_range
+from .common import handle_key, normalize_date_bound, read_snapshot, write_transaction
 from .errors import DBError
+from .people import renormalize_handles
 from .schema import get_schema_version
+from .tags import normalize_tag, renormalize_tag_names
 
 FORMAT = "commscoach-dump"
 FORMAT_VERSION = 2
@@ -32,6 +39,15 @@ class DumpFormatError(DBError):
 class DatabaseNotEmptyError(DBError):
     """Raised when a restore target already contains user data."""
 
+
+# Text the write paths refuse to store blank, so an archive cannot either.
+_REQUIRED_TEXT_COLUMNS: dict[str, tuple[str, ...]] = {
+    "entries": ("body",),
+    "feedback": ("body",),
+    "reviews": ("body",),
+    "goals": ("title",),
+    "person_notes": ("body",),
+}
 
 _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "people": ("id", "handle", "name", "is_self", "created_at", "updated_at"),
@@ -88,6 +104,27 @@ _OPTIONAL_TABLE_COLUMNS: dict[str, frozenset[str]] = {
     ),
 }
 
+# Timestamp columns restored as timezone-aware UTC ISO-8601 strings, and the
+# review scope bounds, which may also be bare legacy UTC dates.
+_TIMESTAMP_COLUMNS = frozenset({"created_at", "updated_at", "occurred_at", "closed_at"})
+_DATE_BOUND_COLUMNS = frozenset({"scope_since", "scope_until"})
+
+# Integer columns checked before insert, so a stringly typed id fails with its
+# location instead of a bare constraint error. Nullable ones may also be null.
+_INTEGER_COLUMNS: dict[str, tuple[str, ...]] = {
+    "people": ("id",),
+    "entries": ("id",),
+    "tags": ("id",),
+    "feedback": ("id", "entry_id"),
+    "reviews": ("id",),
+    "goals": ("id",),
+    "person_notes": ("person_id",),
+}
+_NULLABLE_INTEGER_COLUMNS: dict[str, tuple[str, ...]] = {
+    "reviews": ("scope_limit", "scope_person_id"),
+    "goals": ("person_id", "review_id"),
+}
+
 _AUTOINCREMENT_TABLES = ("people", "entries", "tags", "feedback", "reviews", "goals")
 _ALL_DATA_TABLES = (*_TABLE_COLUMNS, "entry_tags", "entry_people", "review_entries")
 
@@ -96,9 +133,7 @@ def _row_dict(row: sqlite3.Row, columns: tuple[str, ...]) -> dict[str, Any]:
     return {column: row[column] for column in columns}
 
 
-def _dump_rows(
-    conn: sqlite3.Connection, table: str
-) -> list[dict[str, Any]]:
+def _dump_rows(conn: sqlite3.Connection, table: str) -> list[dict[str, Any]]:
     columns = _TABLE_COLUMNS[table]
     order_column = "person_id" if table == "person_notes" else "id"
     rows = conn.execute(
@@ -109,6 +144,11 @@ def _dump_rows(
 
 def dump_to_dict(conn: sqlite3.Connection) -> dict[str, Any]:
     """Return a deterministic, lossless JSON-compatible representation."""
+    with read_snapshot(conn):
+        return _dump_snapshot(conn)
+
+
+def _dump_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
     people = _dump_rows(conn, "people")
     entries = _dump_rows(conn, "entries")
     for entry in entries:
@@ -123,8 +163,7 @@ def dump_to_dict(conn: sqlite3.Connection) -> dict[str, Any]:
         entry["person_ids"] = [
             row[0]
             for row in conn.execute(
-                "SELECT person_id FROM entry_people"
-                " WHERE entry_id = ? ORDER BY person_id",
+                "SELECT person_id FROM entry_people WHERE entry_id = ? ORDER BY person_id",
                 (entry_id,),
             ).fetchall()
         ]
@@ -151,6 +190,15 @@ def dump_to_dict(conn: sqlite3.Connection) -> dict[str, Any]:
         "reviews": reviews,
         "goals": _dump_rows(conn, "goals"),
         "person_notes": _dump_rows(conn, "person_notes"),
+        # Optional: lets a restore keep handing out fresh IDs instead of
+        # reusing those of rows deleted before the dump.
+        "sequences": {
+            row["name"]: row["seq"]
+            for row in conn.execute(
+                "SELECT name, seq FROM sqlite_sequence ORDER BY name"
+            ).fetchall()
+            if row["name"] in _AUTOINCREMENT_TABLES
+        },
     }
 
 
@@ -159,18 +207,87 @@ def _require_int(value: Any, location: str) -> None:
         raise DumpFormatError(f"{location} must be an integer")
 
 
+def _normalize_timestamp(value: Any, location: str) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            stamp = datetime.fromisoformat(value)
+        except ValueError:
+            pass
+        else:
+            if stamp.tzinfo is not None:
+                try:
+                    stamp = stamp.astimezone(UTC)
+                except OverflowError:
+                    pass
+                else:
+                    if in_supported_range(stamp):
+                        return stamp.isoformat()
+                    raise DumpFormatError(f"{location} is out of range")
+    raise DumpFormatError(f"{location} must be a timezone-aware ISO-8601 timestamp")
+
+
+def _normalize_bound(value: Any, location: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise DumpFormatError(f"{location} must be an ISO date or timestamp")
+    try:
+        return normalize_date_bound(value, name=location)
+    except DBError as exc:
+        raise DumpFormatError(str(exc)) from exc
+
+
+def _row_values(table: str, row: Mapping[str, Any], location: str) -> tuple[Any, ...]:
+    optional = _OPTIONAL_TABLE_COLUMNS.get(table, frozenset())
+    values = []
+    for column in _TABLE_COLUMNS[table]:
+        value = row.get(column) if column in optional else row[column]
+        if column in _TIMESTAMP_COLUMNS:
+            value = _normalize_timestamp(value, f"{location}.{column}")
+        elif column in _DATE_BOUND_COLUMNS:
+            value = _normalize_bound(value, f"{location}.{column}")
+        values.append(value)
+    return tuple(values)
+
+
 def _validate_row(table: str, index: int, row: Any) -> None:
     location = f"{table}[{index}]"
     if not isinstance(row, Mapping):
         raise DumpFormatError(f"{location} must be an object")
     optional = _OPTIONAL_TABLE_COLUMNS.get(table, frozenset())
     missing = [
-        column
-        for column in _TABLE_COLUMNS[table]
-        if column not in row and column not in optional
+        column for column in _TABLE_COLUMNS[table] if column not in row and column not in optional
     ]
     if missing:
         raise DumpFormatError(f"{location} is missing column {missing[0]!r}")
+    _row_values(table, row, location)
+    for column in _INTEGER_COLUMNS[table]:
+        _require_int(row[column], f"{location}.{column}")
+    for column in _NULLABLE_INTEGER_COLUMNS.get(table, ()):
+        if row.get(column) is not None:
+            _require_int(row[column], f"{location}.{column}")
+    for column in _REQUIRED_TEXT_COLUMNS.get(table, ()):
+        if not isinstance(row[column], str) or not row[column].strip():
+            raise DumpFormatError(f"{location}.{column} must be a non-empty string")
+
+    # Mirror the write paths' own normalization so a hand-edited archive
+    # cannot restore a person or tag that no command can address afterwards.
+    # Older handles with '@', commas, or spaces are still accepted: the CLI
+    # used to allow them, and a database must re-import its own export.
+    if table == "people":
+        handle = row["handle"]
+        if not isinstance(handle, str) or not handle.strip() or handle != handle.strip():
+            raise DumpFormatError(f"{location}.handle must be a non-empty, trimmed string")
+    elif table == "tags":
+        name = row["name"]
+        # Exports from before NFC and '#' normalization keep importing; the
+        # restore renormalizes those names afterwards.
+        if not isinstance(name, str) or not normalize_tag(name) or name.strip().lower() != name:
+            raise DumpFormatError(
+                f"{location}.name must be a non-empty, trimmed, lowercase tag name"
+            )
 
     if table == "entries":
         for key in ("tag_ids", "person_ids"):
@@ -180,6 +297,11 @@ def _validate_row(table: str, index: int, row: Any) -> None:
             for value_index, value in enumerate(values):
                 _require_int(value, f"{location}.{key}[{value_index}]")
     elif table == "reviews":
+        scope_tag = row.get("scope_tag")
+        if scope_tag is not None and (
+            not isinstance(scope_tag, str) or not normalize_tag(scope_tag)
+        ):
+            raise DumpFormatError(f"{location}.scope_tag must be null or a non-empty tag name")
         linked_entries = row.get("entries", [])
         if not isinstance(linked_entries, list):
             raise DumpFormatError(f"{location}.entries must be an array")
@@ -189,10 +311,13 @@ def _validate_row(table: str, index: int, row: Any) -> None:
                 raise DumpFormatError(f"{entry_location} must be an object")
             for key in ("entry_id", "position"):
                 if key not in linked_entry:
-                    raise DumpFormatError(
-                        f"{entry_location} is missing column {key!r}"
-                    )
+                    raise DumpFormatError(f"{entry_location} is missing column {key!r}")
                 _require_int(linked_entry[key], f"{entry_location}.{key}")
+
+
+def dump_row_counts(data: Mapping[str, Any]) -> dict[str, int]:
+    """Return the number of rows per table in a validated dump."""
+    return {table: len(data.get(table) or ()) for table in _TABLE_COLUMNS}
 
 
 def validate_dump(data: Any) -> None:
@@ -215,6 +340,11 @@ def validate_dump(data: Any) -> None:
     if version < 1:
         raise DumpFormatError(f"unsupported dump format version {version}")
     _require_int(data.get("schema_version"), "schema_version")
+    sequences = data.get("sequences", {})
+    if not isinstance(sequences, Mapping):
+        raise DumpFormatError("sequences must be an object")
+    for name, seq in sequences.items():
+        _require_int(seq, f"sequences.{name}")
 
     for table in _TABLE_COLUMNS:
         rows = data.get(table, [])
@@ -222,6 +352,20 @@ def validate_dump(data: Any) -> None:
             raise DumpFormatError(f"{table} must be an array")
         for index, row in enumerate(rows):
             _validate_row(table, index, row)
+
+    # The LOWER(handle) index only catches ASCII case, so "Émile" and "émile"
+    # would both restore as people no command could tell apart.
+    seen_handles: dict[str, int] = {}
+    for index, person in enumerate(data.get("people", [])):
+        key = handle_key(person["handle"])
+        if key in seen_handles:
+            raise DumpFormatError(
+                f"people[{index}].handle {person['handle']!r} duplicates"
+                f" people[{seen_handles[key]}].handle; rename one with"
+                " 'commscoach person edit HANDLE --handle NEW' in the source database"
+                " and export again"
+            )
+        seen_handles[key] = index
 
 
 def _database_has_data(conn: sqlite3.Connection) -> bool:
@@ -237,15 +381,24 @@ def _insert_row(
     row: Mapping[str, Any],
 ) -> None:
     columns = _TABLE_COLUMNS[table]
-    optional = _OPTIONAL_TABLE_COLUMNS.get(table, frozenset())
     placeholders = ", ".join("?" for _ in columns)
     conn.execute(
         f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
-        tuple(
-            row.get(column) if column in optional else row[column]
-            for column in columns
-        ),
+        _row_values(table, row, table),
     )
+
+
+def _restore_sequences(conn: sqlite3.Connection, sequences: Mapping[str, int]) -> None:
+    for table in _AUTOINCREMENT_TABLES:
+        seq = sequences.get(table)
+        if seq is None:
+            continue
+        updated = conn.execute(
+            "UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?",
+            (seq, table),
+        )
+        if updated.rowcount == 0:
+            conn.execute("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", (table, seq))
 
 
 def _restore_rows(conn: sqlite3.Connection, data: Mapping[str, Any]) -> None:
@@ -271,14 +424,14 @@ def _restore_rows(conn: sqlite3.Connection, data: Mapping[str, Any]) -> None:
         _insert_row(conn, "reviews", review)
         for linked_entry in review.get("entries", []):
             conn.execute(
-                "INSERT INTO review_entries (review_id, entry_id, position)"
-                " VALUES (?, ?, ?)",
+                "INSERT INTO review_entries (review_id, entry_id, position) VALUES (?, ?, ?)",
                 (review["id"], linked_entry["entry_id"], linked_entry["position"]),
             )
     for row in data.get("person_notes", []):
         _insert_row(conn, "person_notes", row)
     for row in data.get("goals", []):
         _insert_row(conn, "goals", row)
+    _restore_sequences(conn, data.get("sequences", {}))
 
 
 def load_from_dict(
@@ -289,15 +442,13 @@ def load_from_dict(
 ) -> None:
     """Restore ``data`` into an empty database, preserving every stored ID.
 
+    The one exception: a tag stored under older normalization rules is folded
+    into the tag it now equals, as ``init`` does for an existing database.
+
     ``dry_run`` executes the same inserts and constraint checks, then rolls the
     savepoint back. No merge or destructive force mode is provided.
     """
     validate_dump(data)
-    if _database_has_data(conn):
-        raise DatabaseNotEmptyError(
-            "database is not empty; import requires an empty database"
-        )
-
     foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
     if not foreign_keys:
         conn.execute("PRAGMA foreign_keys = ON")
@@ -315,16 +466,27 @@ def load_from_dict(
             stacklevel=2,
         )
 
-    savepoint = "commscoach_dump_import"
-    conn.execute(f"SAVEPOINT {savepoint}")
-    try:
-        for table in _AUTOINCREMENT_TABLES:
-            conn.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table,))
-        _restore_rows(conn, data)
-    except (sqlite3.Error, KeyError, TypeError) as exc:
-        conn.execute(f"ROLLBACK TO {savepoint}")
+    # Hold the write lock from the emptiness check on, so a concurrent import
+    # cannot pass the same check and interleave its rows with these.
+    with write_transaction(conn):
+        if _database_has_data(conn):
+            raise DatabaseNotEmptyError("database is not empty; import requires an empty database")
+        savepoint = "commscoach_dump_import"
+        conn.execute(f"SAVEPOINT {savepoint}")
+        try:
+            for table in _AUTOINCREMENT_TABLES:
+                conn.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table,))
+            _restore_rows(conn, data)
+            renormalize_handles(conn)
+            renormalize_tag_names(conn)
+        except BaseException as exc:
+            conn.execute(f"ROLLBACK TO {savepoint}")
+            conn.execute(f"RELEASE {savepoint}")
+            if isinstance(exc, DBError):
+                raise
+            if isinstance(exc, (sqlite3.Error, KeyError, TypeError, ValueError, OverflowError)):
+                raise DumpFormatError(f"cannot import dump: {exc}") from exc
+            raise
+        if dry_run:
+            conn.execute(f"ROLLBACK TO {savepoint}")
         conn.execute(f"RELEASE {savepoint}")
-        raise DumpFormatError(f"cannot import dump: {exc}") from exc
-    if dry_run:
-        conn.execute(f"ROLLBACK TO {savepoint}")
-    conn.execute(f"RELEASE {savepoint}")

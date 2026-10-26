@@ -10,7 +10,16 @@ import tempfile
 from pathlib import Path
 
 from .. import db, paths
-from .common import format_scope, open_db, print_err, resolve_db_path
+from ..db.common import read_snapshot
+from .common import (
+    UsageError,
+    format_scope,
+    open_db,
+    print_err,
+    print_json,
+    reject_store_destination,
+    resolve_db_path,
+)
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -25,14 +34,17 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     export_parser.add_argument(
         "--format",
         choices=("markdown", "json"),
-        default="markdown",
-        help="Export format: Markdown is readable/lossy; JSON is complete/restorable.",
+        default=None,
+        help=(
+            "Export format: Markdown is readable/lossy; JSON is complete/restorable"
+            " (default: markdown; the global --json selects json unless --format is given)."
+        ),
     )
     export_parser.add_argument(
         "--out",
         default=None,
         metavar="PATH",
-        help="Write output to this file with mode 0600. Default: stdout.",
+        help="Write output to this file (not a directory) with mode 0600. Default: stdout.",
     )
     export_parser.set_defaults(func=cmd_export)
 
@@ -46,9 +58,7 @@ def _format_person_export_label(person: db.Person) -> str:
     return label
 
 
-def _format_markdown_entry(
-    entry: db.Entry, feedback_items: tuple[db.Feedback, ...]
-) -> str:
+def _format_markdown_entry(entry: db.Entry, feedback_items: tuple[db.Feedback, ...]) -> str:
     lines: list[str] = [f"## Entry {entry.id}", ""]
     lines.append(f"- **Created**: {entry.created_at}")
     if entry.occurred_at:
@@ -143,9 +153,7 @@ def _render_markdown_export(
         return "\n".join(sections)
     rendered_entries: list[str] = []
     for entry in entries:
-        rendered_entries.append(
-            _format_markdown_entry(entry, feedback_by_entry[entry.id])
-        )
+        rendered_entries.append(_format_markdown_entry(entry, feedback_by_entry[entry.id]))
     sections.append("\n---\n\n".join(rendered_entries))
     if not sections[-1].endswith("\n"):
         sections.append("")
@@ -157,8 +165,12 @@ def _write_export_file(out_path: Path, content: str) -> None:
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=out_path.parent,
-            prefix=f".{out_path.name}.", suffix=".tmp", delete=False,
+            mode="w",
+            encoding="utf-8",
+            dir=out_path.parent,
+            prefix=f".{out_path.name}.",
+            suffix=".tmp",
+            delete=False,
         ) as fh:
             temporary = Path(fh.name)
             paths.secure_file(temporary)
@@ -173,20 +185,18 @@ def _write_export_file(out_path: Path, content: str) -> None:
 
 def _validate_export_destination(out_path: Path, source_path: Path) -> None:
     """Protect the active store and SQLite sidecars, including filesystem aliases."""
-    source = source_path.resolve()
-    protected = [source, *(
-        Path(f"{source}{suffix}") for suffix in ("-wal", "-shm", "-journal")
-    )]
-    for path in protected:
-        if out_path.resolve() == path or (
-            out_path.exists() and path.exists() and out_path.samefile(path)
-        ):
-            raise db.DBError(
-                "export destination must differ from the source database and its SQLite sidecars"
-            )
+    if out_path.is_dir():
+        raise db.DBError(f"export destination {out_path} is a directory; give a file path")
+    if not out_path.parent.is_dir():
+        raise db.DBError(f"cannot write export to {out_path}: {out_path.parent} is not a directory")
+    reject_store_destination(out_path, source_path, what="export")
 
 
 def cmd_export(args: argparse.Namespace) -> int:
+    # With --out, --json only shapes the status line, so any --format can be written.
+    if args.json and args.format == "markdown" and args.out is None:
+        raise UsageError("--json conflicts with --format markdown unless --out is given")
+    export_format = args.format or ("json" if args.json else "markdown")
     out_path = Path(args.out).expanduser() if args.out is not None else None
     if out_path is not None:
         try:
@@ -194,7 +204,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         except OSError as exc:
             raise db.DBError(f"cannot write export to {out_path}: {exc}") from exc
     with open_db(args) as conn:
-        if args.format == "json":
+        if export_format == "json":
             rendered = json.dumps(
                 db.dump_to_dict(conn),
                 ensure_ascii=False,
@@ -202,15 +212,15 @@ def cmd_export(args: argparse.Namespace) -> int:
                 sort_keys=True,
             )
         else:
-            reviews = db.list_reviews(conn)
-            goals = db.list_goals(conn, status=None)
-            entries = db.list_entries(conn)
-            feedback_by_entry = {
-                entry.id: db.list_feedback(conn, entry.id) for entry in entries
-            }
-            rendered = _render_markdown_export(
-                entries, feedback_by_entry, reviews, goals
-            )
+            # One snapshot, as the JSON dump uses, so the sections agree.
+            with read_snapshot(conn):
+                reviews = db.list_reviews(conn)
+                goals = db.list_goals(conn, status=None)
+                entries = db.list_entries(conn)
+                feedback_by_entry = {
+                    entry.id: db.list_feedback(conn, entry.id) for entry in entries
+                }
+            rendered = _render_markdown_export(entries, feedback_by_entry, reviews, goals)
     if not rendered.endswith("\n"):
         rendered += "\n"
     if out_path is None:
@@ -220,5 +230,9 @@ def cmd_export(args: argparse.Namespace) -> int:
         _write_export_file(out_path, rendered)
     except OSError as exc:
         raise db.DBError(f"cannot write export to {out_path}: {exc}") from exc
-    print_err(f"exported to {out_path}")
+    if args.json:
+        # stdout carries no export here, so report the write like backup does.
+        print_json({"format": export_format, "path": str(out_path)})
+    else:
+        print_err(f"exported to {out_path}")
     return 0

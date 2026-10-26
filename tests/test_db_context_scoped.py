@@ -40,9 +40,7 @@ class ScopedReviewContextTests(DBTestCase):
         )
         feedback = db.create_feedback(self.conn, alice_new.id, "alice note")
 
-        context = db.get_review_context(
-            self.conn, scope_kind="person", person_handle="ALICE"
-        )
+        context = db.get_review_context(self.conn, scope_kind="person", person_handle="ALICE")
 
         self.assertIsInstance(context, ReviewContext)
         self.assertEqual(context.scope_kind, "person")
@@ -52,9 +50,7 @@ class ScopedReviewContextTests(DBTestCase):
             [entry_ctx.entry.id for entry_ctx in context.entries],
             [alice_old.id, alice_new.id],
         )
-        self.assertEqual(
-            [f.id for f in context.entries[1].feedback], [feedback.id]
-        )
+        self.assertEqual([f.id for f in context.entries[1].feedback], [feedback.id])
 
     def test_person_scope_honours_entry_limit(self) -> None:
         db.create_entry(
@@ -75,9 +71,7 @@ class ScopedReviewContextTests(DBTestCase):
         )
 
         self.assertEqual(context.scope_limit, 1)
-        self.assertEqual(
-            [entry_ctx.entry.id for entry_ctx in context.entries], [newest.id]
-        )
+        self.assertEqual([entry_ctx.entry.id for entry_ctx in context.entries], [newest.id])
 
     def test_person_scope_prior_reviews_match_the_person(self) -> None:
         entry = db.create_entry(self.conn, "with alice", people=["alice"])
@@ -99,21 +93,15 @@ class ScopedReviewContextTests(DBTestCase):
                 scope_person_handle="bob",
             )
 
-        context = db.get_review_context(
-            self.conn, scope_kind="person", person_handle="alice"
-        )
+        context = db.get_review_context(self.conn, scope_kind="person", person_handle="alice")
 
-        self.assertEqual(
-            [review.id for review in context.prior_reviews], [about_alice.id]
-        )
+        self.assertEqual([review.id for review in context.prior_reviews], [about_alice.id])
 
     def test_person_scope_unknown_handle_raises(self) -> None:
         db.create_entry(self.conn, "with alice", people=["alice"])
 
         with self.assertRaises(db.PersonNotFoundError):
-            db.get_review_context(
-                self.conn, scope_kind="person", person_handle="nobody"
-            )
+            db.get_review_context(self.conn, scope_kind="person", person_handle="nobody")
 
     def test_tag_scope_normalizes_the_tag_and_filters_entries(self) -> None:
         tagged = db.create_entry(
@@ -167,26 +155,14 @@ class ScopedReviewContextTests(DBTestCase):
 
         context = db.get_review_context(self.conn, scope_kind="tag", tag="CONFLICT")
 
-        self.assertEqual(
-            [review.id for review in context.prior_reviews], [about_conflict.id]
-        )
+        self.assertEqual([review.id for review in context.prior_reviews], [about_conflict.id])
 
     def test_range_scope_bounds_are_inclusive_on_the_effective_date(self) -> None:
-        before = db.create_entry(
-            self.conn, "before", occurred_at="2026-01-31T23:00:00Z"
-        )
-        on_since = db.create_entry(
-            self.conn, "on since", occurred_at="2026-02-01T00:00:00Z"
-        )
-        middle = db.create_entry(
-            self.conn, "middle", occurred_at="2026-02-10T12:00:00Z"
-        )
-        on_until = db.create_entry(
-            self.conn, "on until", occurred_at="2026-02-28T23:59:00Z"
-        )
-        after = db.create_entry(
-            self.conn, "after", occurred_at="2026-03-01T00:00:00Z"
-        )
+        before = db.create_entry(self.conn, "before", occurred_at="2026-01-31T23:00:00Z")
+        on_since = db.create_entry(self.conn, "on since", occurred_at="2026-02-01T00:00:00Z")
+        middle = db.create_entry(self.conn, "middle", occurred_at="2026-02-10T12:00:00Z")
+        on_until = db.create_entry(self.conn, "on until", occurred_at="2026-02-28T23:59:00Z")
+        after = db.create_entry(self.conn, "after", occurred_at="2026-03-01T00:00:00Z")
 
         context = db.get_review_context(
             self.conn,
@@ -204,9 +180,7 @@ class ScopedReviewContextTests(DBTestCase):
         self.assertNotIn(after.id, gathered)
 
     def test_range_scope_prior_reviews_are_unfiltered(self) -> None:
-        entry = db.create_entry(
-            self.conn, "in range", occurred_at="2026-02-10T12:00:00Z"
-        )
+        entry = db.create_entry(self.conn, "in range", occurred_at="2026-02-10T12:00:00Z")
         with patch_timestamps("r0", "r0", "r1", "r1"):
             general = db.create_review(self.conn, "general", [entry.id])
             about_alice = db.create_review(
@@ -217,9 +191,7 @@ class ScopedReviewContextTests(DBTestCase):
                 scope_person_handle="alice",
             )
 
-        context = db.get_review_context(
-            self.conn, scope_kind="range", since="2026-02-01"
-        )
+        context = db.get_review_context(self.conn, scope_kind="range", since="2026-02-01")
 
         self.assertEqual(
             {review.id for review in context.prior_reviews},
@@ -229,9 +201,7 @@ class ScopedReviewContextTests(DBTestCase):
     def test_empty_scope_returns_a_valid_context_rather_than_raising(self) -> None:
         db.create_entry(self.conn, "with bob", people=["bob"])
 
-        context = db.get_review_context(
-            self.conn, scope_kind="person", person_handle="alice"
-        )
+        context = db.get_review_context(self.conn, scope_kind="person", person_handle="alice")
 
         self.assertIsInstance(context, ReviewContext)
         self.assertEqual(context.entries, ())
@@ -258,9 +228,7 @@ class ScopedReviewContextTests(DBTestCase):
         for scope in scopes:
             with self.subTest(scope=scope["scope_kind"]):
                 context = db.get_review_context(self.conn, goal_limit=1, **scope)
-                self.assertEqual(
-                    [goal.id for goal in context.goals], [newest.id]
-                )
+                self.assertEqual([goal.id for goal in context.goals], [newest.id])
 
     def test_person_handle_rename_keeps_prior_reviews_in_the_scoped_context(
         self,
@@ -276,25 +244,19 @@ class ScopedReviewContextTests(DBTestCase):
 
         db.update_person(self.conn, self.alice.id, handle="ally")
 
-        context = db.get_review_context(
-            self.conn, scope_kind="person", person_handle="ally"
-        )
+        context = db.get_review_context(self.conn, scope_kind="person", person_handle="ally")
 
         self.assertEqual(context.scope_person.id, self.alice.id)
         self.assertEqual(context.scope_person.handle, "ally")
         self.assertEqual([ctx.entry.id for ctx in context.entries], [entry.id])
-        self.assertEqual(
-            [review.id for review in context.prior_reviews], [about_alice.id]
-        )
+        self.assertEqual([review.id for review in context.prior_reviews], [about_alice.id])
 
     def test_person_handle_rename_leaves_the_old_handle_unresolvable(self) -> None:
         db.create_entry(self.conn, "with alice", people=["alice"])
         db.update_person(self.conn, self.alice.id, handle="ally")
 
         with self.assertRaises(db.PersonNotFoundError):
-            db.get_review_context(
-                self.conn, scope_kind="person", person_handle="alice"
-            )
+            db.get_review_context(self.conn, scope_kind="person", person_handle="alice")
 
     def test_reversed_range_is_rejected_before_any_context_is_built(self) -> None:
         db.create_entry(self.conn, "in range", occurred_at="2026-02-10T12:00:00Z")
@@ -347,18 +309,14 @@ class ScopedReviewContextTests(DBTestCase):
         self.assertEqual(str(ctx.exception), "since must not be after until")
 
     def test_equal_range_bounds_are_a_valid_single_day_scope(self) -> None:
-        same_day = db.create_entry(
-            self.conn, "on the day", occurred_at="2026-02-10T12:00:00Z"
-        )
+        same_day = db.create_entry(self.conn, "on the day", occurred_at="2026-02-10T12:00:00Z")
         db.create_entry(self.conn, "next day", occurred_at="2026-02-11T12:00:00Z")
 
         context = db.get_review_context(
             self.conn, scope_kind="range", since="2026-02-10", until="2026-02-10"
         )
 
-        self.assertEqual(
-            [entry_ctx.entry.id for entry_ctx in context.entries], [same_day.id]
-        )
+        self.assertEqual([entry_ctx.entry.id for entry_ctx in context.entries], [same_day.id])
 
     def test_rejects_unknown_kind_and_axes_from_another_kind(self) -> None:
         with self.assertRaises(db.DBError):

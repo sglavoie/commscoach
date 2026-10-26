@@ -9,6 +9,7 @@ from .. import db
 from .common import (
     first_prose_line,
     format_scope,
+    format_stamp,
     print_json,
     search_excerpt,
     truncate,
@@ -20,7 +21,6 @@ from .serializers import (
     person_to_dict,
     review_to_dict,
 )
-
 
 
 def review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
@@ -55,9 +55,7 @@ def review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
             }
             for item in context.entries
         ],
-        "prior_reviews": [
-            review_to_dict(review) for review in context.prior_reviews
-        ],
+        "prior_reviews": [review_to_dict(review) for review in context.prior_reviews],
         "goals": [goal_to_dict(goal) for goal in context.goals],
         "goal_summary": {
             "limit": context.goal_limit,
@@ -71,13 +69,13 @@ def review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
 def format_review_human(review: db.Review) -> str:
     header_parts = [
         f"[{review.id}]",
-        f"created {review.created_at}",
+        f"created {format_stamp(review.created_at)}",
         f"scope {format_scope(review)}",
     ]
     if review.scope_limit is not None:
         header_parts.append(f"context limit {review.scope_limit}")
     if review.updated_at != review.created_at:
-        header_parts.append(f"updated {review.updated_at}")
+        header_parts.append(f"updated {format_stamp(review.updated_at)}")
     lines = [" ".join(header_parts)]
     if review.entries:
         entry_ids = ", ".join(str(entry.id) for entry in review.entries)
@@ -91,7 +89,7 @@ def format_review_short(review: db.Review, *, query: str | None = None) -> str:
     entry_ids = ",".join(str(entry.id) for entry in review.entries)
     parts = [
         f"[{review.id}]",
-        review.created_at,
+        format_stamp(review.created_at),
         f"scope:{format_scope(review)}",
     ]
     if review.scope_limit is not None:
@@ -99,7 +97,8 @@ def format_review_short(review: db.Review, *, query: str | None = None) -> str:
     if entry_ids:
         parts.append(f"entries:{entry_ids}")
     parts.append(
-        search_excerpt(review.body, query) if query is not None
+        search_excerpt(review.body, query)
+        if query is not None
         else truncate(first_prose_line(review.body))
     )
     return " ".join(parts)
@@ -120,7 +119,10 @@ def emit_review(
 
 
 def emit_reviews(
-    args: argparse.Namespace, reviews: tuple[db.Review, ...], *, query: str | None = None,
+    args: argparse.Namespace,
+    reviews: tuple[db.Review, ...],
+    *,
+    query: str | None = None,
 ) -> None:
     if args.json:
         print_json([review_to_dict(review) for review in reviews])

@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 
 from commscoach.timeparse import TimeParseError, parse_bound, parse_when
 
-
 NOW = datetime(
     2026,
     8,
@@ -53,6 +52,8 @@ class ParseWhenTests(unittest.TestCase):
             parse_when("last monday 9:15pm", now=NOW),
             "2026-08-25T01:15:00+00:00",
         )
+        # NOW is a Tuesday: the same weekday means a week ago, with or without "last".
+        self.assertEqual(parse_when("last tuesday", now=NOW), parse_when("tuesday", now=NOW))
 
     def test_amount_ago_forms(self) -> None:
         cases = {
@@ -72,6 +73,21 @@ class ParseWhenTests(unittest.TestCase):
             "2026-03-07T17:00:00+00:00",
         )
 
+    def test_hour_and_minute_arithmetic_is_elapsed_time_across_dst(self) -> None:
+        # 03:30 EST, 2.5 hours after clocks fell back from 02:00 EDT.
+        fall = datetime(2026, 11, 1, 3, 30, tzinfo=ZoneInfo("America/New_York"))
+        self.assertEqual(parse_when("3 hours ago", now=fall), "2026-11-01T05:30:00+00:00")
+        # 04:00 EDT, one hour after clocks sprang forward from 02:00 EST.
+        spring = datetime(2026, 3, 8, 4, 0, tzinfo=ZoneInfo("America/New_York"))
+        self.assertEqual(parse_when("2 hours ago", now=spring), "2026-03-08T06:00:00+00:00")
+        self.assertEqual(parse_when("90 minutes ago", now=spring), "2026-03-08T06:30:00+00:00")
+
+    def test_zero_days_ago_keeps_the_repeated_fall_back_hour(self) -> None:
+        # 01:30 EST, the second 01:30 of the night clocks fell back.
+        now = datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=ZoneInfo("America/New_York"))
+        self.assertEqual(parse_when("0 days ago", now=now), parse_when("now", now=now))
+        self.assertEqual(parse_when("0 days ago", now=now), "2026-11-01T06:30:00+00:00")
+
     def test_rejected_forms_name_the_grammar(self) -> None:
         for value in (
             "yesterdya",
@@ -82,16 +98,42 @@ class ParseWhenTests(unittest.TestCase):
             "Aug 20",
             "in 2h",
             "2h",
+            "now 9am",
         ):
             with self.subTest(value=value), self.assertRaises(TimeParseError) as raised:
                 parse_when(value, now=NOW)
             self.assertIn("accepted forms", str(raised.exception))
 
+    def test_out_of_range_values_raise_time_parse_error(self) -> None:
+        for value in (
+            "999999999 days ago",
+            "0001-01-01T00:00:00+05:00",
+            # Valid in UTC, but unprintable in any timezone west of it.
+            "0001-01-01T00:00:00+00:00",
+            # A local date whose UTC instant overflows past year 9999.
+            "9999-12-31",
+            "9999-12-31T23:00:00",
+        ):
+            with self.subTest(value=value), self.assertRaises(TimeParseError) as raised:
+                parse_when(value, now=NOW)
+            self.assertIn("out of range", str(raised.exception))
+
 
 class ParseBoundTests(unittest.TestCase):
+    def test_out_of_range_days_raise_time_parse_error(self) -> None:
+        east = NOW.astimezone(timezone(timedelta(hours=9)))
+        for text, upper in (("9999-12-31", True), ("0001-01-02", False)):
+            with self.subTest(text=text), self.assertRaises(TimeParseError) as raised:
+                parse_bound(text, upper=upper, now=east)
+            self.assertIn("out of range", str(raised.exception))
+
     def test_bare_days_cover_the_whole_local_day(self):
-        for text, day in (("today", "2026-08-25"), ("yesterday", "2026-08-24"),
-                          ("last monday", "2026-08-24"), ("2026-08-24", "2026-08-24")):
+        for text, day in (
+            ("today", "2026-08-25"),
+            ("yesterday", "2026-08-24"),
+            ("last monday", "2026-08-24"),
+            ("2026-08-24", "2026-08-24"),
+        ):
             with self.subTest(text=text):
                 start = datetime.fromisoformat(parse_bound(text, now=NOW))
                 end = datetime.fromisoformat(parse_bound(text, upper=True, now=NOW))
@@ -99,8 +141,14 @@ class ParseBoundTests(unittest.TestCase):
                 self.assertEqual(end - start, timedelta(days=1, microseconds=-1))
 
     def test_clock_and_elapsed_time_expressions_stay_exact(self):
-        for text in ("now", "2 hours ago", "3 days ago", "today 9am", "last monday 10:30",
-                     "2026-08-20T14:30:00.123456+02:00"):
+        for text in (
+            "now",
+            "2 hours ago",
+            "3 days ago",
+            "today 9am",
+            "last monday 10:30",
+            "2026-08-20T14:30:00.123456+02:00",
+        ):
             with self.subTest(text=text):
                 expected = parse_when(text, now=NOW)
                 self.assertEqual(parse_bound(text, now=NOW), expected)
@@ -109,7 +157,9 @@ class ParseBoundTests(unittest.TestCase):
     def test_positive_offset_day_is_not_shifted_to_previous_local_date(self):
         now = datetime(2026, 8, 25, 12, tzinfo=ZoneInfo("Asia/Tokyo"))
         self.assertEqual(parse_bound("today", now=now), "2026-08-24T15:00:00+00:00")
-        self.assertEqual(parse_bound("today", upper=True, now=now), "2026-08-25T14:59:59.999999+00:00")
+        self.assertEqual(
+            parse_bound("today", upper=True, now=now), "2026-08-25T14:59:59.999999+00:00"
+        )
 
 
 if __name__ == "__main__":

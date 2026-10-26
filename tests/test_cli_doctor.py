@@ -31,6 +31,7 @@ _EXPECTED_CHECK_ORDER = [
     "unparsable_occurred_at",
     "row_counts",
     "review_scope",
+    "addressable_names",
 ]
 
 
@@ -87,6 +88,7 @@ class DoctorCommandTests(unittest.TestCase):
                 "unparsable_occurred_at",
                 "row_counts",
                 "review_scope",
+                "addressable_names",
             },
         )
         self.assertTrue(all(item["status"] == "ok" for item in checks.values()))
@@ -106,20 +108,23 @@ class DoctorCommandTests(unittest.TestCase):
         self.assertEqual(payload["status"], "warn")
         self.assertEqual(self.checks_by_name(payload)["permissions"]["status"], "warn")
 
+    def test_chosen_directory_keeps_its_own_permissions(self) -> None:
+        db.init_db(self.db_path)
+        os.chmod(self.db_path.parent, 0o755)
+        rc, payload = self.run_doctor()
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.checks_by_name(payload)["permissions"]["status"], "ok")
+
     def test_v1_database_fails_schema_version(self) -> None:
         paths.ensure_data_dir(self.db_path)
         with closing(sqlite3.connect(self.db_path)) as conn:
             conn.executescript(schema.SCHEMA_V1_SQL)
-            conn.execute(
-                "INSERT INTO _meta (key, value) VALUES ('schema_version', '1')"
-            )
+            conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', '1')")
             conn.commit()
         paths.secure_file(self.db_path)
         rc, payload = self.run_doctor()
         self.assertEqual(rc, 1)
-        self.assertEqual(
-            self.checks_by_name(payload)["schema_version"]["status"], "fail"
-        )
+        self.assertEqual(self.checks_by_name(payload)["schema_version"]["status"], "fail")
 
     def test_foreign_key_violation_fails(self) -> None:
         db.init_db(self.db_path)
@@ -148,9 +153,7 @@ class DoctorCommandTests(unittest.TestCase):
             fh.write(b"\x00" * 256)
         rc, payload = self.run_doctor()
         self.assertEqual(rc, 1)
-        self.assertTrue(
-            any(item["status"] == "fail" for item in payload["checks"])
-        )
+        self.assertTrue(any(item["status"] == "fail" for item in payload["checks"]))
 
     def test_unparsable_occurrence_warns_without_failure(self) -> None:
         db.init_db(self.db_path)
@@ -168,15 +171,11 @@ class DoctorCommandTests(unittest.TestCase):
 
     def test_sync_artifacts_warn_without_failure(self) -> None:
         db.init_db(self.db_path)
-        conflict = self.db_path.with_name(
-            "commscoach (Laptop's conflicted copy).sqlite3"
-        )
+        conflict = self.db_path.with_name("commscoach (Laptop's conflicted copy).sqlite3")
         conflict.touch()
         rc, payload = self.run_doctor()
         self.assertEqual(rc, 0)
-        self.assertEqual(
-            self.checks_by_name(payload)["sync_artifacts"]["status"], "warn"
-        )
+        self.assertEqual(self.checks_by_name(payload)["sync_artifacts"]["status"], "warn")
 
     def test_healthy_database_emits_checks_in_the_expected_order(self) -> None:
         db.init_db(self.db_path)
@@ -187,15 +186,55 @@ class DoctorCommandTests(unittest.TestCase):
         _, payload = self.run_doctor()
         self.assertEqual(self.check_names(payload), _EXPECTED_CHECK_ORDER)
         self.assertEqual(self.checks_by_name(payload)["db_present"]["status"], "fail")
-        self.assertIn(
-            "not run", self.checks_by_name(payload)["review_scope"]["message"]
-        )
+        self.assertIn("not run", self.checks_by_name(payload)["review_scope"]["message"])
 
     def test_not_downloaded_database_emits_every_check_in_order(self) -> None:
         self.db_path.parent.mkdir(parents=True)
         paths.icloud_placeholder_for(self.db_path).touch()
         _, payload = self.run_doctor()
         self.assertEqual(self.check_names(payload), _EXPECTED_CHECK_ORDER)
+
+    def test_addressable_names_warns_about_legacy_handles_and_tags(self) -> None:
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_person(conn, "fine")
+            # Rows the CLI used to accept but now rejects.
+            conn.execute(
+                "INSERT INTO people (handle, is_self, created_at, updated_at)"
+                " VALUES ('bob,carol', 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')"
+            )
+            conn.execute("INSERT INTO tags (name) VALUES ('a,b')")
+            conn.commit()
+        rc, payload = self.run_doctor()
+        self.assertEqual(rc, 0)
+        check = self.checks_by_name(payload)["addressable_names"]
+        self.assertEqual(check["status"], "warn")
+        self.assertEqual(
+            [item.get("handle") or item.get("tag") for item in check["details"]],
+            ["bob,carol", "a,b"],
+        )
+
+    def test_addressable_names_warns_about_handles_sharing_an_identity(self) -> None:
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            # Older releases allowed this: LOWER(handle) only folds ASCII.
+            for handle in ("Émile", "émile"):
+                conn.execute(
+                    "INSERT INTO people (handle, is_self, created_at, updated_at)"
+                    " VALUES (?, 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+                    (handle,),
+                )
+            conn.commit()
+            # The exact spelling reaches each one, so either can be renamed.
+            self.assertEqual(db.get_person_by_handle(conn, "émile").handle, "émile")
+            self.assertEqual(db.get_person_by_handle(conn, "Émile").handle, "Émile")
+        _, payload = self.run_doctor()
+        check = self.checks_by_name(payload)["addressable_names"]
+        self.assertEqual(check["status"], "warn")
+        self.assertEqual(
+            check["details"],
+            [{"handle": "émile", "same_as": "Émile", "fix": "person edit HANDLE --handle NEW"}],
+        )
 
     def test_review_scope_ok_without_person_scoped_reviews(self) -> None:
         db.init_db(self.db_path)
@@ -265,7 +304,7 @@ class DoctorCommandTests(unittest.TestCase):
         with redirect_stderr(err):
             list_rc = cli.main(["--db", str(self.db_path), "entry", "list"])
         self.assertEqual(list_rc, 1)
-        self.assertIn("Do NOT run 'commscoach init'", err.getvalue())
+        self.assertIn(f"Do NOT run 'commscoach --db {self.db_path} init'", err.getvalue())
         self.assertFalse(self.db_path.exists())
 
 

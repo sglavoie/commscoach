@@ -70,9 +70,7 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
                 "SELECT review_id, entry_id, position FROM review_entries"
                 " ORDER BY review_id, position",
             )
-            self.before_goals = _rows(
-                conn, "SELECT id, title, review_id FROM goals ORDER BY id"
-            )
+            self.before_goals = _rows(conn, "SELECT id, title, review_id FROM goals ORDER BY id")
 
     def test_migration_stamps_v4_and_keeps_the_table_set(self) -> None:
         db.init_db(self.db_path)
@@ -81,6 +79,22 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
             self.assertEqual(db.get_schema_version(conn), 4)
             self.assertTrue(EXPECTED_TABLES.issubset(table_names(conn)))
             self.assertNotIn("reviews_new", table_names(conn))
+
+    def test_ids_of_reviews_deleted_before_the_upgrade_are_not_reused(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            conn.execute(
+                "INSERT INTO reviews (id, body, scope_kind, scope_limit, created_at, updated_at)"
+                " VALUES (9, 'deleted later', 'latest', NULL, ?, ?)",
+                ("2026-06-20T00:00:00Z", "2026-06-20T00:00:00Z"),
+            )
+            conn.execute("DELETE FROM reviews WHERE id = 9")
+            conn.commit()
+
+        db.init_db(self.db_path)
+
+        with closing(db.connect(self.db_path)) as conn:
+            review = db.create_review(conn, "after the upgrade", [1])
+        self.assertEqual(review.id, 10)
 
     def test_every_review_row_survives_byte_identical(self) -> None:
         db.init_db(self.db_path)
@@ -123,9 +137,7 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
         db.init_db(self.db_path)
 
         with closing(db.connect(self.db_path)) as conn:
-            after = _rows(
-                conn, "SELECT id, title, review_id FROM goals ORDER BY id"
-            )
+            after = _rows(conn, "SELECT id, title, review_id FROM goals ORDER BY id")
 
         self.assertEqual(after, self.before_goals)
         self.assertEqual([row["review_id"] for row in after], [1, 2])
@@ -135,9 +147,7 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
 
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
-            self.assertEqual(
-                [row[0] for row in conn.execute("PRAGMA integrity_check")], ["ok"]
-            )
+            self.assertEqual([row[0] for row in conn.execute("PRAGMA integrity_check")], ["ok"])
             indexes = index_names(conn)
 
         for required in (
@@ -202,9 +212,10 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
 
         paths.ensure_data_dir(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
-            with mock.patch.object(
-                db_schema, "_rebuild_reviews_table", side_effect=sabotage
-            ), self.assertRaisesRegex(RuntimeError, "rebuild exploded"):
+            with (
+                mock.patch.object(db_schema, "_rebuild_reviews_table", side_effect=sabotage),
+                self.assertRaisesRegex(RuntimeError, "rebuild exploded"),
+            ):
                 db_schema._apply_schema(conn)
 
             (foreign_keys,) = conn.execute("PRAGMA foreign_keys").fetchone()
@@ -212,8 +223,7 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
             self.assertEqual(
                 _rows(
                     conn,
-                    f"SELECT {', '.join(_OLD_REVIEW_COLUMNS)} FROM reviews"
-                    " ORDER BY id",
+                    f"SELECT {', '.join(_OLD_REVIEW_COLUMNS)} FROM reviews ORDER BY id",
                 ),
                 self.before_reviews,
             )
@@ -231,18 +241,19 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
             )
             self.assertEqual(db.get_schema_version(conn), 3)
             self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
-            self.assertEqual(
-                [row[0] for row in conn.execute("PRAGMA integrity_check")], ["ok"]
-            )
+            self.assertEqual([row[0] for row in conn.execute("PRAGMA integrity_check")], ["ok"])
 
     def test_failed_verification_leaves_the_database_untouched(self) -> None:
         paths.ensure_data_dir(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
-            with mock.patch.object(
-                db_schema,
-                "_verify_reviews_rebuild",
-                side_effect=db.DBError("verification refused"),
-            ), self.assertRaisesRegex(db.DBError, "verification refused"):
+            with (
+                mock.patch.object(
+                    db_schema,
+                    "_verify_reviews_rebuild",
+                    side_effect=db.DBError("verification refused"),
+                ),
+                self.assertRaisesRegex(db.DBError, "verification refused"),
+            ):
                 db_schema._apply_schema(conn)
 
             (foreign_keys,) = conn.execute("PRAGMA foreign_keys").fetchone()
@@ -251,8 +262,7 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
             self.assertEqual(
                 _rows(
                     conn,
-                    f"SELECT {', '.join(_OLD_REVIEW_COLUMNS)} FROM reviews"
-                    " ORDER BY id",
+                    f"SELECT {', '.join(_OLD_REVIEW_COLUMNS)} FROM reviews ORDER BY id",
                 ),
                 self.before_reviews,
             )
