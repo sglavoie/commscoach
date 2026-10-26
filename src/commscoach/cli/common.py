@@ -90,14 +90,21 @@ def first_prose_line(body: str) -> str:
     return lines[0] if lines else ""
 
 
+_ASCII_FOLD = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def ascii_fold(text: str) -> str:
+    """Lowercase ASCII letters only, matching SQLite's ``LIKE`` case folding."""
+    return text.translate(_ASCII_FOLD)
+
+
 def search_excerpt(body: str, query: str, *, width: int = 180) -> str:
     """Show context around the first literal match, preserving matched headings.
 
     Fold ASCII only, like SQLite LIKE, so Unicode characters do not shift the
     match offsets. Long queries remain whole even when they exceed the budget.
     """
-    fold = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
-    match = body.translate(fold).find(query.translate(fold))
+    match = ascii_fold(body).find(ascii_fold(query))
     if not query or match < 0:
         return truncate(first_prose_line(body), width=width)
     budget = max(width, len(query))

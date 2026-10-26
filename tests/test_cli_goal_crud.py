@@ -196,5 +196,26 @@ class GoalCrudTests(GoalTestBase):
             self.assertIn(verb, out)
 
 
+
+class GoalEmptyTextTests(GoalTestBase):
+    def test_empty_stdin_text_is_rejected_without_writing(self) -> None:
+        rc, _, err = self._run(
+            "goal", "add", "Practice", "--detail", "-", stdin=io.StringIO("  \n")
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("--detail must not be empty", err)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.list_goals(conn, status=None), ())
+            goal = db.create_goal(conn, "Practice")
+        for argv in (
+            ("goal", "edit", str(goal.id), "--outcome", "-"),
+            ("goal", "close", str(goal.id), "--outcome", "-"),
+        ):
+            with self.subTest(argv=argv):
+                rc, _, err = self._run(*argv, stdin=io.StringIO(""))
+                self.assertEqual(rc, 1)
+                self.assertIn("--outcome must not be empty", err)
+
+
 if __name__ == "__main__":
     unittest.main()

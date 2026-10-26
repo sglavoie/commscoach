@@ -9,6 +9,7 @@ from typing import Any
 
 from .. import db
 from .common import (
+    ascii_fold,
     confirm,
     non_negative_int,
     open_db,
@@ -201,13 +202,21 @@ def _emit_goals(
             print("  outcome:")
             print("\n".join(f"    {line}" for line in (goal.outcome or "(no outcome recorded)").splitlines()))
         if query is not None:
-            fold = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
             for label, body in (("title", goal.title), ("detail", goal.detail),
                                 ("outcome", goal.outcome)):
                 if label == "outcome" and with_outcome:
                     continue
-                if body is not None and query.translate(fold) in body.translate(fold):
+                if body is not None and ascii_fold(query) in ascii_fold(body):
                     print(f"  {label}: {search_excerpt(body, query)}")
+
+
+def _read_goal_text(value: str, *, flag: str) -> str:
+    """Read ``--detail``/``--outcome`` text, rejecting an empty value like the
+    editor does (an empty ``-`` on stdin used to store ``""``)."""
+    text = read_body_or_raise(value)
+    if not text.strip():
+        raise db.DBError(f"{flag} must not be empty; omit the flag to leave it unset")
+    return text
 
 
 def cmd_goal_add(args: argparse.Namespace) -> int:
@@ -225,7 +234,10 @@ def cmd_goal_add(args: argparse.Namespace) -> int:
                 isatty=sys.stdin.isatty, compose=compose_in_editor,
             )
         else:
-            detail = read_body_or_raise(args.detail) if args.detail is not None else None
+            detail = (
+                _read_goal_text(args.detail, flag="--detail")
+                if args.detail is not None else None
+            )
         goal = db.create_goal(
             conn,
             args.title,
@@ -289,11 +301,11 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
     if args.clear_detail:
         update_kwargs["detail"] = None
     elif args.detail is not None and not edit_detail:
-        update_kwargs["detail"] = read_body_or_raise(args.detail)
+        update_kwargs["detail"] = _read_goal_text(args.detail, flag="--detail")
     if args.clear_outcome:
         update_kwargs["outcome"] = None
     elif args.outcome is not None and not edit_outcome:
-        update_kwargs["outcome"] = read_body_or_raise(args.outcome)
+        update_kwargs["outcome"] = _read_goal_text(args.outcome, flag="--outcome")
     if args.clear_person:
         update_kwargs["person_handle"] = None
     elif args.person is not None:
@@ -337,7 +349,7 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
 def cmd_goal_close(args: argparse.Namespace) -> int:
     edit_outcome = args.outcome is _EDIT_TEXT
     outcome = (
-        read_body_or_raise(args.outcome)
+        _read_goal_text(args.outcome, flag="--outcome")
         if args.outcome is not None and not edit_outcome else None
     )
     with open_db(args) as conn:
