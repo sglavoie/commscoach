@@ -140,9 +140,12 @@ def update_person(
     params: list[Any] = []
     if handle is not common.UNSET:
         handle = validate_handle(handle)
-        fields.append("handle = ?")
-        params.append(handle)
-    if name is not common.UNSET:
+        if handle == person.handle:
+            handle = common.UNSET
+        else:
+            fields.append("handle = ?")
+            params.append(handle)
+    if name is not common.UNSET and name != person.name:
         fields.append("name = ?")
         params.append(name)
     if not fields:

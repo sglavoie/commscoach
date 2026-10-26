@@ -120,6 +120,13 @@ class StatsTests(DBTestCase):
         stats = db.get_stats(self.conn)
         self.assertEqual(stats.top_sources, (("SLACK", 3), ("email", 1)))
 
+    def test_top_sources_group_non_ascii_case_together(self) -> None:
+        for source in ("ÉQUIPE", "équipe", "Équipe", "equipe"):
+            self._add_entry("2026-01-05T09:00:00+00:00", source=source)
+        self.conn.commit()
+        stats = db.get_stats(self.conn)
+        self.assertEqual(stats.top_sources, (("ÉQUIPE", 3), ("equipe", 1)))
+
     def test_future_dated_entry_does_not_reset_current_streak(self) -> None:
         for timestamp in (
             "2026-01-05T09:00:00+00:00",

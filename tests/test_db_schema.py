@@ -224,6 +224,21 @@ class InitDbSchemaTests(unittest.TestCase):
         self.assertEqual(data_mode, 0o700)
         self.assertEqual(file_mode, 0o600)
 
+    def test_init_refuses_a_foreign_sqlite_file_and_leaves_it_untouched(self) -> None:
+        paths.ensure_data_dir(self.db_path)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute("CREATE TABLE invoices (id INTEGER PRIMARY KEY, total REAL)")
+            conn.execute("INSERT INTO invoices (total) VALUES (12.5)")
+            conn.commit()
+        os.chmod(self.db_path, 0o644)
+
+        with self.assertRaisesRegex(db.DBError, "did not create"):
+            db.init_db(self.db_path)
+
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(table_names(conn), {"invoices"})
+        self.assertEqual(stat.S_IMODE(self.db_path.stat().st_mode), 0o644)
+
     def test_init_is_idempotent(self) -> None:
         db.init_db(self.db_path)
         with closing(db.connect(self.db_path)) as conn:

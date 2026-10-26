@@ -76,16 +76,20 @@ def search_feedback(
     *,
     query: str,
     person_handle: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
     limit: int = 20,
+    oldest_first: bool = False,
 ) -> tuple[Feedback, ...]:
-    """Find literal body substrings, newest-first, optionally by linked person."""
+    """Find literal body substrings, newest-first, by linked person or written date."""
     if limit < 0:
         raise DBError("limit must be non-negative")
-    sql, params = _feedback_search_filter(conn, query, person_handle)
+    sql, params = _feedback_search_filter(conn, query, person_handle, since, until)
+    direction = "ASC" if oldest_first else "DESC"
     return tuple(
         row_to_feedback(row)
         for row in conn.execute(
-            "SELECT f.*" + sql + " ORDER BY f.created_at DESC, f.id DESC LIMIT ?",
+            f"SELECT f.*{sql} ORDER BY f.created_at {direction}, f.id {direction} LIMIT ?",
             [*params, limit],
         )
     )
@@ -96,9 +100,11 @@ def count_search_feedback(
     *,
     query: str,
     person_handle: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> int:
     """Count matching feedback notes before limiting search results."""
-    sql, params = _feedback_search_filter(conn, query, person_handle)
+    sql, params = _feedback_search_filter(conn, query, person_handle, since, until)
     return conn.execute("SELECT COUNT(*)" + sql, params).fetchone()[0]
 
 
@@ -106,6 +112,8 @@ def _feedback_search_filter(
     conn: sqlite3.Connection,
     query: str,
     person_handle: str | None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> tuple[str, list[object]]:
     if not query or not query.strip():
         raise DBError("query must be a non-empty string")
@@ -120,6 +128,13 @@ def _feedback_search_filter(
             " WHERE ep.entry_id = f.entry_id AND ep.person_id = ?)"
         )
         params.append(person.id)
+    common.validate_range_bounds(since, until, since_name="since", until_name="until")
+    if since is not None:
+        sql += " AND f.created_at >= ?"
+        params.append(common.date_bound_timestamp(since, name="since"))
+    if until is not None:
+        sql += " AND f.created_at <= ?"
+        params.append(common.date_bound_timestamp(until, name="until", upper=True))
     return sql, params
 
 
@@ -137,8 +152,11 @@ def update_feedback(
     """
     if not body or not body.strip():
         raise DBError("feedback body must be a non-empty string")
-    if get_feedback(conn, feedback_id) is None:
+    current = get_feedback(conn, feedback_id)
+    if current is None:
         raise FeedbackNotFoundError(feedback_id)
+    if body == current.body:
+        return current
     now = common.utcnow_iso()
     with common.write_transaction(conn):
         conn.execute(

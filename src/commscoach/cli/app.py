@@ -69,6 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
     porting.register(subparsers)
     stats.register(subparsers)
 
+    _reject_repeated_options(parser)
+
     # Argparse only recognizes a parent's options before its subcommand. Add
     # the same flags at each level, suppressing absent child defaults so a
     # flag parsed earlier is retained and the last explicit value wins.
@@ -107,6 +109,34 @@ def _db_path_arg(value: str) -> str:
     if not value.strip():
         raise argparse.ArgumentTypeError("must not be empty")
     return value
+
+
+class _StoreOnce(argparse._StoreAction):
+    """A single-valued option that refuses a second value instead of dropping the first."""
+
+    def __call__(self, parser, namespace, values, option_string=None):  # type: ignore[no-untyped-def]
+        seen = namespace.__dict__.setdefault("_options_seen", set())
+        if self.dest in seen:
+            raise argparse.ArgumentError(self, "may be given only once")
+        seen.add(self.dest)
+        super().__call__(parser, namespace, values, option_string)
+
+
+def _reject_repeated_options(parser: argparse.ArgumentParser) -> None:
+    """Make every subcommand's single-valued options error when repeated.
+
+    Plain ``store`` keeps only the last value, so ``--person a --person b``
+    would silently filter by ``b`` alone. Options meant to repeat use
+    ``append``/``extend``; the global flags, added afterwards, keep their
+    last-explicit-wins behaviour.
+    """
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for child in action.choices.values():
+                for option in child._actions:
+                    if type(option) is argparse._StoreAction and option.option_strings:
+                        option.__class__ = _StoreOnce
+                _reject_repeated_options(child)
 
 
 def _add_global_flags_to_children(parser: argparse.ArgumentParser) -> None:
@@ -177,6 +207,11 @@ def _terminate_cleanly() -> Iterator[None]:
 
 def main(argv: list[str] | None = None) -> int:
     """Console-script entry point. Returns an integer exit code."""
+    # Footers and hints go to stderr after the listing they describe; when both
+    # streams share a pipe, a block-buffered stdout would print them first.
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(line_buffering=True)
     parser = build_parser()
     args = parser.parse_args(argv)
     func: Callable[[argparse.Namespace], int] | None = getattr(args, "func", None)

@@ -9,11 +9,15 @@ import textwrap
 from .. import db
 from .common import (
     EDIT_IN_EDITOR,
+    add_date_bounds,
+    add_oldest_first,
     confirm,
+    edit_verb,
     format_stamp,
     handle_arg,
     non_negative_int,
     open_db,
+    parse_date_bounds,
     print_json,
     prose_lines,
     read_body_arg,
@@ -78,6 +82,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="N",
         help="Maximum results (default: 20); text output reports omitted matches.",
     )
+    add_date_bounds(search, noun="feedback written")
+    add_oldest_first(search, noun="matching feedback")
     search.set_defaults(func=cmd_feedback_search)
 
     show = feedback_sub.add_parser("show", help="Show one feedback note by id.")
@@ -109,7 +115,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _format_feedback_human(feedback: db.Feedback) -> str:
-    header = f"[{feedback.id}] entry {feedback.entry_id} created {feedback.created_at}"
+    header = (
+        f"[{feedback.id}] entry {feedback.entry_id} created {format_stamp(feedback.created_at)}"
+    )
     return "\n".join([header, "---", feedback.body])
 
 
@@ -213,14 +221,20 @@ def cmd_feedback_show(args: argparse.Namespace) -> int:
 
 
 def cmd_feedback_search(args: argparse.Namespace) -> int:
+    since, until = parse_date_bounds(args)
     with open_db(args) as conn:
         items = db.search_feedback(
             conn,
             query=args.query,
             person_handle=args.person,
+            since=since,
+            until=until,
             limit=args.limit,
+            oldest_first=args.oldest_first,
         )
-        total = db.count_search_feedback(conn, query=args.query, person_handle=args.person)
+        total = db.count_search_feedback(
+            conn, query=args.query, person_handle=args.person, since=since, until=until
+        )
     _emit_feedback_list(args, items, query=args.query)
     if total > len(items):
         print(f"Showing {len(items)} of {total} matching feedback notes.", file=sys.stderr)
@@ -230,10 +244,10 @@ def cmd_feedback_search(args: argparse.Namespace) -> int:
 def cmd_feedback_edit(args: argparse.Namespace) -> int:
     body = read_replacement_body(args.body, command="feedback edit")
     with open_db(args) as conn:
+        current = db.get_feedback(conn, args.feedback_id)
+        if current is None:
+            raise db.FeedbackNotFoundError(args.feedback_id)
         if body is None:
-            current = db.get_feedback(conn, args.feedback_id)
-            if current is None:
-                raise db.FeedbackNotFoundError(args.feedback_id)
             body = read_body_arg(
                 None,
                 what="body",
@@ -243,7 +257,7 @@ def cmd_feedback_edit(args: argparse.Namespace) -> int:
                 compose=compose_in_editor,
             )
         feedback = db.update_feedback(conn, args.feedback_id, body=body)
-    _emit_feedback(args, feedback, human_prefix="updated")
+    _emit_feedback(args, feedback, human_prefix=edit_verb(current.updated_at, feedback.updated_at))
     return 0
 
 

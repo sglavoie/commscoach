@@ -80,6 +80,14 @@ class PortingCLITests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("--json conflicts with --format markdown", err)
 
+        out_path = self.tmpdir / "export.md"
+        rc, out, err = self._run(
+            self.source_path, "export", "--json", "--format", "markdown", "--out", str(out_path)
+        )
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out), {"format": "markdown", "path": str(out_path)})
+        self.assertFalse(out_path.read_text(encoding="utf-8").lstrip().startswith("{"))
+
     def test_json_export_file_has_mode_0600(self) -> None:
         out_path = self.tmpdir / "archive.json"
 
@@ -137,7 +145,7 @@ class PortingCLITests(unittest.TestCase):
         rc, stdout, _ = self._run(self.target_path, "import", str(archive))
 
         self.assertEqual(rc, 0)
-        self.assertRegex(stdout, r"^imported 1 people, 1 entries, .* from ")
+        self.assertRegex(stdout, r"^imported 1 person, 1 entry, .* from ")
         with (
             closing(db.connect(self.source_path)) as source,
             closing(db.connect(self.target_path)) as target,

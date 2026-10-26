@@ -60,6 +60,20 @@ def _find_tag_id(conn: sqlite3.Connection, name: str) -> int | None:
     return None if row is None else row["id"]
 
 
+def get_tag(conn: sqlite3.Connection, name: str, *, hint: str | None = None) -> Tag:
+    """Load a tag by name with its entry count, raising ``TagNotFoundError``."""
+    tag_name = _require_name(name)
+    tag_id = _find_tag_id(conn, tag_name)
+    if tag_id is None:
+        raise TagNotFoundError(tag_name, hint=hint)
+    return _get_tag(conn, tag_id)
+
+
+def count_tags(conn: sqlite3.Connection) -> int:
+    """Return how many tags exist, for ``tag list --limit`` footers."""
+    return conn.execute("SELECT COUNT(*) FROM tags").fetchone()[0]
+
+
 def _get_tag(conn: sqlite3.Connection, tag_id: int) -> Tag:
     """Load one tag with its current entry count."""
     row = conn.execute(

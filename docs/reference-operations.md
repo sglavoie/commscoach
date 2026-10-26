@@ -57,9 +57,9 @@ commscoach stats --top 10                       # longer top tags/sources/people
 
 `--top N` (default 5) caps each ranked list and `--weeks N` (default 12) caps the weekly buckets shown; both accept zero.
 
-The summary includes entry, people, tag, feedback, review, and goal counts; feedback coverage; first/last activity; entries per week; current and longest weekly streaks; weekly buckets; and top tags, sources, and people. Weeks are local Monday-to-Sunday weeks. The current streak counts consecutive active weeks up to this week (or the `--until` week); it stays alive while the current week has no entries yet, and drops to 0 once a full week is missed. The backlog hint after the human summary is printed to stderr, so it does not mix into piped output.
+The summary includes entry, people, tag, feedback, review, and goal counts (people and tags count those appearing on entries in the window, not every stored person or tag); feedback coverage; first/last activity; entries per week; current and longest weekly streaks; weekly buckets; and top tags, sources, and people. Weeks are local Monday-to-Sunday weeks. The current streak counts consecutive active weeks up to this week (or the `--until` week); it stays alive while the current week has no entries yet, and drops to 0 once a full week is missed. The backlog hint after the human summary is printed to stderr, so it does not mix into piped output.
 
-Human-readable stats also show the number of entries awaiting feedback. When it is nonzero, a copyable command opens the five oldest uncoached entries, carrying over an explicit `--db` and the resolved date bounds. Stats JSON reports the same number as `entries_awaiting_feedback`.
+Human-readable stats also show the number of entries awaiting feedback. When it is nonzero, a copyable command opens the five oldest uncoached entries, carrying over an explicit `--db` and the date bounds as you typed them. Stats JSON reports the same number as `entries_awaiting_feedback`.
 
 Show the full experiment beneath each goal title with `goal list --with-detail`.
 JSON already contains goal details and is unchanged by this flag.
@@ -95,7 +95,7 @@ The current schema version is **4**. Version 4 rebuilds the `reviews` table to c
 
 An existing database migrates automatically on the next `commscoach init`. The migration copies every review into a new table, then verifies the result with `PRAGMA integrity_check` and `PRAGMA foreign_key_check` before committing, and rolls the whole thing back if anything fails. Every pre-existing review becomes `scope_kind = 'latest'`, which is what it already was.
 
-`init` is safe to run against an existing database, but take a backup first anyway — the migration rewrites a table:
+`init` is safe to run against an existing database, but take a backup first anyway — the migration rewrites a table. It refuses a SQLite file that commscoach did not create (one with other tables and no schema version) and leaves it untouched:
 
 ```sh
 commscoach backup --out ~/Backups/commscoach-pre-v4.sqlite3
@@ -110,7 +110,7 @@ commscoach doctor
 
 ## Diagnostics and backups
 
-`doctor` opens the store read-only and checks schema version, SQLite integrity, foreign keys, journal mode, permissions, unparsable timestamps, row counts, sync artifacts, review scopes, and addressable names. A failing check exits 1; warnings are reported without treating the whole run as failed.
+`doctor` opens the store read-only and checks schema version, SQLite integrity, foreign keys, journal mode, permissions, unparsable timestamps, row counts, sync artifacts, review scopes, and addressable names. A failing check exits 1; warnings are reported without treating the whole run as failed. The `permissions` check expects the database at `0600`; it also expects `0700` on the default data directory, but leaves a directory you chose with `--db` to you.
 
 The `review_scope` check warns when a person-scoped review names a person who has since been deleted. That is expected history rather than corruption: the denormalized handle is kept so the review still records who it was about.
 
@@ -132,7 +132,7 @@ commscoach backup --keep 7
 
 ## Export
 
-Markdown export is human-readable and lossy. JSON export is complete and restorable. Both write to stdout by default; pass `--out PATH` to create a mode-`0600` file. With `--out`, `--json` prints `{"format", "path"}` to stdout instead of the stderr note, like `backup`.
+Markdown export is human-readable and lossy. JSON export is complete and restorable. Both write to stdout by default; pass `--out PATH` to create a mode-`0600` file. With `--out`, `--json` prints `{"format", "path"}` to stdout instead of the stderr note, like `backup`. Without `--format`, the global `--json` also selects the JSON export format; pass `--format markdown --out PATH --json` to write Markdown and still get a JSON status line.
 
 File exports are written to a private temporary file beside the destination and
 replace it atomically after writing succeeds. A failed write leaves an existing
@@ -160,7 +160,7 @@ Each exported review names its scope axis, so a synthesis stays self-describing 
 
 `latest`, `tag conflict`, and `range 2026-07-01..2026-09-01` are the other three shapes. A review whose scoped person was deleted still renders `person @alice` from the stored handle, and the JSON archive round-trips that handle through `import`.
 
-Import restores a complete JSON export into an empty initialized database. Besides timestamps, it checks that ids are integers, handles are non-empty and trimmed, and tag names are normalized (trimmed, lowercase), so a hand-edited archive cannot restore rows no command can address. It never merges with or replaces existing records. Timestamps must be timezone-aware ISO-8601 values and are stored normalized to UTC, as the CLI stores them; IDs of rows deleted before the export are not handed out again. Both the human and `--json` output report how many rows of each table were (or, with `--dry-run`, would be) restored as `counts`. Validate the whole restore, including constraints, with `--dry-run` before writing:
+Import restores a complete JSON export into an empty initialized database. Besides timestamps, it checks that ids are integers, handles are non-empty, trimmed, and unique ignoring case (including accented letters), entry, feedback, review, and note bodies and goal titles are not blank, and tag names are normalized (trimmed, lowercase), so a hand-edited archive cannot restore rows no command can address. It never merges with or replaces existing records. Timestamps must be timezone-aware ISO-8601 values and are stored normalized to UTC, as the CLI stores them; IDs of rows deleted before the export are not handed out again. Both the human and `--json` output report how many rows of each table were (or, with `--dry-run`, would be) restored as `counts`. Validate the whole restore, including constraints, with `--dry-run` before writing:
 
 ```sh
 commscoach --db /path/to/empty.sqlite3 init

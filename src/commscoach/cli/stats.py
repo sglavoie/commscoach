@@ -9,6 +9,7 @@ from .. import db
 from .common import (
     add_date_bounds,
     command_prefix,
+    format_stamp,
     non_negative_int,
     open_db,
     parse_date_bounds,
@@ -49,6 +50,10 @@ def _format_ranked(title: str, items: tuple[tuple[str, int], ...]) -> list[str]:
     return lines
 
 
+def _stamp(value: str | None) -> str:
+    return format_stamp(value) if value else "(none)"
+
+
 def _format_human(stats: db.Stats, *, weeks: int) -> str:
     coverage = stats.entries_with_feedback / stats.entry_count if stats.entry_count else 0.0
     buckets = stats.weekly_buckets[-weeks:] if weeks else ()
@@ -61,16 +66,18 @@ def _format_human(stats: db.Stats, *, weeks: int) -> str:
         (f"Feedback coverage: {stats.entries_with_feedback}/{stats.entry_count} ({coverage:.1%})"),
         f"Reviews: {stats.review_count}",
         f"Goals: {stats.open_goal_count} open, {stats.closed_goal_count} closed",
-        f"First entry: {stats.first_entry or '(none)'}",
-        f"Last entry: {stats.last_entry or '(none)'}",
-        f"Last review: {stats.last_review or '(none)'}",
+        f"First entry: {_stamp(stats.first_entry)}",
+        f"Last entry: {_stamp(stats.last_entry)}",
+        f"Last review: {_stamp(stats.last_review)}",
         f"Entries/week: {stats.entries_per_week:.2f}",
         f"Weekly streak: {stats.current_weekly_streak} current, "
         f"{stats.longest_weekly_streak} longest",
     ]
     lines.extend(_format_ranked("Top tags", stats.top_tags))
     lines.extend(_format_ranked("Top sources", stats.top_sources))
-    lines.extend(_format_ranked("Top people", stats.top_people))
+    lines.extend(
+        _format_ranked("Top people", tuple((f"@{name}", n) for name, n in stats.top_people))
+    )
     lines.append("Recent weeks:")
     lines.extend(f"  {week}: {count}" for week, count in buckets)
     if not buckets:
@@ -89,7 +96,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
         if summary.entry_count > summary.entries_with_feedback:
             command = command_prefix(args)
             command.extend(("entry", "search", "--no-feedback", "--oldest-first", "--limit", "5"))
-            for flag, bound in (("--since", since), ("--until", until)):
+            # Repeat the bounds as typed: "2026-10-01", not its UTC instant.
+            for flag, bound in (("--since", args.since), ("--until", args.until)):
                 if bound is not None:
                     command.extend((flag, bound))
             print_err(f"\nCoach the oldest first: {shlex.join(command)}")

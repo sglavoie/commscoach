@@ -9,7 +9,18 @@ from pathlib import Path
 from typing import Any
 
 from .. import db
-from .common import open_db, print_json
+from .common import open_db, plural, print_json
+
+# Singular and plural labels for the per-table counts in the import summary.
+_TABLE_NOUNS = {
+    "people": ("person", "people"),
+    "entries": ("entry", "entries"),
+    "tags": ("tag", "tags"),
+    "feedback": ("feedback note", "feedback notes"),
+    "reviews": ("review", "reviews"),
+    "goals": ("goal", "goals"),
+    "person_notes": ("person note", "person notes"),
+}
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -68,7 +79,8 @@ def cmd_import(args: argparse.Namespace) -> int:
         print_json(result)
     else:
         summary = ", ".join(
-            f"{count} {table.replace('_', ' ')}" for table, count in result["counts"].items()
+            plural(count, *_TABLE_NOUNS.get(table, (table, table)))
+            for table, count in result["counts"].items()
         )
         if args.dry_run:
             print(f"import validated ({summary}); no data written")

@@ -82,6 +82,12 @@ class ParseWhenTests(unittest.TestCase):
         self.assertEqual(parse_when("2 hours ago", now=spring), "2026-03-08T06:00:00+00:00")
         self.assertEqual(parse_when("90 minutes ago", now=spring), "2026-03-08T06:30:00+00:00")
 
+    def test_zero_days_ago_keeps_the_repeated_fall_back_hour(self) -> None:
+        # 01:30 EST, the second 01:30 of the night clocks fell back.
+        now = datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=ZoneInfo("America/New_York"))
+        self.assertEqual(parse_when("0 days ago", now=now), parse_when("now", now=now))
+        self.assertEqual(parse_when("0 days ago", now=now), "2026-11-01T06:30:00+00:00")
+
     def test_rejected_forms_name_the_grammar(self) -> None:
         for value in (
             "yesterdya",

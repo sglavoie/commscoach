@@ -32,6 +32,13 @@ def _finish_draft(path: Path, *, recover: bool, template: str = "") -> None:
             body = strip_comment_lines(raw.decode("utf-8", errors="replace")).strip()
             if body and body != template.strip():
                 path.chmod(0o600)
+                try:
+                    raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    pass  # keep an undecodable draft byte-for-byte
+                else:
+                    # Drop the #> instructions so ``@PATH`` restores just the text.
+                    path.write_text(body + "\n", encoding="utf-8")
                 print(f"Draft saved for recovery: {path}", file=sys.stderr)
                 return
         path.unlink()

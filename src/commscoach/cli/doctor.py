@@ -72,6 +72,17 @@ def _permissions_check(db_path: Path) -> dict[str, Any]:
         "database": oct(file_mode),
         "directory": oct(dir_mode),
     }
+    # A directory chosen with --db keeps its own permissions (see
+    # paths.ensure_data_dir), so only the default data directory must be 0700.
+    if not paths.within_default_data_dir(db_path.parent):
+        if file_mode == paths.DB_FILE_MODE:
+            return _result(
+                "permissions",
+                "ok",
+                "database is 0600 (directory permissions are yours to manage)",
+                details=details,
+            )
+        return _result("permissions", "warn", "expected database mode 0600", details=details)
     if file_mode == paths.DB_FILE_MODE and dir_mode == paths.DATA_DIR_MODE:
         return _result(
             "permissions", "ok", "database is 0600 and directory is 0700", details=details

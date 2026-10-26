@@ -99,6 +99,16 @@ def init_db(db_path: Path | str | None = None) -> Path:
         paths.ensure_data_dir(resolved)
     except OSError as exc:
         raise DBError(f"cannot create data directory for {resolved}: {exc}") from exc
+    if resolved.exists():
+        # Check read-only first: ``connect`` sets the journal mode, a lasting
+        # change to a file that turns out to belong to another application.
+        try:
+            with closing(
+                sqlite3.connect(f"{resolved.resolve().as_uri()}?mode=ro", uri=True)
+            ) as probe:
+                _refuse_foreign_database(probe)
+        except sqlite3.Error:
+            pass  # unreadable or not SQLite: the regular path reports it
     with closing(connect(resolved)) as conn:
         _apply_schema(conn)
     try:
@@ -264,8 +274,12 @@ def _rebuild_reviews_table(conn: sqlite3.Connection) -> None:
     """Copy the pre-v4 ``reviews`` rows into a v4-shaped table and swap it in.
 
     Every pre-existing row is ``scope_kind = 'latest'``, so the five new scope
-    columns stay NULL and every new CHECK holds.
+    columns stay NULL and every new CHECK holds. ``DROP TABLE`` also discards
+    the table's ``sqlite_sequence`` row, so the high-water mark is carried
+    over; otherwise the ids of reviews deleted before the upgrade (still named
+    in old exports and notes) would be handed out again.
     """
+    sequence = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'reviews'").fetchone()
     conn.execute("DROP TABLE IF EXISTS reviews_new")
     conn.execute(_REVIEWS_TABLE_SQL.format(table="reviews_new"))
     conn.execute(
@@ -276,6 +290,14 @@ def _rebuild_reviews_table(conn: sqlite3.Connection) -> None:
     )
     conn.execute("DROP TABLE reviews")
     conn.execute("ALTER TABLE reviews_new RENAME TO reviews")
+    if sequence is not None:
+        updated = conn.execute(
+            "UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'reviews'", (sequence[0],)
+        )
+        if updated.rowcount == 0:
+            conn.execute(
+                "INSERT INTO sqlite_sequence (name, seq) VALUES ('reviews', ?)", (sequence[0],)
+            )
     for statement in _REVIEWS_INDEX_STATEMENTS:
         conn.execute(statement)
 
@@ -397,7 +419,38 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA foreign_keys = ON" if foreign_keys else "PRAGMA foreign_keys = OFF")
 
 
+def _refuse_foreign_database(conn: sqlite3.Connection) -> None:
+    """Raise ``DBError`` when an unstamped ``conn`` holds tables that are not ours.
+
+    Every release stamps ``_meta.schema_version``; an unstamped file holding
+    only commscoach tables is a pre-release or interrupted store and is
+    finished in place. Any other table means the file belongs to another
+    application, and adding ours to it (and making it owner-only) would
+    quietly alter data commscoach does not own.
+    """
+    tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+    }
+    if "_meta" in tables and get_schema_version(conn) is not None:
+        return
+    foreign = sorted(
+        name
+        for name in tables
+        if name not in EXPECTED_TABLES and not name.startswith("entries_fts")
+    )
+    if foreign:
+        raise DBError(
+            "refusing to initialize a SQLite database that commscoach did not create"
+            f" (it has no schema version and contains table {foreign[0]!r});"
+            " choose a new database path"
+        )
+
+
 def _apply_schema_steps(conn: sqlite3.Connection) -> None:
+    _refuse_foreign_database(conn)
     _execute_script(conn, SCHEMA_V1_SQL)
     version = get_schema_version(conn)
     if version is not None and not 1 <= version <= SCHEMA_VERSION:

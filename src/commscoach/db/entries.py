@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import unicodedata
 from collections.abc import Iterable
 from typing import Any, Literal
 
@@ -17,19 +18,49 @@ from .rows import hydrate_entry
 
 _PLAIN_WORDS = re.compile(r"[^\W_]+(?:\s+[^\W_]+)*")
 _FTS_OPERATORS = frozenset({"AND", "OR", "NOT", "NEAR"})
+# Characters that only mean something as FTS5 query syntax: phrases, prefixes,
+# initial-token anchors, grouping, and column filters.
+_FTS_SYNTAX = re.compile(r'["*^():{}]')
 
 
-def _fts_match_query(query: str) -> str:
-    """Turn plain words into prefix terms so ``meet`` also finds ``meeting``.
+def _is_plain_words(query: str) -> bool:
+    stripped = query.strip()
+    return bool(_PLAIN_WORDS.fullmatch(stripped)) and not _FTS_OPERATORS.intersection(
+        stripped.split()
+    )
 
-    A query using any FTS5 syntax (quotes, ``*``, operators, columns, symbols)
-    is passed through unchanged, so phrases and boolean searches still work.
+
+def _fts_match_query(query: str) -> str | None:
+    """Return the FTS5 query for an automatic search, or ``None`` for substring search.
+
+    Plain words become prefix terms so ``meet`` also finds ``meeting``, and a
+    query using FTS5 syntax (quotes, ``*``, operators, columns) is passed
+    through unchanged, so phrases and boolean searches still work. Anything
+    else (``€50``, ``follow-up``, an emoji) is literal text: FTS5 reads
+    non-ASCII symbols as token characters and then drops them, so ``€50``
+    would match any ``50`` and ``😀`` nothing at all. A query without a single
+    letter or digit has no searchable tokens either way.
     """
     stripped = query.strip()
-    words = stripped.split()
-    if not _PLAIN_WORDS.fullmatch(stripped) or _FTS_OPERATORS.intersection(words):
+    if not any(char.isalnum() for char in stripped):
+        return None
+    if _is_plain_words(stripped):
+        return " ".join(f'"{word}"*' for word in stripped.split())
+    if _FTS_SYNTAX.search(stripped) or _FTS_OPERATORS.intersection(stripped.split()):
         return query
-    return " ".join(f'"{word}"*' for word in words)
+    return None
+
+
+def _fts_folds_like_search(query: str) -> bool:
+    """Report whether ``unicode61`` folds ``query`` exactly as ``search_fold`` does.
+
+    The tokenizer lowercases and strips diacritics but does not casefold
+    (``ß`` stays ``ß``) or apply compatibility forms (``ﬁ``), so only for such
+    queries does the index decide every ASCII entry on its own.
+    """
+    decomposed = unicodedata.normalize("NFD", query)
+    stripped = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return stripped.lower() == common.search_fold(query)
 
 
 def _validate_occurred_at(value: Any) -> str | None:
@@ -103,7 +134,8 @@ def update_entry(
     existing links (pass ``()`` to clear them). Other column args update only
     when not ``UNSET``.
     """
-    if get_entry(conn, entry_id) is None:
+    current = get_entry(conn, entry_id)
+    if current is None:
         raise EntryNotFoundError(entry_id)
 
     column_updates: list[str] = []
@@ -123,6 +155,19 @@ def update_entry(
 
     normalized_tags = tags_mod.normalize_tag_list(tags) if tags is not common.UNSET else None
     resolved_people = resolve_person_handles(conn, people) if people is not common.UNSET else None
+
+    # Repeating the stored values is a no-op, so ``updated_at`` only moves on change.
+    if (
+        (body is common.UNSET or body == current.body)
+        and (source is common.UNSET or source == current.source)
+        and (occurred_at is common.UNSET or occurred_at == current.occurred_at)
+        and (normalized_tags is None or set(normalized_tags) == set(current.tags))
+        and (
+            resolved_people is None
+            or {p.id for p in resolved_people} == {p.id for p in current.people}
+        )
+    ):
+        return current
 
     now = common.utcnow_iso()
     with common.write_transaction(conn):
@@ -173,6 +218,7 @@ def list_entries(
     since: str | None = None,
     until: str | None = None,
     limit: int | None = None,
+    oldest_first: bool = False,
 ) -> tuple[Entry, ...]:
     """Return entries newest-first, optionally bounded by date and count."""
     return search_entries(
@@ -180,6 +226,7 @@ def list_entries(
         since=since,
         until=until,
         limit=limit,
+        oldest_first=oldest_first,
     )
 
 
@@ -332,8 +379,10 @@ def search_entries(
     All filters combine with AND. ``query`` uses FTS5 when ``mode`` is ``auto``
     and the initialized database advertises support, while ``like`` forces a
     case-insensitive substring match and ``fts`` explicitly requests FTS5.
-    Malformed automatic FTS queries silently retry with LIKE. ``source`` is a
-    case-insensitive exact match on the stored channel. ``tag`` matches
+    In ``auto`` mode only plain words and FTS5 syntax reach the index; other
+    text is matched as a substring, and malformed FTS queries silently retry
+    with LIKE. ``source`` is a Unicode case-insensitive exact match on the
+    stored channel (``ÉQUIPE`` is ``équipe``). ``tag`` matches
     the normalized tag name; ``person_handle`` matches case-insensitively.
     ``since`` and ``until`` are
     inclusive UTC dates or timezone-aware timestamps applied to ``COALESCE(occurred_at, created_at)``;
@@ -411,9 +460,10 @@ def _search_entry_rows(
         until=until,
     )
     if source is not None:
-        where.append("e.source = ? COLLATE NOCASE")
+        # NOCASE folds ASCII only; handle_key gives the same identity as handles.
+        where.append("handle_key(e.source) = handle_key(?)")
         params.append(source)
-    use_fts = False
+    use_fts = join_fts = False
     if query is not None and not query.strip():
         # Same rule as feedback, review, and goal search.
         raise DBError("query must be a non-empty string")
@@ -423,16 +473,29 @@ def _search_entry_rows(
         if mode == "fts" and not fts_enabled:
             raise DBError("FTS5 search is unavailable")
         use_fts = mode in {"auto", "fts"} and fts_enabled
-        if use_fts:
+        match: str | None = query
+        if use_fts and mode == "auto":
+            match = _fts_match_query(query)
+            use_fts = match is not None
+        if use_fts and mode == "auto" and _is_plain_words(query):
+            # The tokenizer folds less than search_fold, so "strasse" would miss
+            # "Straße"; folded word prefixes cover the rows it cannot decide.
+            where.append(
+                "(e.id IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)"
+                " OR word_prefixes(e.body, ?, ?))"
+            )
+            params.extend((match, query, _fts_folds_like_search(query)))
+        elif use_fts:
+            join_fts = True
             where.append("entries_fts MATCH ?")
-            params.append(_fts_match_query(query) if mode == "auto" else query)
+            params.append(match)
         else:
             where.append("search_fold(e.body) LIKE ? ESCAPE '!'")
             params.append(common.contains_pattern(query))
     if without_feedback:
         where.append("NOT EXISTS (SELECT 1 FROM feedback f WHERE f.entry_id = e.id)")
     sql = "SELECT " + ("COUNT(*)" if count_only else "e.*") + " FROM entries e"
-    if use_fts:
+    if join_fts:
         sql += " JOIN entries_fts ON entries_fts.rowid = e.id"
     if where:
         sql += " WHERE " + " AND ".join(where)
@@ -477,7 +540,8 @@ def search_entry_snippets(
     Literal callers should use their own substring excerpts instead.
     """
     ids = tuple(dict.fromkeys(entry_ids))
-    if not query or not ids:
+    match = _fts_match_query(query) if query else None
+    if match is None or not ids:
         return {}
     enabled = conn.execute("SELECT value FROM _meta WHERE key = 'fts5'").fetchone()
     if enabled is None or enabled[0] != "1":
@@ -492,7 +556,7 @@ def search_entry_snippets(
                 "SELECT rowid, snippet(entries_fts, 0, '', '', '…', 32)"
                 " FROM entries_fts WHERE entries_fts MATCH ?"
                 f" AND rowid IN ({placeholders})",
-                (_fts_match_query(query), *batch),
+                (match, *batch),
             ).fetchall()
             snippets.update((row[0], row[1]) for row in rows)
     except sqlite3.OperationalError:

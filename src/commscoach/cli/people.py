@@ -13,6 +13,7 @@ from .. import db
 from .common import (
     command_prefix,
     confirm,
+    edit_verb,
     first_prose_line,
     format_stamp,
     handle_arg,
@@ -41,27 +42,39 @@ NOTES_PREAMBLE = (
 )
 
 
-def ensure_people(
+def confirm_new_people(
     conn: Any,
     handles: Iterable[str],
     *,
     assume_yes: bool,
     command: list[str] | None = None,
-) -> None:
-    """Confirm and create any people handles that do not already exist.
+) -> list[str]:
+    """Confirm creating any people handles that do not already exist; return them.
 
-    ``command`` is the ``command_prefix`` used in the follow-up hint, so it
-    names the same ``--db`` the user is working with.
+    Nothing is written here, so a command can ask before opening the editor
+    and create the people in the same transaction as the entry linking them:
+    a later failure then leaves no stray people behind. ``command`` is the
+    ``command_prefix`` used in the follow-up hint, so it names the same
+    ``--db`` the user is working with.
     """
+    missing: dict[str, str] = {}
     for handle in handles:
-        if db.get_person_by_handle(conn, handle) is not None:
+        if handle.casefold() in missing or db.get_person_by_handle(conn, handle) is not None:
             continue
+        db.validate_handle(handle)
         if not confirm(f"Create person @{handle}?", assume_yes=assume_yes):
             prefix = command if command is not None else ["commscoach"]
             raise db.DBError(
                 f"person @{handle} does not exist; pass --yes to create it, or run "
                 f"{shlex.join([*prefix, 'person', 'add', handle])} first"
             )
+        missing[handle.casefold()] = handle
+    return list(missing.values())
+
+
+def create_people(conn: Any, handles: Iterable[str]) -> None:
+    """Create the people :func:`confirm_new_people` returned."""
+    for handle in handles:
         db.create_person(conn, handle, name=None)
 
 
@@ -182,6 +195,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     lst = person_sub.add_parser("list", help="List people (self first, then handle-alphabetical).")
     lst.add_argument("--query", metavar="TEXT", help="Match a literal name or handle substring.")
+    lst.add_argument(
+        "--limit",
+        type=non_negative_int,
+        default=None,
+        metavar="N",
+        help="Cap the number of people returned.",
+    )
     lst.add_argument(
         "--with-activity",
         action="store_true",
@@ -369,7 +389,9 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                 _emit_goals(args, goals, with_detail=True)
         print("\nRecent interactions:")
         if args.with_feedback and entries:
-            for entry in entries:
+            for index, entry in enumerate(entries):
+                if index:
+                    print()
                 emit_entries(args, (entry,), coached)
                 print("Feedback:")
                 if brief:
@@ -389,7 +411,6 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                         "\n\n".join(_format_feedback_human(note) for note in feedback[entry.id])
                         or "(no feedback)"
                     )
-                print()
         else:
             emit_entries(args, entries, coached)
         if args.person_command != "prep":
@@ -429,8 +450,8 @@ def cmd_person_edit(args: argparse.Namespace) -> int:
 
     with open_db(args) as conn:
         person = _resolve_existing_person(conn, args.handle)
+        note = db.get_person_note(conn, person.id)
         if edit_notes:
-            note = db.get_person_note(conn, person.id)
             note_body = read_body_arg(
                 None,
                 what="notes",
@@ -440,18 +461,22 @@ def cmd_person_edit(args: argparse.Namespace) -> int:
                 compose=compose_in_editor,
             )
         updated = db.update_person(conn, person.id, **update_kwargs) if update_kwargs else person
+        notes_changed = False
         if note_body is not None:
-            db.set_person_note(conn, person.id, note_body)
+            saved = db.set_person_note(conn, person.id, note_body)
+            notes_changed = note is None or saved.updated_at != note.updated_at
         elif args.clear_notes:
-            db.clear_person_note(conn, person.id)
-    _emit_person(args, updated, human_prefix="updated")
+            notes_changed = db.clear_person_note(conn, person.id)
+    verb = "updated" if notes_changed else edit_verb(person.updated_at, updated.updated_at)
+    _emit_person(args, updated, human_prefix=verb)
     return 0
 
 
 def cmd_person_list(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
-        people = db.list_people(conn, query=args.query)
+        matched = db.list_people(conn, query=args.query)
         activity = db.get_people_activity(conn) if args.with_activity else {}
+    people = matched[: args.limit] if args.limit is not None else matched
     if not args.with_activity:
         _emit_people(args, people)
     elif args.json:
@@ -476,6 +501,8 @@ def cmd_person_list(args: argparse.Namespace) -> int:
                 f" · interactions: {summary.interaction_count}"
                 f" · active goals: {summary.active_goal_count}"
             )
+    if len(matched) > len(people):
+        print(f"Showing {len(people)} of {len(matched)} people.", file=sys.stderr)
     return 0
 
 

@@ -80,6 +80,22 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
             self.assertTrue(EXPECTED_TABLES.issubset(table_names(conn)))
             self.assertNotIn("reviews_new", table_names(conn))
 
+    def test_ids_of_reviews_deleted_before_the_upgrade_are_not_reused(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            conn.execute(
+                "INSERT INTO reviews (id, body, scope_kind, scope_limit, created_at, updated_at)"
+                " VALUES (9, 'deleted later', 'latest', NULL, ?, ?)",
+                ("2026-06-20T00:00:00Z", "2026-06-20T00:00:00Z"),
+            )
+            conn.execute("DELETE FROM reviews WHERE id = 9")
+            conn.commit()
+
+        db.init_db(self.db_path)
+
+        with closing(db.connect(self.db_path)) as conn:
+            review = db.create_review(conn, "after the upgrade", [1])
+        self.assertEqual(review.id, 10)
+
     def test_every_review_row_survives_byte_identical(self) -> None:
         db.init_db(self.db_path)
 

@@ -80,8 +80,14 @@ class GoalOutcomeSearchTests(GoalTestBase):
                         "compose_in_editor",
                     ) as compose,
                 ):
-                    rc, _, _ = self._run("goal", "edit", str(goal.id), field, *flags)
-                    self.assertEqual(rc, 1)
+                    if field == flags[0]:
+                        # A repeated --outcome is an argparse usage error.
+                        with self.assertRaises(SystemExit) as raised:
+                            self._run("goal", "edit", str(goal.id), field, *flags)
+                        self.assertEqual(raised.exception.code, 2)
+                    else:
+                        rc, _, _ = self._run("goal", "edit", str(goal.id), field, *flags)
+                        self.assertEqual(rc, 1)
                     compose.assert_not_called()
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.get_goal(conn, goal.id), goal)

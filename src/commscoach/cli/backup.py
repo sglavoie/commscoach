@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .. import db
 from ..db.backup import BACKUP_PREFIX, BACKUP_SUFFIX
-from .common import confirm, open_db, positive_int, print_json, resolve_db_path
+from .common import confirm, open_db, plural, positive_int, print_json, resolve_db_path
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -94,5 +94,5 @@ def cmd_backup(args: argparse.Namespace, *, now: datetime | None = None) -> int:
     else:
         print(f"backed up to {created}")
         if removed:
-            print(f"pruned {len(removed)} old backup(s)")
+            print(f"pruned {plural(len(removed), 'old backup')}")
     return 0

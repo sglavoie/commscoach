@@ -77,6 +77,10 @@ def create_goal(
     return goal
 
 
+def _row_id(row: Any) -> int | None:
+    return row.id if row is not None else None
+
+
 @common.writes
 def update_goal(
     conn: sqlite3.Connection,
@@ -107,15 +111,15 @@ def update_goal(
     updates: list[str] = []
     params: list[Any] = []
     for column, value in (("title", title), ("detail", detail), ("outcome", outcome)):
-        if value is not common.UNSET:
+        if value is not common.UNSET and value != getattr(current, column):
             updates.append(f"{column} = ?")
             params.append(value)
-    if person is not common.UNSET:
+    if person is not common.UNSET and _row_id(person) != _row_id(current.person):
         updates.append("person_id = ?")
-        params.append(person.id if person is not None else None)
-    if review is not common.UNSET:
+        params.append(_row_id(person))
+    if review is not common.UNSET and _row_id(review) != _row_id(current.review):
         updates.append("review_id = ?")
-        params.append(review.id if review is not None else None)
+        params.append(_row_id(review))
 
     status_changed = status is not common.UNSET and status != current.status
     if not updates and not status_changed:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import re
 import sqlite3
 import unicodedata
 from collections.abc import Callable, Iterator
@@ -29,22 +30,59 @@ def search_fold(text: str) -> str:
     return "".join(char for char in decomposed if not unicodedata.combining(char)).casefold()
 
 
+_WORD = re.compile(r"[^\W_]+")
+
+
+@functools.lru_cache(maxsize=64)
+def _folded_words(query: str) -> tuple[str, ...]:
+    return tuple(search_fold(word) for word in query.split())
+
+
+def word_prefixes_match(text: str, query: str) -> bool:
+    """Report whether every word of ``query`` starts a word of ``text``, both folded.
+
+    This is the plain-word FTS5 prefix search (``meet`` finds ``meeting``)
+    under :func:`search_fold`, which also folds what FTS5's ``unicode61``
+    tokenizer leaves alone, such as ``ß`` matching ``ss``.
+    """
+    tokens = _WORD.findall(search_fold(text))
+    return all(any(token.startswith(word) for token in tokens) for word in _folded_words(query))
+
+
+def _word_prefixes_sql(text: Any, query: Any, skip_ascii: Any) -> Any:
+    if not isinstance(text, str) or not isinstance(query, str):
+        return 0
+    if skip_ascii and text.isascii():
+        return 0
+    return int(word_prefixes_match(text, query))
+
+
 def _search_fold_sql(text: Any) -> Any:
     return search_fold(text) if isinstance(text, str) else text
 
 
+def handle_key(text: str) -> str:
+    """Return the identity of a handle: Unicode case-insensitive, accents kept."""
+    return text.casefold()
+
+
 def _handle_key_sql(text: Any) -> Any:
-    return text.casefold() if isinstance(text, str) else text
+    return handle_key(text) if isinstance(text, str) else text
 
 
 def register_functions(conn: sqlite3.Connection) -> None:
-    """Make ``search_fold(text)`` and ``handle_key(text)`` available to SQL on ``conn``.
+    """Make the Unicode-aware helpers below available to SQL on ``conn``.
 
-    ``handle_key`` is Unicode case-insensitive identity for handles (``Émile``
-    is ``émile``) without folding accents, which ``LOWER`` cannot do.
+    ``search_fold(text)`` folds case and accents. ``handle_key(text)`` is
+    Unicode case-insensitive identity for handles (``Émile`` is ``émile``)
+    without folding accents, which ``LOWER`` cannot do.
+    ``word_prefixes(text, query, skip_ascii)`` is :func:`word_prefixes_match`;
+    a true ``skip_ascii`` answers no for ASCII ``text``, for callers whose
+    full-text index already decides those rows exactly.
     """
     conn.create_function("search_fold", 1, _search_fold_sql, deterministic=True)
     conn.create_function("handle_key", 1, _handle_key_sql, deterministic=True)
+    conn.create_function("word_prefixes", 3, _word_prefixes_sql, deterministic=True)
 
 
 def contains_pattern(query: str) -> str:

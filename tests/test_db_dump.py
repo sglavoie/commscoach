@@ -88,6 +88,11 @@ class DumpRoundTripTests(DBTestCase):
             "untrimmed tag": lambda d: d["tags"][0].update(name="upper "),
             "string id": lambda d: d["entries"][0].update(id="7"),
             "string goal person": lambda d: d["goals"][0].update(person_id="1"),
+            "blank entry body": lambda d: d["entries"][0].update(body=" \n"),
+            "blank feedback body": lambda d: d["feedback"][0].update(body=""),
+            "blank review body": lambda d: d["reviews"][0].update(body="  "),
+            "null note body": lambda d: d["person_notes"][0].update(body=None),
+            "blank goal title": lambda d: d["goals"][0].update(title="\t"),
         }
         for label, mutate in cases.items():
             with self.subTest(label):
@@ -96,6 +101,15 @@ class DumpRoundTripTests(DBTestCase):
                 restored = self._fresh_connection()
                 with self.assertRaises(db.DumpFormatError):
                     db.load_from_dict(restored, payload)
+
+    def test_handles_differing_only_by_non_ascii_case_are_rejected(self) -> None:
+        payload = db.dump_to_dict(self.conn)
+        payload["people"][0].update(handle="Émile")
+        payload["people"][1].update(handle="émile")
+        restored = self._fresh_connection()
+        with self.assertRaisesRegex(db.DumpFormatError, r"people\[1\]\.handle"):
+            db.load_from_dict(restored, payload)
+        self.assertEqual(db.dump_to_dict(restored)["people"], [])
 
     def test_review_entry_positions_survive(self) -> None:
         original = db.dump_to_dict(self.conn)

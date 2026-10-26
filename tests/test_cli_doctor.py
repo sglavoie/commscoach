@@ -108,6 +108,13 @@ class DoctorCommandTests(unittest.TestCase):
         self.assertEqual(payload["status"], "warn")
         self.assertEqual(self.checks_by_name(payload)["permissions"]["status"], "warn")
 
+    def test_chosen_directory_keeps_its_own_permissions(self) -> None:
+        db.init_db(self.db_path)
+        os.chmod(self.db_path.parent, 0o755)
+        rc, payload = self.run_doctor()
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.checks_by_name(payload)["permissions"]["status"], "ok")
+
     def test_v1_database_fails_schema_version(self) -> None:
         paths.ensure_data_dir(self.db_path)
         with closing(sqlite3.connect(self.db_path)) as conn:

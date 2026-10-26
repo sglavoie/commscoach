@@ -14,7 +14,7 @@ commscoach feedback search --query "ask" --person jdoe --limit 5
 commscoach --json feedback search --query "10%"
 ```
 
-Feedback search uses literal substring matching that ignores case and accents, including literal `%` and `_` characters. It returns the newest feedback first (creation time, then ID), with a default limit of 20. `--person` matches people linked to the feedback's entry, case-insensitively; an unknown handle is an error. The query must contain non-whitespace text. `--limit 0` returns an empty result. Human output shows feedback and entry IDs plus a preview; JSON returns the existing feedback objects.
+Feedback search uses literal substring matching that ignores case and accents, including literal `%` and `_` characters. It returns the newest feedback first (creation time, then ID), with a default limit of 20. `--since`/`--until` bound when the feedback was written, and `--oldest-first` reverses the order before the limit. `--person` matches people linked to the feedback's entry, case-insensitively; an unknown handle is an error. The query must contain non-whitespace text. `--limit 0` returns an empty result. Human output shows feedback and entry IDs plus a preview; JSON returns the existing feedback objects.
 
 Search previews show an excerpt around the first matching passage, including matches in headings or late in a long note. Ellipses mark omitted text; JSON always contains the full body.
 
@@ -139,7 +139,7 @@ commscoach --yes review rm 1
 
 ## Skill integration
 
-The skill is included in this repository at [skills/commscoach/SKILL.md](../skills/commscoach/SKILL.md). Install or link the `skills/commscoach` directory into your harness's skill directory, keeping the entrypoint named `SKILL.md`. The skill calls `commscoach` through `PATH`; install the CLI using the [quick-start instructions](../README.md#install-globally) before invoking it.
+The skill is included in this repository at [skills/commscoach/SKILL.md](../skills/commscoach/SKILL.md). Install or link the `skills/commscoach` directory into your harness's skill directory, keeping the entrypoint named `SKILL.md`. The skill and these docs are not part of the built wheel, so keep a checkout of the repository for them. The skill calls `commscoach` through `PATH`; install the CLI using the [quick-start instructions](../README.md#install-globally) before invoking it.
 
 Maintain the skill in this repository alongside the CLI. Existing local paths can be preserved with symlinks to the repository's `SKILL.md`, so they continue to read the same source without maintaining separate copies. Recreate those links if you move the checkout.
 

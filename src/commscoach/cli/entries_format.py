@@ -15,14 +15,14 @@ from .serializers import entry_to_dict
 
 
 def format_entry_human(entry: db.Entry) -> str:
-    header_parts = [f"[{entry.id}]", f"created {entry.created_at}"]
+    header_parts = [f"[{entry.id}]", f"created {format_stamp(entry.created_at)}"]
     if entry.occurred_at:
-        header_parts.append(f"occurred {entry.occurred_at}")
+        header_parts.append(f"occurred {format_stamp(entry.occurred_at)}")
     if entry.source:
         header_parts.append(f"source: {entry.source}")
     lines = [" ".join(header_parts)]
     if entry.people:
-        lines.append("people: " + ", ".join(p.handle for p in entry.people))
+        lines.append("people: " + ", ".join(f"@{p.handle}" for p in entry.people))
     if entry.tags:
         lines.append("tags: " + ", ".join(entry.tags))
     lines.append("---")

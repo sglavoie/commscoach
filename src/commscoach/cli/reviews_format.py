@@ -9,6 +9,7 @@ from .. import db
 from .common import (
     first_prose_line,
     format_scope,
+    format_stamp,
     print_json,
     search_excerpt,
     truncate,
@@ -68,13 +69,13 @@ def review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
 def format_review_human(review: db.Review) -> str:
     header_parts = [
         f"[{review.id}]",
-        f"created {review.created_at}",
+        f"created {format_stamp(review.created_at)}",
         f"scope {format_scope(review)}",
     ]
     if review.scope_limit is not None:
         header_parts.append(f"context limit {review.scope_limit}")
     if review.updated_at != review.created_at:
-        header_parts.append(f"updated {review.updated_at}")
+        header_parts.append(f"updated {format_stamp(review.updated_at)}")
     lines = [" ".join(header_parts)]
     if review.entries:
         entry_ids = ", ".join(str(entry.id) for entry in review.entries)
@@ -88,7 +89,7 @@ def format_review_short(review: db.Review, *, query: str | None = None) -> str:
     entry_ids = ",".join(str(entry.id) for entry in review.entries)
     parts = [
         f"[{review.id}]",
-        review.created_at,
+        format_stamp(review.created_at),
         f"scope:{format_scope(review)}",
     ]
     if review.scope_limit is not None:

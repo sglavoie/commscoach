@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 from .. import db
 from ..db.tags import normalize_tag
-from .common import confirm, non_negative_int, open_db, print_json
+from .common import confirm, non_negative_int, open_db, plural, print_json
 from .serializers import tag_to_dict
 
 
@@ -69,14 +70,16 @@ def _emit_tag(
 def cmd_tag_list(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         tags = db.list_tags(conn, limit=args.limit)
+        total = db.count_tags(conn) if args.limit is not None else len(tags)
     if args.json:
         print_json([tag_to_dict(tag) for tag in tags])
-        return 0
-    if not tags:
+    elif not tags:
         print("(no tags)")
-        return 0
-    for tag in tags:
-        print(_format_tag_short(tag))
+    else:
+        for tag in tags:
+            print(_format_tag_short(tag))
+    if total > len(tags):
+        print(f"Showing {len(tags)} of {total} tags.", file=sys.stderr)
     return 0
 
 
@@ -89,7 +92,17 @@ def cmd_tag_rename(args: argparse.Namespace) -> int:
 
 def cmd_tag_merge(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
-        if not confirm(f"Merge tag '{args.source}' into '{args.dest}'?", assume_yes=args.yes):
+        source = db.get_tag(conn, args.source)
+        dest = db.get_tag(
+            conn, args.dest, hint="use 'commscoach tag rename' to rename a tag to a new name"
+        )
+        if source.id == dest.id:
+            raise db.DBError("cannot merge a tag into itself")
+        prompt = (
+            f"Merge tag '{source.name}' ({plural(source.entry_count, 'entry', 'entries')})"
+            f" into '{dest.name}'?"
+        )
+        if not confirm(prompt, assume_yes=args.yes):
             raise db.DBError("aborted; pass --yes to confirm without a prompt")
         tag = db.merge_tags(conn, args.source, args.dest)
     _emit_tag(args, tag, human_line=f"merged tag '{args.source}' into '{tag.name}'")
@@ -98,7 +111,12 @@ def cmd_tag_merge(args: argparse.Namespace) -> int:
 
 def cmd_tag_rm(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
-        if not confirm(f"Delete tag '{args.name}'?", assume_yes=args.yes):
+        tag = db.get_tag(conn, args.name)
+        prompt = (
+            f"Delete tag '{tag.name}'? It will be removed from"
+            f" {plural(tag.entry_count, 'entry', 'entries')}."
+        )
+        if not confirm(prompt, assume_yes=args.yes):
             raise db.DBError("aborted; pass --yes to confirm without a prompt")
         unlinked = db.delete_tag(conn, args.name)
     name = normalize_tag(args.name)

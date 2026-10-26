@@ -129,12 +129,12 @@ def ensure_data_dir(db_path: Path) -> Path:
     parent.mkdir(parents=True, exist_ok=True)
     for created in missing:
         os.chmod(created, DATA_DIR_MODE)
-    if not missing and _within_default_data_dir(parent):
+    if not missing and within_default_data_dir(parent):
         os.chmod(parent, DATA_DIR_MODE)
     return parent
 
 
-def _within_default_data_dir(directory: Path) -> bool:
+def within_default_data_dir(directory: Path) -> bool:
     try:
         directory.resolve().relative_to(default_data_dir().resolve())
     except ValueError:

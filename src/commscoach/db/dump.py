@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from .common import normalize_date_bound, read_snapshot
+from .common import handle_key, normalize_date_bound, read_snapshot
 from .errors import DBError
 from .schema import get_schema_version
 from .tags import normalize_tag
@@ -37,6 +37,15 @@ class DumpFormatError(DBError):
 class DatabaseNotEmptyError(DBError):
     """Raised when a restore target already contains user data."""
 
+
+# Text the write paths refuse to store blank, so an archive cannot either.
+_REQUIRED_TEXT_COLUMNS: dict[str, tuple[str, ...]] = {
+    "entries": ("body",),
+    "feedback": ("body",),
+    "reviews": ("body",),
+    "goals": ("title",),
+    "person_notes": ("body",),
+}
 
 _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "people": ("id", "handle", "name", "is_self", "created_at", "updated_at"),
@@ -253,6 +262,9 @@ def _validate_row(table: str, index: int, row: Any) -> None:
     for column in _NULLABLE_INTEGER_COLUMNS.get(table, ()):
         if row.get(column) is not None:
             _require_int(row[column], f"{location}.{column}")
+    for column in _REQUIRED_TEXT_COLUMNS.get(table, ()):
+        if not isinstance(row[column], str) or not row[column].strip():
+            raise DumpFormatError(f"{location}.{column} must be a non-empty string")
 
     # Mirror the write paths' own normalization so a hand-edited archive
     # cannot restore a person or tag that no command can address afterwards.
@@ -327,6 +339,18 @@ def validate_dump(data: Any) -> None:
             raise DumpFormatError(f"{table} must be an array")
         for index, row in enumerate(rows):
             _validate_row(table, index, row)
+
+    # The LOWER(handle) index only catches ASCII case, so "Émile" and "émile"
+    # would both restore as people no command could tell apart.
+    seen_handles: dict[str, int] = {}
+    for index, person in enumerate(data.get("people", [])):
+        key = handle_key(person["handle"])
+        if key in seen_handles:
+            raise DumpFormatError(
+                f"people[{index}].handle {person['handle']!r} duplicates"
+                f" people[{seen_handles[key]}].handle"
+            )
+        seen_handles[key] = index
 
 
 def _database_has_data(conn: sqlite3.Connection) -> bool:

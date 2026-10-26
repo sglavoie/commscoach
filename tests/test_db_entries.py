@@ -205,6 +205,7 @@ class EntryCrudTests(DBTestCase):
             since="2026-06-01",
             until="2026-06-02",
             limit=4,
+            oldest_first=False,
         )
 
     def test_delete_entry_cascades_links_and_feedback(self) -> None:
@@ -236,6 +237,14 @@ class EntryCrudTests(DBTestCase):
 
     def test_delete_entry_missing_returns_false(self) -> None:
         self.assertFalse(db.delete_entry(self.conn, 9999))
+
+    def test_source_filter_matches_non_ascii_case(self) -> None:
+        upper = db.create_entry(self.conn, "a", source="ÉQUIPE")
+        lower = db.create_entry(self.conn, "b", source="équipe")
+        db.create_entry(self.conn, "c", source="equipe")
+        found = db.search_entries(self.conn, source="Équipe", oldest_first=True)
+        self.assertEqual([e.id for e in found], [upper.id, lower.id])
+        self.assertEqual(db.count_search_entries(self.conn, source="ÉQUIPE"), 2)
 
     def test_search_entries_by_body_substring_case_insensitive(self) -> None:
         db.create_entry(self.conn, "Hello world")

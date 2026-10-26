@@ -202,6 +202,7 @@ def list_reviews(
     query: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    oldest_first: bool = False,
 ) -> tuple[Review, ...]:
     """Return stored reviews newest-first by creation time.
 
@@ -223,7 +224,8 @@ def list_reviews(
         since=since,
         until=until,
     )
-    sql = "SELECT * FROM reviews" + filters + " ORDER BY created_at DESC, id DESC"
+    direction = "ASC" if oldest_first else "DESC"
+    sql = "SELECT * FROM reviews" + filters + f" ORDER BY created_at {direction}, id {direction}"
     if limit is not None:
         sql += " LIMIT ?"
         params.append(limit)
@@ -312,6 +314,8 @@ def update_review(
         return current
     if not body or not str(body).strip():
         raise DBError("review body must be a non-empty string")
+    if body == current.body:
+        return current
     now = common.utcnow_iso()
     with common.write_transaction(conn):
         conn.execute(

@@ -17,9 +17,14 @@ class FtsMatchQueryTests(unittest.TestCase):
         self.assertEqual(_fts_match_query("café"), '"café"*')
 
     def test_fts_syntax_passes_through(self) -> None:
-        for query in ('"lead with"', "caf*", "meet -budget", "a OR b", "body:ask", "x_y"):
+        for query in ('"lead with"', "caf*", "a OR b", "body:ask", "^start", "(a b)"):
             with self.subTest(query=query):
                 self.assertEqual(_fts_match_query(query), query)
+
+    def test_other_text_is_left_to_substring_search(self) -> None:
+        for query in ("😀", "€50", "follow-up", "meet -budget", "x_y", "...", '"😀"'):
+            with self.subTest(query=query):
+                self.assertIsNone(_fts_match_query(query))
 
 
 class PrefixSearchTests(DBTestCase):
@@ -36,3 +41,29 @@ class PrefixSearchTests(DBTestCase):
         self.assertEqual([entry.id for entry in found], [meeting.id])
         snippets = db.search_entry_snippets(self.conn, "meet", [meeting.id])
         self.assertIn("meeting", snippets[meeting.id])
+
+    def test_symbols_fts_would_drop_are_matched_literally(self) -> None:
+        emoji = db.create_entry(self.conn, "Great call 😀 today")
+        euro = db.create_entry(self.conn, "Budget is €50 now")
+        db.create_entry(self.conn, "I have 50 apples")
+        for query, expected in (("😀", [emoji.id]), ("€50", [euro.id])):
+            with self.subTest(query=query):
+                found = db.search_entries(self.conn, query=query)
+                self.assertEqual([entry.id for entry in found], expected)
+                self.assertEqual(db.count_search_entries(self.conn, query=query), 1)
+                self.assertEqual(db.search_entry_snippets(self.conn, query, expected), {})
+
+    def test_plain_words_fold_beyond_the_tokenizer(self) -> None:
+        street = db.create_entry(self.conn, "Walked down the Straße")
+        spelled = db.create_entry(self.conn, "Strassen are long")
+        db.create_entry(self.conn, "Unrelated")
+        for query in ("strasse", "STRAẞE", "straße"):
+            with self.subTest(query=query):
+                found = db.search_entries(self.conn, query=query, oldest_first=True)
+                self.assertEqual([entry.id for entry in found], [street.id, spelled.id])
+
+    def test_folded_matches_keep_word_prefix_semantics(self) -> None:
+        db.create_entry(self.conn, "Großstraße plans")
+        prefix = db.create_entry(self.conn, "Straßenbahn ride")
+        found = db.search_entries(self.conn, query="strasse")
+        self.assertEqual([entry.id for entry in found], [prefix.id])

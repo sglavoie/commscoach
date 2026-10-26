@@ -28,7 +28,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help=(
             "Export format: Markdown is readable/lossy; JSON is complete/restorable"
-            " (default: markdown; the global --json selects json)."
+            " (default: markdown; the global --json selects json unless --format is given)."
         ),
     )
     export_parser.add_argument(
@@ -188,8 +188,9 @@ def _validate_export_destination(out_path: Path, source_path: Path) -> None:
 
 
 def cmd_export(args: argparse.Namespace) -> int:
-    if args.json and args.format == "markdown":
-        raise db.DBError("--json conflicts with --format markdown")
+    # With --out, --json only shapes the status line, so any --format can be written.
+    if args.json and args.format == "markdown" and args.out is None:
+        raise db.DBError("--json conflicts with --format markdown unless --out is given")
     export_format = args.format or ("json" if args.json else "markdown")
     out_path = Path(args.out).expanduser() if args.out is not None else None
     if out_path is not None:

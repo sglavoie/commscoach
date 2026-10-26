@@ -10,8 +10,10 @@ from .. import db
 from .common import (
     EDIT_IN_EDITOR,
     add_date_bounds,
+    add_oldest_first,
     confirm,
     covered_entry_id,
+    edit_verb,
     handle_arg,
     non_negative_int,
     open_db,
@@ -138,6 +140,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Only list reviews scoped to tag NAME.",
     )
     add_date_bounds(lst, noun="reviews written")
+    add_oldest_first(lst, noun="reviews")
     lst.set_defaults(func=cmd_review_list)
 
     search = review_sub.add_parser("search", help="Search stored review bodies.")
@@ -176,6 +179,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Only search reviews scoped to tag NAME.",
     )
     add_date_bounds(search, noun="reviews written")
+    add_oldest_first(search, noun="matching reviews")
     search.set_defaults(func=cmd_review_list)
 
     show = review_sub.add_parser("show", help="Show one review by id.")
@@ -289,6 +293,7 @@ def cmd_review_list(args: argparse.Namespace) -> int:
             query=query,
             since=since,
             until=until,
+            oldest_first=args.oldest_first,
         )
         total = (
             db.count_reviews(
@@ -343,10 +348,10 @@ def cmd_review_show(args: argparse.Namespace) -> int:
 def cmd_review_edit(args: argparse.Namespace) -> int:
     body = read_replacement_body(args.body, command="review edit")
     with open_db(args) as conn:
+        current = db.get_review(conn, args.review_id)
+        if current is None:
+            raise db.ReviewNotFoundError(args.review_id)
         if body is None:
-            current = db.get_review(conn, args.review_id)
-            if current is None:
-                raise db.ReviewNotFoundError(args.review_id)
             body = read_body_arg(
                 None,
                 what="body",
@@ -356,7 +361,7 @@ def cmd_review_edit(args: argparse.Namespace) -> int:
                 compose=compose_in_editor,
             )
         review = db.update_review(conn, args.review_id, body=body)
-    emit_review(args, review, human_prefix="updated")
+    emit_review(args, review, human_prefix=edit_verb(current.updated_at, review.updated_at))
     return 0
 
 

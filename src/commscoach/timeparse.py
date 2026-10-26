@@ -148,7 +148,9 @@ def _parse_when(text: str, *, now: datetime | None) -> str:
             # stay wall-clock ("2 days ago" keeps the time of day).
             instant = _canonical(reference, reference)
             return (datetime.fromisoformat(instant) - delta).isoformat()
-        return _canonical(reference - delta, reference)
+        # Arithmetic resets ``fold``, which would move "0 days ago" during a
+        # repeated fall-back hour to that hour's first occurrence.
+        return _canonical((reference - delta).replace(fold=reference.fold), reference)
 
     raise _error(text)
 

@@ -128,7 +128,7 @@ Scope is **single-axis**: the latest entries, *or* one person, *or* one tag, *or
 commscoach review context --limit 20 --prior-review-limit 3 --goal-limit 10
 commscoach review context --person alice --limit 10
 commscoach review context --tag conflict --limit 10
-commscoach review context --since "12 weeks ago" --until today
+commscoach review context --since 2026-07-01 --until 2026-09-30
 ```
 
 Scope rules:
@@ -313,7 +313,7 @@ commscoach --json review search --query "lead with the ask"
 commscoach --json goal search --query "lead with the ask"
 ```
 
-These are literal substring searches that ignore case and accents. Add `--person HANDLE` to narrow feedback or review searches to one person. If nothing matches, try a shorter or different phrase once before reporting that nothing was found.
+These are literal substring searches that ignore case and accents. Add `--person HANDLE` to narrow feedback searches to entries with that person. For review searches, `--person` only matches reviews *scoped* to that person; drop it when looking for any review that covered their entries. If nothing matches, try a shorter or different phrase once before reporting that nothing was found.
 
 ## Correcting stored coaching
 

@@ -130,6 +130,17 @@ def search_excerpt(body: str, query: str, *, width: int = 180) -> str:
     return ("…" if start else "") + excerpt + ("…" if end < len(body) else "")
 
 
+def plural(count: int, singular: str, plural_form: str | None = None) -> str:
+    """Render ``count`` with the matching noun form: ``1 entry``, ``2 entries``."""
+    noun = singular if count == 1 else (plural_form or f"{singular}s")
+    return f"{count} {noun}"
+
+
+def edit_verb(before: str, after: str) -> str:
+    """Name an edit's outcome from the row's ``updated_at`` before and after it."""
+    return "updated" if after != before else "unchanged"
+
+
 def format_stamp(iso: str) -> str:
     """Render a stored ISO-8601 UTC timestamp as local ``YYYY-MM-DD HH:MM``.
 
@@ -303,6 +314,15 @@ def add_date_bounds(parser: argparse.ArgumentParser, *, noun: str = "entries") -
         default=None,
         metavar="DATE",
         help=f"Include {noun} through DATE (whole local day, or exact time).",
+    )
+
+
+def add_oldest_first(parser: argparse.ArgumentParser, *, noun: str) -> None:
+    """Declare the shared ``--oldest-first`` flag of the listing commands."""
+    parser.add_argument(
+        "--oldest-first",
+        action="store_true",
+        help=f"Return the oldest {noun} first, before applying --limit.",
     )
 
 

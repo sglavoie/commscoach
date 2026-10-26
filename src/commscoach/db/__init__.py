@@ -123,7 +123,9 @@ from .schema import (
 )
 from .stats import get_stats
 from .tags import (
+    count_tags,
     delete_tag,
+    get_tag,
     list_tags,
     merge_tags,
     rename_tag,
@@ -167,6 +169,7 @@ __all__ = [
     "count_search_feedback",
     "count_goals",
     "count_reviews",
+    "count_tags",
     "close_goal",
     "clear_person_note",
     "create_entry",
@@ -196,6 +199,7 @@ __all__ = [
     "get_schema_version",
     "get_self_person",
     "get_stats",
+    "get_tag",
     "init_db",
     "list_entries",
     "list_entries_with_person",

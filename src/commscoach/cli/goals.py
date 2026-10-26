@@ -11,6 +11,8 @@ from .. import db
 from .common import (
     confirm,
     contains_folded,
+    edit_verb,
+    format_stamp,
     handle_arg,
     non_negative_int,
     open_db,
@@ -209,9 +211,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _format_goal_human(goal: db.Goal) -> str:
-    parts = [f"[{goal.id}]", goal.status, f"created {goal.created_at}"]
+    parts = [f"[{goal.id}]", goal.status, f"created {format_stamp(goal.created_at)}"]
     if goal.closed_at is not None:
-        parts.append(f"closed {goal.closed_at}")
+        parts.append(f"closed {format_stamp(goal.closed_at)}")
     lines = [" ".join(parts), goal.title]
     if goal.person is not None:
         lines.append(f"person: @{goal.person.handle}")
@@ -438,7 +440,7 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
                 compose=compose_in_editor,
             )
         goal = db.update_goal(conn, args.goal_id, **update_kwargs)
-    _emit_goal(args, goal, human_prefix="updated")
+    _emit_goal(args, goal, human_prefix=edit_verb(current.updated_at, goal.updated_at))
     return 0
 
 

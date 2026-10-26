@@ -195,7 +195,7 @@ class BackupCommandTests(unittest.TestCase):
 class LegacySchemaBackupTests(unittest.TestCase):
     """``backup`` must run on the pre-v4 database it exists to protect.
 
-    The README's migration recipe tells a v3 user to snapshot *before*
+    The migration recipe in docs/reference-operations.md tells a v3 user to snapshot *before*
     ``commscoach init`` upgrades them, so this command has to accept the exact
     database that every other command correctly refuses. It used to open
     through the schema-validating path and answer "run 'commscoach init'
@@ -279,7 +279,7 @@ class LegacySchemaBackupTests(unittest.TestCase):
     def test_backup_accepts_pre_v4_database_then_init_migrates_only_the_source(
         self,
     ) -> None:
-        """The README procedure end to end: back up, then migrate."""
+        """The documented migration procedure end to end: back up, then migrate."""
         self.assertEqual(self._run_backup(), 0)
 
         with redirect_stdout(io.StringIO()):

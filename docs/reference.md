@@ -34,17 +34,17 @@ The database is created with mode `0600`. Directories commscoach creates for it 
 
 ## Capture and dates
 
-Handles are shown as `@handle`, and every command accepts a handle with or without that `@`. `--person` is repeatable or comma-separated like `--tag` (`--person jdoe,asmith`). Handles are case-insensitive, including accented letters (`Émile` is `émile`), and cannot contain spaces or commas; `doctor` flags any older handle that does.
+Handles are shown as `@handle`, and every command accepts a handle with or without that `@`. On `entry add` and `entry edit`, `--person` is repeatable or comma-separated like `--tag` (`--person jdoe,asmith`). Search and list filters such as `--person`, `--tag`, and `--source` take a single value; repeating one is a usage error (exit 2) rather than silently keeping the last value. Handles are case-insensitive, including accented letters (`Émile` is `émile`), and cannot contain spaces or commas; `doctor` flags any older handle that does.
 
 `entry add` body sources are a literal string, `-` for stdin, or `@PATH` for a UTF-8 file. On an interactive terminal, omitting the body opens `$VISUAL` or `$EDITOR` (falling back to `vi`). The same body-source convention applies to `entry edit --body`, `feedback add`, and `review add`; their omitted-body forms also use the editor where supported.
 
 The entry editor includes optional prompts about what you wanted, what you said, how the other person responded, and what you want feedback on. These are `#>` instruction lines, so they are removed from the saved body; answer whichever help, or simply write your entry. Leaving only the prompts still counts as an empty draft.
 
-Editor drafts are kept until the command succeeds. If the editor fails, you interrupt the command, the process is terminated (SIGTERM, or SIGHUP when the terminal closes), or the subsequent save fails, a draft with new text is retained with mode `0600` and its recovery path is printed to stderr (including with `--json`). Open that file to recover your text; it preserves the editor contents, including any `#>` instruction lines. Successful commands, empty drafts, and drafts left unchanged from their starting text are cleaned up automatically. Recovery files live in the system temporary directory, so recover them before system cleanup removes them.
+Editor drafts are kept until the command succeeds. If the editor fails, you interrupt the command, the process is terminated (SIGTERM, or SIGHUP when the terminal closes), or the subsequent save fails, a draft with new text is retained with mode `0600` and its recovery path is printed to stderr (including with `--json`). Open that file to recover your text, or pass it back as `@PATH`; the `#>` instruction lines are removed when the draft is saved, so only your text remains (a draft that is not valid UTF-8 is kept byte-for-byte). Successful commands, empty drafts, and drafts left unchanged from their starting text are cleaned up automatically. Recovery files live in the system temporary directory, so recover them before system cleanup removes them.
 
 `person edit HANDLE --notes` also opens the editor, pre-filled with that person's private notes (or blank when unset). It uses the same draft recovery. Empty drafts are rejected; use `--clear-notes` to remove notes. Non-interactive callers must supply text, `-`, or `@PATH`.
 
-`--occurred-at`, `--since`, and `--until` accept ISO-8601 values and natural relative dates such as `today`, `yesterday`, `3 days ago`, `last monday`, and `now`. A weekday always means its most recent occurrence strictly before today, so on a Monday both `monday` and `last monday` mean seven days ago; `last` is optional. `now` takes no time of day; use `today 9am`. Stored timestamps are normalized to UTC. Entries are ordered by when they occurred, falling back to creation time.
+`--occurred-at`, `--since`, and `--until` accept ISO-8601 values and natural relative dates such as `today`, `yesterday`, `3 days ago`, `last monday`, and `now`, plus `tomorrow` for planned conversations. A weekday always means its most recent occurrence strictly before today, so on a Monday both `monday` and `last monday` mean seven days ago; `last` is optional. `now` takes no time of day; use `today 9am`. Stored timestamps are normalized to UTC. Entries are ordered by when they occurred, falling back to creation time.
 
 Date filters use your system's local timezone. A bare date, `today`, `yesterday`, or `last monday` covers the whole local day, including daylight-saving transitions. Explicit times and elapsed-time expressions such as `today 9am`, `now`, or `3 days ago` retain their time; timestamps with an offset use that offset. Both bounds are inclusive, and a `--since` instant after `--until` is rejected. These rules apply to entry listings, searches, stats, and review scopes:
 
@@ -72,7 +72,7 @@ commscoach entry search --source email --person jdoe --since "30 days ago"
 
 `entry search --source` matches the complete stored channel or medium case-insensitively (`email` matches `Email`, but not `email-thread`). It combines with the existing query, tag, person, date, and feedback filters, and is applied before ordering and limiting results.
 
-`entry list --limit N` and `review list --limit N` cap the newest results shown. `--oldest-first` applies to `entry search` and orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. By default, when SQLite has FTS5, `entry search --query` matches the start of words, accent-insensitively: `meet` also finds `meeting`, and several words must all appear. Queries using full-text syntax are passed through as written, so quote a phrase (`"lead with the ask"`) for exact words in order, or use `*`, `OR`, and `NOT`. Without FTS5 it falls back to substring matching. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters. Feedback, review, goal, and person searches (and `--exact`) always use substring matching, ignoring case and accents the same way the full-text index does, so `cafe` finds `Café`.
+`entry list --limit N` and `review list --limit N` cap the newest results shown. `--oldest-first` applies to `entry list`, `entry search`, `review list`, `review search`, and `feedback search`; for entries it orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. By default, when SQLite has FTS5, `entry search --query` matches the start of words, accent-insensitively: `meet` also finds `meeting`, and several words must all appear. Queries made of symbols or other non-word text (`€50`, an emoji, `follow-up`) use substring matching instead, so they match literally. Queries using full-text syntax are passed through as written, so quote a phrase (`"lead with the ask"`) for exact words in order, or use `*`, `OR`, and `NOT`. Without FTS5 it falls back to substring matching. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters. Feedback, review, goal, and person searches (and `--exact`) always use substring matching, ignoring case and accents the same way the full-text index does, so `cafe` finds `Café`.
 
 When `entry search --limit N` omits matches, human output ends with a count such
 as `Showing 5 of 23 matching entries.`, printed to stderr so piping the results
@@ -82,7 +82,7 @@ reports omitted matches. Complete results have no footer. With `--json`, stdout
 remains a plain array and the same footer still goes to stderr, so a script can
 tell a complete result from a truncated one.
 
-The same omitted-match footer appears for `entry list`, `feedback search`,
+The same omitted-match footer appears for `entry list`, `feedback search`, `person list`, `tag list`,
 `review list`, `review search`, `goal search`, and `goal list` with `--limit N`,
 using each command's active filters.
 For example, `Showing 5 of 23 matching feedback notes.` means you can increase
@@ -100,9 +100,9 @@ The entry is its current stored version, not a snapshot from when feedback was
 written. JSON adds an `entry` object only when this flag is supplied; plain
 `feedback show ID` is unchanged.
 
-`entry rm ID` includes the counts of feedback notes to delete and review links to remove in its confirmation. The reviews themselves remain. `--yes` continues to bypass confirmation.
+`entry rm ID` includes the counts of feedback notes to delete and review links to remove in its confirmation. The reviews themselves remain; when a review covered only this entry, the confirmation names it, and with `--yes` a stderr note says it now covers no entries. `--yes` continues to bypass confirmation.
 
-`entry edit ID` replaces links with `--tag TAG` and `--person HANDLE` (both repeatable; tags also accept comma-separated values) and removes them all with `--clear-tags` or `--clear-people`:
+`entry edit ID` replaces links with `--tag TAG` and `--person HANDLE` (both repeatable; tags also accept comma-separated values) and removes them all with `--clear-tags` or `--clear-people`. An empty `--tag ""` or `--person ""` (often an unset shell variable) is rejected instead of clearing links. Edits that leave every value as it was print `unchanged` and keep `updated_at`; this applies to every `edit` command:
 
 ```sh
 commscoach entry edit 42 --tag 1on1,review --person jdoe
@@ -199,11 +199,11 @@ The tag is normalized before matching and stored normalized, so `--tag Conflict`
 
 ### `range` — `--since` and/or `--until`
 
-"How did last quarter go?"
+"How did last quarter go?" (asked in October 2026: the previous calendar quarter)
 
 ```sh
-commscoach review context --since "12 weeks ago" --until today
-commscoach review add "Q3 retrospective." --since "12 weeks ago" --until today --entry 4 5
+commscoach review context --since 2026-07-01 --until 2026-09-30
+commscoach review add "Q3 retrospective." --since 2026-07-01 --until 2026-09-30 --entry 4 5
 commscoach review list --scope range
 ```
 

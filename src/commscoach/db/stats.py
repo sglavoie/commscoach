@@ -216,10 +216,12 @@ def _collect_stats(
     top_sources = _ranked_counts(
         conn,
         # Grouped case-insensitively like ``entry search --source``, so "Slack"
-        # and "slack" are one source, shown by its first spelling in sort order.
+        # and "slack" (or "ÉQUIPE" and "équipe") are one source, shown by its
+        # first spelling in sort order.
         "SELECT MIN(e.source) AS source, COUNT(*) AS uses FROM entries e "
         f"WHERE {entry_where} AND e.source IS NOT NULL AND e.source != '' "
-        "GROUP BY e.source COLLATE NOCASE ORDER BY uses DESC, source COLLATE NOCASE ASC LIMIT ?",
+        "GROUP BY handle_key(e.source) "
+        "ORDER BY uses DESC, handle_key(source) ASC, source ASC LIMIT ?",
         [*entry_params, top],
     )
     top_people = _ranked_counts(

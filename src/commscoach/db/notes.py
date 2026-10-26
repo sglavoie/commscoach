@@ -33,6 +33,9 @@ def set_person_note(
         raise DBError("person notes must be a non-empty string")
     if get_person(conn, person_id) is None:
         raise PersonNotFoundError(person_id)
+    current = get_person_note(conn, person_id)
+    if current is not None and current.body == body:
+        return current
     timestamp = now if now is not None else common.utcnow_iso()
     with common.write_transaction(conn):
         conn.execute(

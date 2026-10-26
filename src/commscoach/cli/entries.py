@@ -8,12 +8,15 @@ import sys
 from typing import Any
 
 from .. import db
+from ..db.common import write_transaction
 from ..db.tags import normalize_tag_list
 from .common import (
     EDIT_IN_EDITOR,
     add_date_bounds,
+    add_oldest_first,
     command_prefix,
     confirm,
+    edit_verb,
     handle_arg,
     handle_list_arg,
     non_negative_int,
@@ -28,7 +31,7 @@ from .common import (
 from .editor import compose_in_editor
 from .entries_format import emit_entries, emit_entry
 from .feedback import _format_feedback_human
-from .people import ensure_people
+from .people import confirm_new_people, create_people
 from .serializers import entry_to_dict, feedback_to_dict
 
 ENTRY_PREAMBLE = (
@@ -184,6 +187,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Cap the number of entries returned.",
     )
     add_date_bounds(lst)
+    add_oldest_first(lst, noun="entries")
     lst.set_defaults(func=cmd_entry_list)
 
     srch = entry_sub.add_parser(
@@ -230,16 +234,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="N",
         help="Maximum results (default: all); text output reports omitted matches.",
     )
-    srch.add_argument(
-        "--oldest-first",
-        action="store_true",
-        help="Return the oldest matching entries first, before applying --limit.",
-    )
+    add_oldest_first(srch, noun="matching entries")
     srch.set_defaults(func=cmd_entry_search)
 
-    rm = entry_sub.add_parser(
-        "rm", help="Delete an entry and its linked tags, people, and feedback."
-    )
+    rm = entry_sub.add_parser("rm", help="Delete an entry, its feedback, and its tag/person links.")
     rm.add_argument("entry_id", type=row_id, metavar="ENTRY_ID")
     rm.set_defaults(func=cmd_entry_rm)
 
@@ -247,6 +245,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 def cmd_entry_add(args: argparse.Namespace) -> int:
     occurred_at = parse_when_or_raise(args.occurred_at) if args.occurred_at is not None else None
     with open_db(args) as conn:
+        # Ask about new people before the editor opens, so declining loses no draft.
+        new_people = confirm_new_people(
+            conn, args.people, assume_yes=args.yes, command=command_prefix(args)
+        )
         body = read_body_arg(
             args.body,
             what="body",
@@ -255,17 +257,23 @@ def cmd_entry_add(args: argparse.Namespace) -> int:
             isatty=sys.stdin.isatty,
             compose=compose_in_editor,
         )
-        ensure_people(conn, args.people, assume_yes=args.yes, command=command_prefix(args))
-        entry = db.create_entry(
-            conn,
-            body,
-            source=args.source,
-            occurred_at=occurred_at,
-            tags=args.tags,
-            people=args.people,
-        )
+        with write_transaction(conn):
+            create_people(conn, new_people)
+            entry = db.create_entry(
+                conn,
+                body,
+                source=_clean_source(args.source),
+                occurred_at=occurred_at,
+                tags=args.tags,
+                people=args.people,
+            )
     emit_entry(args, entry, human_prefix="created")
     return 0
+
+
+def _clean_source(value: str | None) -> str | None:
+    """Strip a ``--source`` value; a blank one means no source."""
+    return (value.strip() or None) if value is not None else None
 
 
 def cmd_entry_show(args: argparse.Namespace) -> int:
@@ -304,6 +312,11 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
     removed_tags = set(normalize_tag_list(args.remove_tag))
     if removed_tags.intersection(added_tags):
         raise db.DBError("cannot add and remove the same tag")
+    # An empty --person/--tag (say, an unset $VAR) would silently clear every link.
+    if args.people == []:
+        raise db.DBError("--person needs a handle; use --clear-people to remove every person")
+    if args.tags is not None and not normalize_tag_list(args.tags):
+        raise db.DBError("--tag needs a tag; use --clear-tags to remove every tag")
     removed_people = {handle.lower() for handle in args.remove_person}
     if removed_people.intersection(handle.lower() for handle in args.add_person):
         raise db.DBError("cannot add and remove the same person")
@@ -319,7 +332,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
             compose=compose_in_editor,
         )
     if args.source is not None:
-        update_kwargs["source"] = args.source if args.source else None
+        update_kwargs["source"] = _clean_source(args.source)
     if args.occurred_at is not None:
         update_kwargs["occurred_at"] = (
             parse_when_or_raise(args.occurred_at) if args.occurred_at else None
@@ -354,6 +367,12 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
             update_kwargs["people"] = [
                 handle for handle in handles if handle.lower() not in removed_people
             ]
+        new_people = confirm_new_people(
+            conn,
+            args.people or args.add_person,
+            assume_yes=args.yes,
+            command=command_prefix(args),
+        )
         if args.body is EDIT_IN_EDITOR:
             update_kwargs["body"] = read_body_arg(
                 None,
@@ -363,14 +382,9 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
                 isatty=sys.stdin.isatty,
                 compose=compose_in_editor,
             )
-        if args.people is not None or args.add_person:
-            ensure_people(
-                conn,
-                args.people or args.add_person,
-                assume_yes=args.yes,
-                command=command_prefix(args),
-            )
-        entry = db.update_entry(conn, args.entry_id, **update_kwargs)
+        with write_transaction(conn):
+            create_people(conn, new_people)
+            entry = db.update_entry(conn, args.entry_id, **update_kwargs)
         body_changed = entry.body != current.body
         has_feedback = body_changed and bool(db.feedback_entry_ids(conn, (entry.id,)))
         review_ids = (
@@ -384,7 +398,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
             if body_changed
             else []
         )
-    emit_entry(args, entry, human_prefix="updated")
+    emit_entry(args, entry, human_prefix=edit_verb(current.updated_at, entry.updated_at))
     if has_feedback or review_ids:
         command = command_prefix(args)
         print("Existing coaching may refer to the previous text.", file=sys.stderr)
@@ -409,6 +423,7 @@ def cmd_entry_list(args: argparse.Namespace) -> int:
             since=since,
             until=until,
             limit=args.limit,
+            oldest_first=args.oldest_first,
         )
         total = (
             db.count_search_entries(conn, since=since, until=until)
@@ -487,10 +502,28 @@ def cmd_entry_rm(args: argparse.Namespace) -> int:
             "SELECT COUNT(*) FROM review_entries WHERE entry_id = ?",
             (args.entry_id,),
         ).fetchone()[0]
+        # Reviews whose only covered entry is this one would cover nothing after.
+        emptied = [
+            row[0]
+            for row in conn.execute(
+                "SELECT re.review_id FROM review_entries re WHERE re.entry_id = ?"
+                " AND NOT EXISTS (SELECT 1 FROM review_entries other"
+                " WHERE other.review_id = re.review_id AND other.entry_id != re.entry_id)"
+                " ORDER BY re.review_id",
+                (args.entry_id,),
+            )
+        ]
+        emptied_note = (
+            f" {'Review' if len(emptied) == 1 else 'Reviews'}"
+            f" {', '.join(map(str, emptied))} will then cover no entries."
+            if emptied
+            else ""
+        )
         prompt = (
             f"Delete entry {args.entry_id}? This will delete {feedback_count} feedback "
             f"{'note' if feedback_count == 1 else 'notes'} and remove {review_count} "
             f"{'review link' if review_count == 1 else 'review links'}; reviews themselves remain."
+            + emptied_note
         )
         if not confirm(prompt, assume_yes=args.yes):
             raise db.DBError("aborted; pass --yes to confirm without a prompt")
@@ -501,4 +534,8 @@ def cmd_entry_rm(args: argparse.Namespace) -> int:
         print_json({"deleted": True, "id": args.entry_id})
     else:
         print(f"deleted entry {args.entry_id}")
+    if emptied:
+        noun = "Review" if len(emptied) == 1 else "Reviews"
+        verb = "covers" if len(emptied) == 1 else "cover"
+        print(f"{noun} {', '.join(map(str, emptied))} now {verb} no entries.", file=sys.stderr)
     return 0
