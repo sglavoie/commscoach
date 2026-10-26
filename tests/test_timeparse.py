@@ -52,6 +52,8 @@ class ParseWhenTests(unittest.TestCase):
             parse_when("last monday 9:15pm", now=NOW),
             "2026-08-25T01:15:00+00:00",
         )
+        # NOW is a Tuesday: the same weekday means a week ago, with or without "last".
+        self.assertEqual(parse_when("last tuesday", now=NOW), parse_when("tuesday", now=NOW))
 
     def test_amount_ago_forms(self) -> None:
         cases = {

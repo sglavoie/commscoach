@@ -126,6 +126,8 @@ def _parse_when(text: str, *, now: datetime | None) -> str:
     match = _WEEKDAY_RE.fullmatch(value)
     if match:
         target_weekday = _WEEKDAYS[match.group(1).lower()]
+        # Strictly in the past: on a Monday, "monday" is a week ago, and the
+        # optional "last" does not change the meaning.
         days_back = (reference.weekday() - target_weekday) % 7 or 7
         clock = _parse_clock(match.group(2), text) if match.group(2) else time()
         return _canonical(_at_local_time(reference, -days_back, clock), reference)

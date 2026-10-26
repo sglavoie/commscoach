@@ -42,7 +42,7 @@ Editor drafts are kept until the command succeeds. If the editor fails, you inte
 
 `person edit HANDLE --notes` also opens the editor, pre-filled with that person's private notes (or blank when unset). It uses the same draft recovery. Empty drafts are rejected; use `--clear-notes` to remove notes. Non-interactive callers must supply text, `-`, or `@PATH`.
 
-`--occurred-at`, `--since`, and `--until` accept ISO-8601 values and natural relative dates such as `today`, `yesterday`, `3 days ago`, `last monday`, and `now`. Stored timestamps are normalized to UTC. Entries are ordered by when they occurred, falling back to creation time.
+`--occurred-at`, `--since`, and `--until` accept ISO-8601 values and natural relative dates such as `today`, `yesterday`, `3 days ago`, `last monday`, and `now`. A weekday always means its most recent occurrence strictly before today, so on a Monday both `monday` and `last monday` mean seven days ago; `last` is optional. `now` takes no time of day; use `today 9am`. Stored timestamps are normalized to UTC. Entries are ordered by when they occurred, falling back to creation time.
 
 Date filters use your system's local timezone. A bare date, `today`, `yesterday`, or `last monday` covers the whole local day, including daylight-saving transitions. Explicit times and elapsed-time expressions such as `today 9am`, `now`, or `3 days ago` retain their time; timestamps with an offset use that offset. Both bounds are inclusive, and a `--since` instant after `--until` is rejected. These rules apply to entry listings, searches, stats, and review scopes:
 
