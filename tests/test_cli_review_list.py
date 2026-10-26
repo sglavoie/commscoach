@@ -273,9 +273,7 @@ class ScopeRenderingTests(ReviewTestBase):
         self.assertIn("scope person:@ally", long_out)
 
     def test_tag_scope_renders_the_tag(self) -> None:
-        review = self._seed_review(
-            "body", [self.entry.id], scope_kind="tag", scope_tag="conflict"
-        )
+        review = self._seed_review("body", [self.entry.id], scope_kind="tag", scope_tag="conflict")
         long_out, short_out = self._lines(review)
         self.assertIn("scope tag:conflict", long_out)
         self.assertIn("scope:tag:conflict", short_out)

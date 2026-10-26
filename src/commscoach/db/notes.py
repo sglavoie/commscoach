@@ -49,25 +49,17 @@ def set_person_note(
 def clear_person_note(conn: sqlite3.Connection, person_id: int) -> bool:
     """Delete a person's note, returning whether a row was removed."""
     with conn:
-        cur = conn.execute(
-            "DELETE FROM person_notes WHERE person_id = ?", (person_id,)
-        )
+        cur = conn.execute("DELETE FROM person_notes WHERE person_id = ?", (person_id,))
     return cur.rowcount > 0
 
 
-def get_person_note(
-    conn: sqlite3.Connection, person_id: int
-) -> PersonNote | None:
+def get_person_note(conn: sqlite3.Connection, person_id: int) -> PersonNote | None:
     """Return one person's note, if present."""
-    row = conn.execute(
-        "SELECT * FROM person_notes WHERE person_id = ?", (person_id,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM person_notes WHERE person_id = ?", (person_id,)).fetchone()
     return _row_to_person_note(row) if row is not None else None
 
 
-def get_person_notes(
-    conn: sqlite3.Connection, person_ids: Iterable[int]
-) -> dict[int, PersonNote]:
+def get_person_notes(conn: sqlite3.Connection, person_ids: Iterable[int]) -> dict[int, PersonNote]:
     """Bulk-fetch notes as a mapping keyed by person ID."""
     ids = tuple(dict.fromkeys(person_ids))
     if not ids:
@@ -77,7 +69,4 @@ def get_person_notes(
         f"SELECT * FROM person_notes WHERE person_id IN ({placeholders})",
         ids,
     ).fetchall()
-    return {
-        note.person_id: note
-        for note in (_row_to_person_note(row) for row in rows)
-    }
+    return {note.person_id: note for note in (_row_to_person_note(row) for row in rows)}

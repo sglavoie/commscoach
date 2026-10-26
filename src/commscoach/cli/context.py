@@ -58,17 +58,12 @@ def _context_to_dict(context: db.EntryContext) -> dict[str, Any]:
                     "limit": person_context.history_limit,
                     "count": len(person_context.history),
                     "total_count": person_context.total_history_count,
-                    "truncated": (
-                        len(person_context.history) < person_context.total_history_count
-                    ),
+                    "truncated": (len(person_context.history) < person_context.total_history_count),
                 },
                 "history": [
                     {
                         "entry": entry_to_dict(item.entry),
-                        "feedback": [
-                            feedback_to_dict(feedback)
-                            for feedback in item.feedback
-                        ],
+                        "feedback": [feedback_to_dict(feedback) for feedback in item.feedback],
                     }
                     for item in person_context.history
                 ],
@@ -83,9 +78,7 @@ def _context_to_dict(context: db.EntryContext) -> dict[str, Any]:
             "total_count": context.total_goal_count,
             "truncated": len(context.goals) < context.total_goal_count,
         },
-        "prior_reviews": [
-            review_to_dict(review) for review in context.prior_reviews
-        ],
+        "prior_reviews": [review_to_dict(review) for review in context.prior_reviews],
     }
 
 

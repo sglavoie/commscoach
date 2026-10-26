@@ -108,9 +108,7 @@ class EditorCompositionTests(unittest.TestCase):
 
     def test_compose_with_real_subprocess(self) -> None:
         script = (
-            "import sys; "
-            "open(sys.argv[-1], 'a', encoding='utf-8').write("
-            "'\\nsubprocess body\\n')"
+            "import sys; open(sys.argv[-1], 'a', encoding='utf-8').write('\\nsubprocess body\\n')"
         )
         command = shlex.join([sys.executable, "-c", script])
         with mock.patch.dict(os.environ, {"EDITOR": command}, clear=True):

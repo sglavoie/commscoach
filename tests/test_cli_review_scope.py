@@ -20,8 +20,7 @@ class ScopeDerivationTests(ScopedContextBase):
             (("--tag", "Conflict"), 2),
             (("--since", "2026-07-01T00:00:00+00:00"), 2),
             (("--until", self.first.occurred_at), 2),
-            (("--since", self.first.occurred_at,
-              "--until", self.second.occurred_at), 2),
+            (("--since", self.first.occurred_at, "--until", self.second.occurred_at), 2),
             (("--tag", "missing"), 0),
         ]
         for flags, total in cases:
@@ -216,9 +215,7 @@ class ReversedRangeTests(ScopedContextBase):
 
     def test_reversed_relative_bounds_are_rejected_after_resolution(self) -> None:
         """Both flags resolve through ``parse_date_bound`` before being ordered."""
-        rc, _, err = self._run(
-            "review", "context", "--since", "today", "--until", "2 weeks ago"
-        )
+        rc, _, err = self._run("review", "context", "--since", "today", "--until", "2 weeks ago")
 
         self.assertEqual(rc, 1)
         self.assertIn("must not be after", err)
@@ -227,9 +224,7 @@ class ReversedRangeTests(ScopedContextBase):
         payload = self._scope("--since", "2026-07-05", "--until", "2026-07-05")
 
         self.assertEqual(payload["scope"]["kind"], "range")
-        self.assertEqual(
-            [item["entry"]["id"] for item in payload["entries"]], [self.first.id]
-        )
+        self.assertEqual([item["entry"]["id"] for item in payload["entries"]], [self.first.id])
 
 
 class ScopeKindFlagTests(ScopedContextBase):
@@ -247,17 +242,13 @@ class ScopeKindFlagTests(ScopedContextBase):
         self.assertEqual(payload["scope"]["kind"], "range")
 
     def test_scope_contradicting_the_axis_flag_exits_one(self) -> None:
-        rc, _, err = self._run(
-            "review", "context", "--person", "alice", "--scope", "tag"
-        )
+        rc, _, err = self._run("review", "context", "--person", "alice", "--scope", "tag")
         self.assertEqual(rc, 1)
         self.assertIn("--scope tag", err)
         self.assertIn("--person", err)
 
     def test_scope_latest_with_an_axis_flag_exits_one(self) -> None:
-        rc, _, err = self._run(
-            "review", "context", "--scope", "latest", "--tag", "conflict"
-        )
+        rc, _, err = self._run("review", "context", "--scope", "latest", "--tag", "conflict")
         self.assertEqual(rc, 1)
         self.assertIn("--scope latest", err)
         self.assertIn("--tag", err)

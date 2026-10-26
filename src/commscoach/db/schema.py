@@ -109,8 +109,7 @@ def validate_schema(conn: sqlite3.Connection) -> None:
     """Raise ``DBError`` unless ``conn`` points at the expected initialized DB."""
     try:
         rows = conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
         ).fetchall()
         tables = {row[0] for row in rows}
         version = get_schema_version(conn) if "_meta" in tables else None
@@ -141,8 +140,7 @@ def validate_backup_source(conn: sqlite3.Connection) -> int:
     """
     try:
         rows = conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
         ).fetchall()
         tables = {row[0] for row in rows}
         version = get_schema_version(conn) if "_meta" in tables else None
@@ -290,16 +288,12 @@ def _rebuild_fts5(conn: sqlite3.Connection) -> None:
 
 def _configure_fts5(conn: sqlite3.Connection) -> None:
     """Probe and configure optional FTS5 support for this database."""
-    previous = conn.execute(
-        "SELECT value FROM _meta WHERE key = ?", (_FTS5_META_KEY,)
-    ).fetchone()
+    previous = conn.execute("SELECT value FROM _meta WHERE key = ?", (_FTS5_META_KEY,)).fetchone()
     enabled = _probe_fts5(conn)
     if enabled:
         _execute_script(conn, _FTS5_TRIGGER_SQL)
         entry_count = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
-        indexed_count = conn.execute(
-            "SELECT COUNT(*) FROM entries_fts_docsize"
-        ).fetchone()[0]
+        indexed_count = conn.execute("SELECT COUNT(*) FROM entries_fts_docsize").fetchone()[0]
         # A build without FTS5 drops the sync triggers, so entries may have
         # been edited there without the index noticing; equal counts cannot
         # detect an edited body, hence the unconditional rebuild after one.
@@ -350,9 +344,7 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
             raise
         conn.execute("COMMIT")
     finally:
-        conn.execute(
-            "PRAGMA foreign_keys = ON" if foreign_keys else "PRAGMA foreign_keys = OFF"
-        )
+        conn.execute("PRAGMA foreign_keys = ON" if foreign_keys else "PRAGMA foreign_keys = OFF")
 
 
 def _apply_schema_steps(conn: sqlite3.Connection) -> None:

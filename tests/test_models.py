@@ -192,9 +192,7 @@ class ReviewTests(unittest.TestCase):
 
     def test_handle_survives_without_the_person(self):
         # What hydration produces once the scoped person has been deleted.
-        review = _make_review(
-            scope_kind="person", scope_person=None, scope_person_handle="alex"
-        )
+        review = _make_review(scope_kind="person", scope_person=None, scope_person_handle="alex")
         self.assertIsNone(review.scope_person)
         self.assertEqual(review.scope_person_handle, "alex")
 
@@ -205,8 +203,7 @@ class ReviewTests(unittest.TestCase):
         ranged = _make_review(
             scope_kind="range", scope_since="2026-01-01", scope_until="2026-01-31"
         )
-        self.assertEqual((ranged.scope_since, ranged.scope_until),
-                         ("2026-01-01", "2026-01-31"))
+        self.assertEqual((ranged.scope_since, ranged.scope_until), ("2026-01-01", "2026-01-31"))
 
     def test_is_frozen(self):
         review = _make_review()
@@ -217,9 +214,7 @@ class ReviewTests(unittest.TestCase):
 class GoalTests(unittest.TestCase):
     def test_is_open_is_derived_from_status(self):
         self.assertTrue(_make_goal().is_open)
-        self.assertFalse(
-            _make_goal(status="done", closed_at="2026-06-21T00:00:00Z").is_open
-        )
+        self.assertFalse(_make_goal(status="done", closed_at="2026-06-21T00:00:00Z").is_open)
 
     def test_relationships_and_optional_fields(self):
         person = _make_person()
@@ -284,9 +279,7 @@ class EntryContextTests(unittest.TestCase):
     def test_is_frozen(self):
         self_person = _make_person(id=1, handle="me", is_self=True)
         entry = _make_entry()
-        context = EntryContext(
-            entry=entry, self_person=self_person, people=(), prior_feedback=()
-        )
+        context = EntryContext(entry=entry, self_person=self_person, people=(), prior_feedback=())
         with self.assertRaises(dataclasses.FrozenInstanceError):
             context.people = ()  # type: ignore[misc]
 

@@ -25,9 +25,7 @@ class NormalizeTagTests(unittest.TestCase):
 
 class NormalizeTagListTests(unittest.TestCase):
     def test_splits_on_commas_and_preserves_first_seen_order(self) -> None:
-        self.assertEqual(
-            normalize_tag_list(["Ops, conflict", "ops"]), ["ops", "conflict"]
-        )
+        self.assertEqual(normalize_tag_list(["Ops, conflict", "ops"]), ["ops", "conflict"])
 
     def test_drops_empties(self) -> None:
         self.assertEqual(normalize_tag_list(["ops,,  ,"]), ["ops"])
@@ -238,9 +236,7 @@ class MergeTagsTests(DBTestCase):
         self.assertEqual(db.get_review(self.conn, source_scoped.id).scope_tag, "conflict")
         self.assertEqual(db.get_review(self.conn, dest_scoped.id).scope_tag, "conflict")
         self.assertEqual(
-            sorted(
-                review.body for review in db.list_reviews(self.conn, tag="conflict")
-            ),
+            sorted(review.body for review in db.list_reviews(self.conn, tag="conflict")),
             ["real theme", "typo theme"],
         )
 

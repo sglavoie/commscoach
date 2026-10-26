@@ -113,8 +113,7 @@ def _schema_version_check(conn: sqlite3.Connection) -> dict[str, Any]:
         tables = {
             row[0]
             for row in conn.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
             )
         }
         version = db.get_schema_version(conn) if "_meta" in tables else None
@@ -227,8 +226,7 @@ def _review_scope_check(conn: sqlite3.Connection) -> dict[str, Any]:
             "review_scope", "ok", "every person-scoped review still resolves to a person"
         )
     dangling = [
-        {"review_id": row["id"], "scope_person_handle": row["scope_person_handle"]}
-        for row in rows
+        {"review_id": row["id"], "scope_person_handle": row["scope_person_handle"]} for row in rows
     ]
     return _result(
         "review_scope",
@@ -303,8 +301,10 @@ def run_checks(db_path: Path, *, quick: bool = False) -> list[dict[str, Any]]:
 def cmd_doctor(args: argparse.Namespace) -> int:
     db_path = resolve_db_path(args)
     checks = run_checks(db_path, quick=args.quick)
-    overall = "fail" if any(item["status"] == "fail" for item in checks) else (
-        "warn" if any(item["status"] == "warn" for item in checks) else "ok"
+    overall = (
+        "fail"
+        if any(item["status"] == "fail" for item in checks)
+        else ("warn" if any(item["status"] == "warn" for item in checks) else "ok")
     )
     if args.json:
         print_json({"db_path": str(db_path), "status": overall, "checks": checks})

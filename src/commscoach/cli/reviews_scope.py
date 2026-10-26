@@ -13,8 +13,6 @@ from .common import (
 )
 
 
-
-
 #: Each axis flag as ``(flag, argparse dest, scope kind it derives)``, in the
 #: order the flags are declared so a conflict message names them predictably.
 #: ``latest`` has no flag: it is what "no axis given" derives to.
@@ -100,27 +98,20 @@ def resolve_scope(args: argparse.Namespace) -> Scope:
     and only then being told the flags were incoherent.
     """
     supplied = [
-        (flag, kind)
-        for flag, dest, kind in _SCOPE_FLAGS
-        if getattr(args, dest) is not None
+        (flag, kind) for flag, dest, kind in _SCOPE_FLAGS if getattr(args, dest) is not None
     ]
     flags = [flag for flag, _ in supplied]
     kinds = {kind for _, kind in supplied}
     if len(kinds) > 1:
-        raise db.DBError(
-            f"{flags[0]} cannot be combined with {', '.join(flags[1:])}"
-        )
+        raise db.DBError(f"{flags[0]} cannot be combined with {', '.join(flags[1:])}")
     derived = next(iter(kinds), "latest")
 
     requested = getattr(args, "scope_kind", None)
     if requested is not None and requested != derived:
         if not flags:
-            raise db.DBError(
-                f"--scope {requested} requires {_SCOPE_REQUIRES[requested]}"
-            )
+            raise db.DBError(f"--scope {requested} requires {_SCOPE_REQUIRES[requested]}")
         raise db.DBError(
-            f"--scope {requested} does not match "
-            f"{', '.join(flags)} (scope '{derived}')"
+            f"--scope {requested} does not match {', '.join(flags)} (scope '{derived}')"
         )
 
     since, until = parse_date_bounds(args) if derived == "range" else (None, None)

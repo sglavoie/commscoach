@@ -50,11 +50,7 @@ def _format_ranked(title: str, items: tuple[tuple[str, int], ...]) -> list[str]:
 
 
 def _format_human(stats: db.Stats, *, weeks: int) -> str:
-    coverage = (
-        stats.entries_with_feedback / stats.entry_count
-        if stats.entry_count
-        else 0.0
-    )
+    coverage = stats.entries_with_feedback / stats.entry_count if stats.entry_count else 0.0
     buckets = stats.weekly_buckets[-weeks:] if weeks else ()
     lines = [
         f"Entries: {stats.entry_count}",
@@ -62,10 +58,7 @@ def _format_human(stats: db.Stats, *, weeks: int) -> str:
         f"Tags: {stats.tag_count}",
         f"Feedback: {stats.feedback_count}",
         f"Entries awaiting feedback: {stats.entry_count - stats.entries_with_feedback}",
-        (
-            "Feedback coverage: "
-            f"{stats.entries_with_feedback}/{stats.entry_count} ({coverage:.1%})"
-        ),
+        (f"Feedback coverage: {stats.entries_with_feedback}/{stats.entry_count} ({coverage:.1%})"),
         f"Reviews: {stats.review_count}",
         f"Goals: {stats.open_goal_count} open, {stats.closed_goal_count} closed",
         f"First entry: {stats.first_entry or '(none)'}",

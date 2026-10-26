@@ -84,9 +84,7 @@ class StatsCLITests(unittest.TestCase):
         self.assertIn("--since", err)
 
     def test_reversed_date_range_is_semantic_error(self) -> None:
-        rc, _, err = self._run(
-            "stats", "--since", "2026-06-03", "--until", "2026-06-02"
-        )
+        rc, _, err = self._run("stats", "--since", "2026-06-03", "--until", "2026-06-02")
         self.assertEqual(rc, 1)
         self.assertIn("--since must not be after --until", err)
 

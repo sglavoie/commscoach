@@ -47,9 +47,7 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(cli.read_body("-", stdin=stdin), "from stdin\n")
 
     def test_read_body_reads_file_for_at_prefix(self) -> None:
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".txt", delete=False, encoding="utf-8"
-        ) as fh:
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as fh:
             fh.write("file contents")
             tmp_path = fh.name
         try:
@@ -102,27 +100,19 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_confirm_y_returns_true(self) -> None:
-        result = cli.confirm(
-            "ok?", stream=io.StringIO(), input_fn=lambda _: "y"
-        )
+        result = cli.confirm("ok?", stream=io.StringIO(), input_fn=lambda _: "y")
         self.assertTrue(result)
 
     def test_confirm_yes_returns_true(self) -> None:
-        result = cli.confirm(
-            "ok?", stream=io.StringIO(), input_fn=lambda _: "YES"
-        )
+        result = cli.confirm("ok?", stream=io.StringIO(), input_fn=lambda _: "YES")
         self.assertTrue(result)
 
     def test_confirm_n_returns_false(self) -> None:
-        result = cli.confirm(
-            "ok?", stream=io.StringIO(), input_fn=lambda _: "no"
-        )
+        result = cli.confirm("ok?", stream=io.StringIO(), input_fn=lambda _: "no")
         self.assertFalse(result)
 
     def test_confirm_empty_returns_false(self) -> None:
-        result = cli.confirm(
-            "ok?", stream=io.StringIO(), input_fn=lambda _: ""
-        )
+        result = cli.confirm("ok?", stream=io.StringIO(), input_fn=lambda _: "")
         self.assertFalse(result)
 
     def test_confirm_eof_returns_false(self) -> None:
@@ -153,10 +143,10 @@ class ResolveDBPathTests(unittest.TestCase):
     def test_falls_through_to_default_when_neither_set(self) -> None:
         args = mock.Mock(spec=["db"], db=None)
         expected = Path("/tmp/default.sqlite3")
-        with mock.patch.dict(os.environ, {}, clear=False), mock.patch.object(
-            paths, "default_db_path", return_value=expected
-        ), mock.patch.object(
-            paths, "LEGACY_ICLOUD_DB_PATH", Path("/tmp/missing-legacy.sqlite3")
+        with (
+            mock.patch.dict(os.environ, {}, clear=False),
+            mock.patch.object(paths, "default_db_path", return_value=expected),
+            mock.patch.object(paths, "LEGACY_ICLOUD_DB_PATH", Path("/tmp/missing-legacy.sqlite3")),
         ):
             os.environ.pop(paths.ENV_VAR, None)
             self.assertEqual(cli.resolve_db_path(args), expected)
@@ -188,12 +178,8 @@ class InitCommandTests(unittest.TestCase):
             rc = cli.main(["--db", str(self.db_path), "init"])
         self.assertEqual(rc, 0)
         self.assertTrue(self.db_path.exists())
-        self.assertEqual(
-            stat.S_IMODE(self.db_path.stat().st_mode), paths.DB_FILE_MODE
-        )
-        self.assertEqual(
-            stat.S_IMODE(self.db_path.parent.stat().st_mode), paths.DATA_DIR_MODE
-        )
+        self.assertEqual(stat.S_IMODE(self.db_path.stat().st_mode), paths.DB_FILE_MODE)
+        self.assertEqual(stat.S_IMODE(self.db_path.parent.stat().st_mode), paths.DATA_DIR_MODE)
 
     def test_init_text_output_includes_path(self) -> None:
         buf = io.StringIO()
@@ -221,8 +207,9 @@ class InitCommandTests(unittest.TestCase):
 
     def test_init_honors_env_var_when_no_cli_db(self) -> None:
         buf = io.StringIO()
-        with redirect_stdout(buf), mock.patch.dict(
-            os.environ, {paths.ENV_VAR: str(self.db_path)}, clear=False
+        with (
+            redirect_stdout(buf),
+            mock.patch.dict(os.environ, {paths.ENV_VAR: str(self.db_path)}, clear=False),
         ):
             rc = cli.main(["init"])
         self.assertEqual(rc, 0)
@@ -285,9 +272,11 @@ class ExitCodeTests(unittest.TestCase):
             raise BrokenPipeError()
 
         err_buf = io.StringIO()
-        with mock.patch.object(cli_app, "cmd_init", boom), mock.patch.object(
-            cli_app, "_silence_stdout"
-        ) as silence, redirect_stderr(err_buf):
+        with (
+            mock.patch.object(cli_app, "cmd_init", boom),
+            mock.patch.object(cli_app, "_silence_stdout") as silence,
+            redirect_stderr(err_buf),
+        ):
             rc = cli.main(["init"])
         self.assertEqual(rc, 1)
         self.assertEqual(err_buf.getvalue(), "")
@@ -372,9 +361,7 @@ class OpenDBTests(unittest.TestCase):
         paths.ensure_data_dir(db_path)
         with closing(db.connect(db_path)) as conn:
             conn.executescript(db_schema.SCHEMA_V1_SQL)
-            conn.execute(
-                "INSERT INTO _meta (key, value) VALUES ('schema_version', '1')"
-            )
+            conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', '1')")
             conn.commit()
 
         err_buf = io.StringIO()

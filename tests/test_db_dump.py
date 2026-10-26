@@ -130,9 +130,9 @@ class DumpRoundTripTests(DBTestCase):
 
     def test_round_trip_preserves_every_review_scope_column(self) -> None:
         # The CRUD layer cannot write these yet, so drive the columns directly.
-        person_id = self.conn.execute(
-            "SELECT id FROM people WHERE handle = 'alex'"
-        ).fetchone()["id"]
+        person_id = self.conn.execute("SELECT id FROM people WHERE handle = 'alex'").fetchone()[
+            "id"
+        ]
         self.conn.execute(
             "INSERT INTO reviews (body, scope_kind, scope_limit,"
             " scope_person_id, scope_person_handle, created_at, updated_at)"
@@ -158,10 +158,7 @@ class DumpRoundTripTests(DBTestCase):
         db.load_from_dict(restored, original)
 
         self.assertEqual(db.dump_to_dict(restored), original)
-        scoped = {
-            review["body"]: review
-            for review in db.dump_to_dict(restored)["reviews"]
-        }
+        scoped = {review["body"]: review for review in db.dump_to_dict(restored)["reviews"]}
         self.assertEqual(scoped["about alex"]["scope_person_handle"], "alex")
         self.assertEqual(scoped["conflict theme"]["scope_tag"], "conflict")
         self.assertEqual(scoped["june"]["scope_since"], "2026-06-01")
@@ -290,9 +287,10 @@ class SequenceResetTests(unittest.TestCase):
             target_path = Path(tmp) / "target.sqlite3"
             db.init_db(source_path)
             db.init_db(target_path)
-            with closing(db.connect(source_path)) as source, closing(
-                db.connect(target_path)
-            ) as target:
+            with (
+                closing(db.connect(source_path)) as source,
+                closing(db.connect(target_path)) as target,
+            ):
                 first = db.create_entry(source, "source")
                 for index in range(5):
                     db.create_entry(target, f"old {index}")
@@ -310,9 +308,10 @@ class SequenceResetTests(unittest.TestCase):
             target_path = Path(tmp) / "target.sqlite3"
             db.init_db(source_path)
             db.init_db(target_path)
-            with closing(db.connect(source_path)) as source, closing(
-                db.connect(target_path)
-            ) as target:
+            with (
+                closing(db.connect(source_path)) as source,
+                closing(db.connect(target_path)) as target,
+            ):
                 db.create_entry(source, "kept")
                 deleted = db.create_entry(source, "deleted later")
                 source.execute("DELETE FROM entries WHERE id = ?", (deleted.id,))
@@ -347,8 +346,9 @@ class RestoreValidationTests(DBTestCase):
 
     def test_unparseable_or_naive_timestamps_are_rejected(self) -> None:
         for value in ("last tuesday", "2026-03-01T21:00:00", 42):
-            with self.subTest(value=value), self.assertRaisesRegex(
-                db.DumpFormatError, r"entries\[0\]\.occurred_at"
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(db.DumpFormatError, r"entries\[0\]\.occurred_at"),
             ):
                 db.validate_dump(self._payload_with_entry(occurred_at=value))
 

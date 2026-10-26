@@ -99,9 +99,7 @@ class StatsTests(DBTestCase):
         with local_timezone("UTC"):
             ongoing = db.get_stats(self.conn, today=date(2026, 1, 21))
             ended = db.get_stats(self.conn, today=date(2026, 3, 1))
-            windowed = db.get_stats(
-                self.conn, until="2026-01-18", today=date(2026, 3, 1)
-            )
+            windowed = db.get_stats(self.conn, until="2026-01-18", today=date(2026, 3, 1))
 
         self.assertEqual(ongoing.current_weekly_streak, 2)
         self.assertEqual(ended.current_weekly_streak, 0)
@@ -132,9 +130,7 @@ class StatsTests(DBTestCase):
             source="slack",
             people=(alice, bob),
         )
-        focus_id = self.conn.execute(
-            "SELECT id FROM tags WHERE name = 'focus'"
-        ).fetchone()[0]
+        focus_id = self.conn.execute("SELECT id FROM tags WHERE name = 'focus'").fetchone()[0]
         self.conn.execute(
             "INSERT INTO entry_tags (entry_id, tag_id) VALUES (?, ?)",
             (second, focus_id),
@@ -159,9 +155,7 @@ class StatsTests(DBTestCase):
     def test_window_filters_entries_links_reviews_and_goal_events(self) -> None:
         alice = self._add_person("alice")
         bob = self._add_person("bob")
-        old_entry = self._add_entry(
-            "2026-01-01T10:00:00+00:00", tags=("old",), people=(alice,)
-        )
+        old_entry = self._add_entry("2026-01-01T10:00:00+00:00", tags=("old",), people=(alice,))
         current_entry = self._add_entry(
             "2026-02-10T10:00:00+00:00", tags=("current",), people=(bob,)
         )
@@ -200,9 +194,7 @@ class StatsTests(DBTestCase):
         )
         self.conn.commit()
 
-        stats = db.get_stats(
-            self.conn, since="2026-02-01", until="2026-02-28"
-        )
+        stats = db.get_stats(self.conn, since="2026-02-01", until="2026-02-28")
 
         self.assertEqual(stats.entry_count, 1)
         self.assertEqual(stats.people_count, 1)

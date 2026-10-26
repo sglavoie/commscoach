@@ -70,9 +70,7 @@ def review_to_dict(review: db.Review) -> dict[str, Any]:
         "scope_kind": review.scope_kind,
         "scope_limit": review.scope_limit,
         "scope_person": (
-            person_to_dict(review.scope_person)
-            if review.scope_person is not None
-            else None
+            person_to_dict(review.scope_person) if review.scope_person is not None else None
         ),
         "scope_person_handle": review.scope_person_handle,
         "scope_tag": review.scope_tag,
@@ -105,11 +103,7 @@ def stats_to_dict(stats: db.Stats, *, weeks: int | None = None) -> dict[str, Any
     buckets = stats.weekly_buckets if weeks is None else stats.weekly_buckets[-weeks:]
     if weeks == 0:
         buckets = ()
-    coverage = (
-        stats.entries_with_feedback / stats.entry_count
-        if stats.entry_count
-        else 0.0
-    )
+    coverage = stats.entries_with_feedback / stats.entry_count if stats.entry_count else 0.0
     return {
         "entry_count": stats.entry_count,
         "people_count": stats.people_count,
@@ -126,17 +120,8 @@ def stats_to_dict(stats: db.Stats, *, weeks: int | None = None) -> dict[str, Any
         "entries_per_week": stats.entries_per_week,
         "current_weekly_streak": stats.current_weekly_streak,
         "longest_weekly_streak": stats.longest_weekly_streak,
-        "weekly_buckets": [
-            {"week": week, "count": count} for week, count in buckets
-        ],
-        "top_tags": [
-            {"name": name, "count": count} for name, count in stats.top_tags
-        ],
-        "top_sources": [
-            {"name": name, "count": count} for name, count in stats.top_sources
-        ],
-        "top_people": [
-            {"handle": handle, "count": count}
-            for handle, count in stats.top_people
-        ],
+        "weekly_buckets": [{"week": week, "count": count} for week, count in buckets],
+        "top_tags": [{"name": name, "count": count} for name, count in stats.top_tags],
+        "top_sources": [{"name": name, "count": count} for name, count in stats.top_sources],
+        "top_people": [{"handle": handle, "count": count} for handle, count in stats.top_people],
     }

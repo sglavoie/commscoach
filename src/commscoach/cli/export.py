@@ -49,9 +49,7 @@ def _format_person_export_label(person: db.Person) -> str:
     return label
 
 
-def _format_markdown_entry(
-    entry: db.Entry, feedback_items: tuple[db.Feedback, ...]
-) -> str:
+def _format_markdown_entry(entry: db.Entry, feedback_items: tuple[db.Feedback, ...]) -> str:
     lines: list[str] = [f"## Entry {entry.id}", ""]
     lines.append(f"- **Created**: {entry.created_at}")
     if entry.occurred_at:
@@ -146,9 +144,7 @@ def _render_markdown_export(
         return "\n".join(sections)
     rendered_entries: list[str] = []
     for entry in entries:
-        rendered_entries.append(
-            _format_markdown_entry(entry, feedback_by_entry[entry.id])
-        )
+        rendered_entries.append(_format_markdown_entry(entry, feedback_by_entry[entry.id]))
     sections.append("\n---\n\n".join(rendered_entries))
     if not sections[-1].endswith("\n"):
         sections.append("")
@@ -160,8 +156,12 @@ def _write_export_file(out_path: Path, content: str) -> None:
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=out_path.parent,
-            prefix=f".{out_path.name}.", suffix=".tmp", delete=False,
+            mode="w",
+            encoding="utf-8",
+            dir=out_path.parent,
+            prefix=f".{out_path.name}.",
+            suffix=".tmp",
+            delete=False,
         ) as fh:
             temporary = Path(fh.name)
             paths.secure_file(temporary)
@@ -177,9 +177,7 @@ def _write_export_file(out_path: Path, content: str) -> None:
 def _validate_export_destination(out_path: Path, source_path: Path) -> None:
     """Protect the active store and SQLite sidecars, including filesystem aliases."""
     source = source_path.resolve()
-    protected = [source, *(
-        Path(f"{source}{suffix}") for suffix in ("-wal", "-shm", "-journal")
-    )]
+    protected = [source, *(Path(f"{source}{suffix}") for suffix in ("-wal", "-shm", "-journal"))]
     for path in protected:
         if out_path.resolve() == path or (
             out_path.exists() and path.exists() and out_path.samefile(path)
@@ -211,12 +209,8 @@ def cmd_export(args: argparse.Namespace) -> int:
             reviews = db.list_reviews(conn)
             goals = db.list_goals(conn, status=None)
             entries = db.list_entries(conn)
-            feedback_by_entry = {
-                entry.id: db.list_feedback(conn, entry.id) for entry in entries
-            }
-            rendered = _render_markdown_export(
-                entries, feedback_by_entry, reviews, goals
-            )
+            feedback_by_entry = {entry.id: db.list_feedback(conn, entry.id) for entry in entries}
+            rendered = _render_markdown_export(entries, feedback_by_entry, reviews, goals)
     if not rendered.endswith("\n"):
         rendered += "\n"
     if out_path is None:

@@ -54,12 +54,11 @@ class BackupCommandTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out.getvalue())["backup_path"], str(destination))
         self.assertEqual(stat.S_IMODE(destination.stat().st_mode), paths.DB_FILE_MODE)
-        self.assertEqual(
-            stat.S_IMODE(destination.parent.stat().st_mode), paths.DATA_DIR_MODE
-        )
-        with closing(db.connect(self.db_path)) as source, closing(
-            db.connect(destination)
-        ) as copied:
+        self.assertEqual(stat.S_IMODE(destination.parent.stat().st_mode), paths.DATA_DIR_MODE)
+        with (
+            closing(db.connect(self.db_path)) as source,
+            closing(db.connect(destination)) as copied,
+        ):
             self.assertEqual(
                 source.execute("SELECT * FROM entries").fetchall(),
                 copied.execute("SELECT * FROM entries").fetchall(),
@@ -104,9 +103,14 @@ class BackupCommandTests(unittest.TestCase):
         with redirect_stdout(out):
             rc = cli.main(
                 [
-                    "--json", "--db", str(live), "backup",
-                    "--out", str(folder / "commscoach-20260101T000000Z.sqlite3"),
-                    "--keep", "0",
+                    "--json",
+                    "--db",
+                    str(live),
+                    "backup",
+                    "--out",
+                    str(folder / "commscoach-20260101T000000Z.sqlite3"),
+                    "--keep",
+                    "0",
                 ]
             )
         self.assertEqual(rc, 0)
@@ -133,9 +137,10 @@ class BackupCommandTests(unittest.TestCase):
 
     def test_backup_during_open_write_transaction_is_valid(self) -> None:
         destination = Path(self._tmp.name) / "copies" / "live.sqlite3"
-        with closing(sqlite3.connect(self.db_path)) as writer, closing(
-            db.connect(self.db_path)
-        ) as source:
+        with (
+            closing(sqlite3.connect(self.db_path)) as writer,
+            closing(db.connect(self.db_path)) as source,
+        ):
             writer.execute(
                 "INSERT INTO entries (body, source, occurred_at, created_at, updated_at) "
                 "VALUES ('uncommitted', NULL, NULL, ?, ?)",
@@ -184,9 +189,7 @@ class LegacySchemaBackupTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.db_path = Path(self._tmp.name) / "data" / "commscoach.sqlite3"
-        self.destination = (
-            Path(self._tmp.name) / "Backups" / "commscoach-pre-v4.sqlite3"
-        )
+        self.destination = Path(self._tmp.name) / "Backups" / "commscoach-pre-v4.sqlite3"
         build_v3_database(self.db_path)
 
     def _run_backup(self) -> int:
@@ -210,9 +213,7 @@ class LegacySchemaBackupTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         self.assertTrue(self.destination.exists())
-        self.assertEqual(
-            stat.S_IMODE(self.destination.stat().st_mode), paths.DB_FILE_MODE
-        )
+        self.assertEqual(stat.S_IMODE(self.destination.stat().st_mode), paths.DB_FILE_MODE)
 
     def test_backup_accepts_pre_v4_database_preserving_schema_and_data(self) -> None:
         with closing(db.connect(self.db_path)) as source:
@@ -225,9 +226,7 @@ class LegacySchemaBackupTests(unittest.TestCase):
                 "SELECT review_id, entry_id, position FROM review_entries"
                 " ORDER BY review_id, position",
             )
-            before_goals = self._rows(
-                source, "SELECT id, title, review_id FROM goals ORDER BY id"
-            )
+            before_goals = self._rows(source, "SELECT id, title, review_id FROM goals ORDER BY id")
 
         self.assertEqual(self._run_backup(), 0)
 
@@ -256,9 +255,7 @@ class LegacySchemaBackupTests(unittest.TestCase):
                 self._rows(copied, "SELECT id, title, review_id FROM goals ORDER BY id"),
                 before_goals,
             )
-            self.assertEqual(
-                [row[0] for row in copied.execute("PRAGMA integrity_check")], ["ok"]
-            )
+            self.assertEqual([row[0] for row in copied.execute("PRAGMA integrity_check")], ["ok"])
             self.assertEqual(copied.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     def test_backup_accepts_pre_v4_database_then_init_migrates_only_the_source(
@@ -295,9 +292,7 @@ class LegacySchemaBackupTests(unittest.TestCase):
 
         err_buf = io.StringIO()
         with redirect_stderr(err_buf), redirect_stdout(io.StringIO()):
-            rc = cli.main(
-                ["--db", str(foreign), "backup", "--out", str(self.destination)]
-            )
+            rc = cli.main(["--db", str(foreign), "backup", "--out", str(self.destination)])
 
         self.assertEqual(rc, 1)
         self.assertIn("run 'commscoach init' first", err_buf.getvalue())

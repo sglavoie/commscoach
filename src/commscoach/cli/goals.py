@@ -49,11 +49,16 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Goal detail (text, '-', or '@PATH'); omit the value to open $EDITOR.",
     )
     add.add_argument(
-        "--person", default=None, metavar="HANDLE",
+        "--person",
+        default=None,
+        metavar="HANDLE",
         help="Tie the goal to an existing person (default: a general goal).",
     )
     add.add_argument(
-        "--review", type=int, default=None, metavar="ID",
+        "--review",
+        type=int,
+        default=None,
+        metavar="ID",
         help="Record the review this goal came from.",
     )
     add.set_defaults(func=cmd_goal_add)
@@ -66,50 +71,71 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Goal status to list (default: active).",
     )
     lst.add_argument(
-        "--person", default=None, metavar="HANDLE",
+        "--person",
+        default=None,
+        metavar="HANDLE",
         help="Only goals tied to this person.",
     )
     lst.add_argument(
-        "--limit", type=non_negative_int, default=None, metavar="N",
+        "--limit",
+        type=non_negative_int,
+        default=None,
+        metavar="N",
         help="Maximum results; text output reports omitted matches.",
     )
     lst.add_argument(
-        "--oldest-first", action="store_true",
+        "--oldest-first",
+        action="store_true",
         help="Show oldest goals first before applying --limit (active first with --status all).",
     )
     lst.set_defaults(func=cmd_goal_list)
     lst.add_argument(
-        "--with-detail", action="store_true", help="Show full detail beneath each goal.",
+        "--with-detail",
+        action="store_true",
+        help="Show full detail beneath each goal.",
     )
 
     search = goal_sub.add_parser("search", help="Search goal titles, details, and outcomes.")
     search.add_argument(
-        "--query", required=True, metavar="TEXT",
+        "--query",
+        required=True,
+        metavar="TEXT",
         help="Case-insensitive substring to find in titles, details, and outcomes.",
     )
     search.add_argument(
-        "--status", choices=("active", "done", "dropped", "all"), default="all",
+        "--status",
+        choices=("active", "done", "dropped", "all"),
+        default="all",
         help="Goal status (default: all, active goals first).",
     )
     search.add_argument(
-        "--person", default=None, metavar="HANDLE",
+        "--person",
+        default=None,
+        metavar="HANDLE",
         help="Only goals tied to this person.",
     )
     search.add_argument(
-        "--limit", type=non_negative_int, default=20, metavar="N",
+        "--limit",
+        type=non_negative_int,
+        default=20,
+        metavar="N",
         help="Maximum results (default: 20); text output reports omitted matches.",
     )
     search.add_argument(
-        "--oldest-first", action="store_true",
+        "--oldest-first",
+        action="store_true",
         help="Show oldest goals first before applying --limit.",
     )
     search.add_argument(
-        "--with-detail", action="store_true", help="Show full detail beneath each goal.",
+        "--with-detail",
+        action="store_true",
+        help="Show full detail beneath each goal.",
     )
     search.set_defaults(func=cmd_goal_list)
     for parser in (lst, search):
         parser.add_argument(
-            "--with-outcome", action="store_true",
+            "--with-outcome",
+            action="store_true",
             help="Show the full recorded outcome beneath each goal.",
         )
 
@@ -129,20 +155,28 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     edit.add_argument("--clear-detail", action="store_true", help="Remove the detail.")
     edit.add_argument(
-        "--outcome", nargs="?", const=_EDIT_TEXT, default=None,
+        "--outcome",
+        nargs="?",
+        const=_EDIT_TEXT,
+        default=None,
         help="Replace outcome without changing status (text, '-', '@PATH', or omit for $EDITOR).",
     )
     edit.add_argument("--clear-outcome", action="store_true", help="Remove the outcome.")
     edit.add_argument(
-        "--person", default=None, metavar="HANDLE",
+        "--person",
+        default=None,
+        metavar="HANDLE",
         help="Tie the goal to this existing person.",
     )
     edit.add_argument(
-        "--clear-person", action="store_true",
+        "--clear-person",
+        action="store_true",
         help="Make the goal general (not tied to a person).",
     )
     edit.add_argument(
-        "--status", choices=("active", "done", "dropped"), default=None,
+        "--status",
+        choices=("active", "done", "dropped"),
+        default=None,
         help="Set the status directly (use 'goal close' to record an outcome).",
     )
     edit.set_defaults(func=cmd_goal_edit)
@@ -157,7 +191,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Outcome (text, '-', or '@PATH'); omit the value to open $EDITOR.",
     )
     close.add_argument(
-        "--dropped", action="store_true", help="Close as dropped instead of done.",
+        "--dropped",
+        action="store_true",
+        help="Close as dropped instead of done.",
     )
     close.set_defaults(func=cmd_goal_close)
 
@@ -213,8 +249,12 @@ def _emit_goal(
 
 
 def _emit_goals(
-    args: argparse.Namespace, goals: tuple[db.Goal, ...], *, with_detail: bool = False,
-    query: str | None = None, with_outcome: bool = False,
+    args: argparse.Namespace,
+    goals: tuple[db.Goal, ...],
+    *,
+    with_detail: bool = False,
+    query: str | None = None,
+    with_outcome: bool = False,
 ) -> None:
     if args.json:
         print_json([goal_to_dict(goal) for goal in goals])
@@ -232,10 +272,17 @@ def _emit_goals(
             print("\n".join(f"  {line}" for line in goal.detail.splitlines()))
         if with_outcome:
             print("  outcome:")
-            print("\n".join(f"    {line}" for line in (goal.outcome or "(no outcome recorded)").splitlines()))
+            print(
+                "\n".join(
+                    f"    {line}" for line in (goal.outcome or "(no outcome recorded)").splitlines()
+                )
+            )
         if query is not None:
-            for label, body in (("title", goal.title), ("detail", goal.detail),
-                                ("outcome", goal.outcome)):
+            for label, body in (
+                ("title", goal.title),
+                ("detail", goal.detail),
+                ("outcome", goal.outcome),
+            ):
                 if label == "outcome" and with_outcome:
                     continue
                 if body is not None and ascii_fold(query) in ascii_fold(body):
@@ -261,14 +308,16 @@ def cmd_goal_add(args: argparse.Namespace) -> int:
             raise db.ReviewNotFoundError(args.review)
         if args.detail is _EDIT_TEXT:
             detail = read_body_arg(
-                None, what="detail", template="",
+                None,
+                what="detail",
+                template="",
                 preamble="Write goal detail below. Lines beginning with #> are ignored.",
-                isatty=sys.stdin.isatty, compose=compose_in_editor,
+                isatty=sys.stdin.isatty,
+                compose=compose_in_editor,
             )
         else:
             detail = (
-                _read_goal_text(args.detail, flag="--detail")
-                if args.detail is not None else None
+                _read_goal_text(args.detail, flag="--detail") if args.detail is not None else None
             )
         goal = db.create_goal(
             conn,
@@ -294,13 +343,19 @@ def cmd_goal_list(args: argparse.Namespace) -> int:
         )
         total = (
             db.count_goals(
-                conn, status=status, person_handle=args.person,
+                conn,
+                status=status,
+                person_handle=args.person,
                 query=getattr(args, "query", None),
             )
-            if not args.json and args.limit is not None else len(goals)
+            if not args.json and args.limit is not None
+            else len(goals)
         )
     _emit_goals(
-        args, goals, with_detail=args.with_detail, with_outcome=args.with_outcome,
+        args,
+        goals,
+        with_detail=args.with_detail,
+        with_outcome=args.with_outcome,
         query=getattr(args, "query", None),
     )
     if not args.json and total > len(goals):
@@ -369,9 +424,12 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
             )
         if edit_outcome:
             update_kwargs["outcome"] = read_body_arg(
-                None, what="outcome", template=current.outcome or "",
+                None,
+                what="outcome",
+                template=current.outcome or "",
                 preamble=OUTCOME_PREAMBLE + "\nUse --clear-outcome to remove the outcome.",
-                isatty=sys.stdin.isatty, compose=compose_in_editor,
+                isatty=sys.stdin.isatty,
+                compose=compose_in_editor,
             )
         goal = db.update_goal(conn, args.goal_id, **update_kwargs)
     _emit_goal(args, goal, human_prefix="updated")
@@ -382,7 +440,8 @@ def cmd_goal_close(args: argparse.Namespace) -> int:
     edit_outcome = args.outcome is _EDIT_TEXT
     outcome = (
         _read_goal_text(args.outcome, flag="--outcome")
-        if args.outcome is not None and not edit_outcome else None
+        if args.outcome is not None and not edit_outcome
+        else None
     )
     with open_db(args) as conn:
         if edit_outcome:

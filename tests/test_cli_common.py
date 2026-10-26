@@ -37,9 +37,7 @@ class ProseLinesTests(unittest.TestCase):
 
     def test_consecutive_lines_collapse_into_one_paragraph(self) -> None:
         body = "## Situation\nfirst line\nsecond line\n\n## Impact\nthird line"
-        self.assertEqual(
-            prose_lines(body), ["first line second line", "third line"]
-        )
+        self.assertEqual(prose_lines(body), ["first line second line", "third line"])
 
     def test_horizontal_rules_and_blank_lines_are_dropped(self) -> None:
         body = "alpha\n\n---\n\n***\n\n___\n\nbeta"

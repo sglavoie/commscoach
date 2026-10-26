@@ -100,12 +100,8 @@ def update_entry(
         column_updates.append("occurred_at = ?")
         params.append(occurred_at)
 
-    normalized_tags = (
-        tags_mod.normalize_tag_list(tags) if tags is not common.UNSET else None
-    )
-    resolved_people = (
-        resolve_person_handles(conn, people) if people is not common.UNSET else None
-    )
+    normalized_tags = tags_mod.normalize_tag_list(tags) if tags is not common.UNSET else None
+    resolved_people = resolve_person_handles(conn, people) if people is not common.UNSET else None
 
     now = common.utcnow_iso()
     with conn:
@@ -179,21 +175,17 @@ def list_entries_with_person(
         raise DBError("limit must be non-negative")
     where, params = _person_history_filter(person_id, exclude_entry_id, before)
     sql = "SELECT e.* FROM entries e" + where
-    sql += (
-        " ORDER BY COALESCE(e.occurred_at, e.created_at) DESC, e.id DESC"
-        " LIMIT ?"
-    )
+    sql += " ORDER BY COALESCE(e.occurred_at, e.created_at) DESC, e.id DESC LIMIT ?"
     rows = conn.execute(sql, [*params, limit]).fetchall()
     return tuple(hydrate_entry(conn, row) for row in rows)
 
 
 def _person_history_filter(
-    person_id: int, exclude_entry_id: int, before: str | None,
+    person_id: int,
+    exclude_entry_id: int,
+    before: str | None,
 ) -> tuple[str, list[Any]]:
-    sql = (
-        " JOIN entry_people ep ON ep.entry_id = e.id"
-        " WHERE ep.person_id = ? AND e.id != ?"
-    )
+    sql = " JOIN entry_people ep ON ep.entry_id = e.id WHERE ep.person_id = ? AND e.id != ?"
     params: list[Any] = [person_id, exclude_entry_id]
     if before is not None:
         sql += " AND COALESCE(e.occurred_at, e.created_at) < ?"
@@ -202,7 +194,10 @@ def _person_history_filter(
 
 
 def count_entries_with_person(
-    conn: sqlite3.Connection, person_id: int, *, exclude_entry_id: int,
+    conn: sqlite3.Connection,
+    person_id: int,
+    *,
+    exclude_entry_id: int,
     before: str | None = None,
 ) -> int:
     """Count the same eligible history as ``list_entries_with_person``."""
@@ -221,13 +216,14 @@ def delete_entry(conn: sqlite3.Connection, entry_id: int) -> bool:
 
 
 def _scope_filters(
-    *, tag: str | None, person_handle: str | None,
-    since: str | None, until: str | None,
+    *,
+    tag: str | None,
+    person_handle: str | None,
+    since: str | None,
+    until: str | None,
 ) -> tuple[list[str], list[Any]]:
     """Share scope predicates between entry retrieval and completeness counts."""
-    common.validate_range_bounds(
-        since, until, since_name="since", until_name="until"
-    )
+    common.validate_range_bounds(since, until, since_name="since", until_name="until")
     where: list[str] = []
     params: list[Any] = []
     if tag:
@@ -256,13 +252,19 @@ def _scope_filters(
 
 
 def count_scoped_entries(
-    conn: sqlite3.Connection, *, tag: str | None = None,
-    person_handle: str | None = None, since: str | None = None,
+    conn: sqlite3.Connection,
+    *,
+    tag: str | None = None,
+    person_handle: str | None = None,
+    since: str | None = None,
     until: str | None = None,
 ) -> int:
     """Count a review's matching entries without hydrating the omitted rows."""
     where, params = _scope_filters(
-        tag=tag, person_handle=person_handle, since=since, until=until,
+        tag=tag,
+        person_handle=person_handle,
+        since=since,
+        until=until,
     )
     sql = "SELECT COUNT(*) FROM entries e"
     if where:
@@ -298,9 +300,17 @@ def search_entries(
     unless ``oldest_first`` is set; ordering is applied before the limit.
     """
     rows = _search_entry_rows(
-        conn, query=query, source=source, tag=tag, person_handle=person_handle,
-        since=since, until=until, without_feedback=without_feedback,
-        limit=limit, mode=mode, oldest_first=oldest_first,
+        conn,
+        query=query,
+        source=source,
+        tag=tag,
+        person_handle=person_handle,
+        since=since,
+        until=until,
+        without_feedback=without_feedback,
+        limit=limit,
+        mode=mode,
+        oldest_first=oldest_first,
     )
     return tuple(hydrate_entry(conn, row) for row in rows)
 
@@ -319,8 +329,15 @@ def count_search_entries(
 ) -> int:
     """Count all search matches using the same predicates and FTS fallback."""
     rows = _search_entry_rows(
-        conn, query=query, source=source, tag=tag, person_handle=person_handle,
-        since=since, until=until, without_feedback=without_feedback, mode=mode,
+        conn,
+        query=query,
+        source=source,
+        tag=tag,
+        person_handle=person_handle,
+        since=since,
+        until=until,
+        without_feedback=without_feedback,
+        mode=mode,
         count_only=True,
     )
     return rows[0][0]
@@ -346,16 +363,17 @@ def _search_entry_rows(
     if mode not in {"auto", "like", "fts"}:
         raise DBError("mode must be one of: auto, like, fts")
     where, params = _scope_filters(
-        tag=tag, person_handle=person_handle, since=since, until=until,
+        tag=tag,
+        person_handle=person_handle,
+        since=since,
+        until=until,
     )
     if source is not None:
         where.append("e.source = ? COLLATE NOCASE")
         params.append(source)
     use_fts = False
     if query:
-        fts_row = conn.execute(
-            "SELECT value FROM _meta WHERE key = 'fts5'"
-        ).fetchone()
+        fts_row = conn.execute("SELECT value FROM _meta WHERE key = 'fts5'").fetchone()
         fts_enabled = fts_row is not None and fts_row[0] == "1"
         if mode == "fts" and not fts_enabled:
             raise DBError("FTS5 search is unavailable")
@@ -365,15 +383,10 @@ def _search_entry_rows(
             params.append(query)
         else:
             where.append("e.body LIKE ? ESCAPE '!' COLLATE NOCASE")
-            literal_query = (
-                query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
-            )
+            literal_query = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
             params.append(f"%{literal_query}%")
     if without_feedback:
-        where.append(
-            "NOT EXISTS ("
-            "SELECT 1 FROM feedback f WHERE f.entry_id = e.id)"
-        )
+        where.append("NOT EXISTS (SELECT 1 FROM feedback f WHERE f.entry_id = e.id)")
     sql = "SELECT " + ("COUNT(*)" if count_only else "e.*") + " FROM entries e"
     if use_fts:
         sql += " JOIN entries_fts ON entries_fts.rowid = e.id"
@@ -381,10 +394,7 @@ def _search_entry_rows(
         sql += " WHERE " + " AND ".join(where)
     if not count_only:
         direction = "ASC" if oldest_first else "DESC"
-        sql += (
-            f" ORDER BY COALESCE(e.occurred_at, e.created_at) {direction},"
-            f" e.id {direction}"
-        )
+        sql += f" ORDER BY COALESCE(e.occurred_at, e.created_at) {direction}, e.id {direction}"
         if limit is not None:
             sql += " LIMIT ?"
             params.append(limit)
@@ -411,7 +421,9 @@ def _search_entry_rows(
 
 
 def search_entry_snippets(
-    conn: sqlite3.Connection, query: str, entry_ids: Iterable[int],
+    conn: sqlite3.Connection,
+    query: str,
+    entry_ids: Iterable[int],
 ) -> dict[int, str]:
     """Return FTS excerpts for selected search results, keyed by entry ID.
 
@@ -430,7 +442,7 @@ def search_entry_snippets(
     try:
         # Bound placeholders even when the caller searches without a limit.
         for start in range(0, len(ids), 500):
-            batch = ids[start:start + 500]
+            batch = ids[start : start + 500]
             placeholders = ",".join("?" for _ in batch)
             rows = conn.execute(
                 "SELECT rowid, snippet(entries_fts, 0, '', '', '…', 32)"

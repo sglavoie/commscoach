@@ -33,16 +33,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     lst.set_defaults(func=cmd_tag_list)
 
-    rename = tag_sub.add_parser(
-        "rename", help="Rename a tag, keeping every entry link."
-    )
+    rename = tag_sub.add_parser("rename", help="Rename a tag, keeping every entry link.")
     rename.add_argument("old", metavar="OLD")
     rename.add_argument("new", metavar="NEW")
     rename.set_defaults(func=cmd_tag_rename)
 
-    merge = tag_sub.add_parser(
-        "merge", help="Fold one existing tag into another and drop it."
-    )
+    merge = tag_sub.add_parser("merge", help="Fold one existing tag into another and drop it.")
     merge.add_argument("source", metavar="SOURCE")
     merge.add_argument("dest", metavar="DEST")
     merge.set_defaults(func=cmd_tag_merge)
@@ -93,9 +89,7 @@ def cmd_tag_rename(args: argparse.Namespace) -> int:
 
 def cmd_tag_merge(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
-        if not confirm(
-            f"Merge tag '{args.source}' into '{args.dest}'?", assume_yes=args.yes
-        ):
+        if not confirm(f"Merge tag '{args.source}' into '{args.dest}'?", assume_yes=args.yes):
             raise db.DBError("aborted")
         tag = db.merge_tags(conn, args.source, args.dest)
     _emit_tag(args, tag, human_line=f"merged tag '{args.source}' into '{tag.name}'")
@@ -109,9 +103,7 @@ def cmd_tag_rm(args: argparse.Namespace) -> int:
         unlinked = db.delete_tag(conn, args.name)
     name = normalize_tag(args.name)
     if args.json:
-        print_json(
-            {"deleted": True, "name": name, "entries_unlinked": unlinked}
-        )
+        print_json({"deleted": True, "name": name, "entries_unlinked": unlinked})
     else:
         noun = "entry" if unlinked == 1 else "entries"
         print(f"removed tag '{name}' from {unlinked} {noun}")

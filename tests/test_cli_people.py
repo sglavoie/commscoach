@@ -18,13 +18,19 @@ class PersonAddTests(PeopleTestBase):
         self._seed_person("alice", name="Alice Smith")
         self._seed_person("bob")
         with closing(db.connect(self.db_path)) as conn:
-            db.create_entry(conn, "Earlier", people=["alice", "bob"],
-                            occurred_at="2026-01-01T00:00:00+00:00")
-            with mock.patch("commscoach.db.common.utcnow_iso", return_value="2026-02-01T00:00:00+00:00"):
+            db.create_entry(
+                conn, "Earlier", people=["alice", "bob"], occurred_at="2026-01-01T00:00:00+00:00"
+            )
+            with mock.patch(
+                "commscoach.db.common.utcnow_iso", return_value="2026-02-01T00:00:00+00:00"
+            ):
                 db.create_entry(conn, "Latest", people=["alice"])
-            with mock.patch("commscoach.db.common.utcnow_iso", return_value="2026-03-01T00:00:00+00:00"):
-                db.create_entry(conn, "Backfilled", people=["alice"],
-                                occurred_at="2025-01-01T00:00:00+00:00")
+            with mock.patch(
+                "commscoach.db.common.utcnow_iso", return_value="2026-03-01T00:00:00+00:00"
+            ):
+                db.create_entry(
+                    conn, "Backfilled", people=["alice"], occurred_at="2025-01-01T00:00:00+00:00"
+                )
             for _ in range(2):
                 db.create_goal(conn, "Active", person_handle="alice")
             for dropped in (False, True):
@@ -35,13 +41,22 @@ class PersonAddTests(PeopleTestBase):
         self.assertEqual(rc, 0, err)
         rows = json.loads(out)
         self.assertEqual([row["handle"] for row in rows], ["me", "alice", "bob"])
-        self.assertEqual(rows[0]["activity"], {
-            "last_logged_interaction": None, "interaction_count": 0, "active_goal_count": 0,
-        })
-        self.assertEqual(rows[1]["activity"], {
-            "last_logged_interaction": "2026-02-01T00:00:00+00:00",
-            "interaction_count": 3, "active_goal_count": 2,
-        })
+        self.assertEqual(
+            rows[0]["activity"],
+            {
+                "last_logged_interaction": None,
+                "interaction_count": 0,
+                "active_goal_count": 0,
+            },
+        )
+        self.assertEqual(
+            rows[1]["activity"],
+            {
+                "last_logged_interaction": "2026-02-01T00:00:00+00:00",
+                "interaction_count": 3,
+                "active_goal_count": 2,
+            },
+        )
         self.assertEqual(rows[2]["activity"]["interaction_count"], 1)
         rc, out, err = self._run("person", "list", "--query", "SMITH", "--with-activity")
         self.assertEqual(rc, 0, err)
@@ -49,7 +64,9 @@ class PersonAddTests(PeopleTestBase):
         self.assertIn("interactions: 3 · active goals: 2", out)
         self.assertNotIn("@bob", out)
         self.assertNotIn("activity", json.loads(self._run("person", "list", "--json")[1])[0])
-        self.assertEqual(self._run("person", "list", "--query", "missing", "--with-activity")[1], "(no people)\n")
+        self.assertEqual(
+            self._run("person", "list", "--query", "missing", "--with-activity")[1], "(no people)\n"
+        )
 
     def test_list_query_matches_names_handles_and_literal_characters(self) -> None:
         self._seed_person("jdoe", name="John Doe")
@@ -58,7 +75,9 @@ class PersonAddTests(PeopleTestBase):
         self._seed_person("literal_%!", name=None)
         rc, out, err = self._run("person", "list", "--query", "JOHN", "--json")
         self.assertEqual(rc, 0, err)
-        self.assertEqual([p["handle"] for p in json.loads(out)], ["john_self", "jdoe", "john_other"])
+        self.assertEqual(
+            [p["handle"] for p in json.loads(out)], ["john_self", "jdoe", "john_other"]
+        )
         self.assertIn("@literal_%!", self._run("person", "list", "--query", "_%!")[1])
         self.assertEqual(self._run("person", "list", "--query", "missing")[1], "(no people)\n")
         self.assertEqual(self._run("person", "list", "--query", " ")[0], 1)
@@ -67,15 +86,32 @@ class PersonAddTests(PeopleTestBase):
         person = self._seed_person("alice")
         with closing(db.connect(self.db_path)) as conn:
             db.set_person_note(conn, person.id, "Complete private notes")
-            db.create_goal(conn, "Experiment", detail="Full experiment detail", person_handle="alice")
+            db.create_goal(
+                conn, "Experiment", detail="Full experiment detail", person_handle="alice"
+            )
             db.create_goal(conn, "General experiment", detail="General detail")
             entry = db.create_entry(conn, "Conversation", people=["alice"])
-            feedback = db.create_feedback(conn, entry.id, "# Heading\n\nBrief advice " + "x" * 300 + " hidden ending")
-            review = db.create_review(conn, "Brief review " + "y" * 300 + " hidden review ending", [entry.id], scope_kind="person", scope_person_handle="alice")
+            feedback = db.create_feedback(
+                conn, entry.id, "# Heading\n\nBrief advice " + "x" * 300 + " hidden ending"
+            )
+            review = db.create_review(
+                conn,
+                "Brief review " + "y" * 300 + " hidden review ending",
+                [entry.id],
+                scope_kind="person",
+                scope_person_handle="alice",
+            )
         rc, out, err = self._run("person", "prep", "alice", "--brief", "--include-general-goals")
         self.assertEqual(rc, 0, err)
-        for text in ("Complete private notes", "Full experiment detail", "General detail",
-                     f"Feedback [{feedback.id}]", f"Review [{review.id}]", "Brief advice", "Brief review"):
+        for text in (
+            "Complete private notes",
+            "Full experiment detail",
+            "General detail",
+            f"Feedback [{feedback.id}]",
+            f"Review [{review.id}]",
+            "Brief advice",
+            "Brief review",
+        ):
             self.assertIn(text, out)
         self.assertNotIn("hidden ending", out)
         self.assertNotIn("hidden review ending", out)
@@ -96,7 +132,9 @@ class PersonAddTests(PeopleTestBase):
             db.set_person_note(conn, person.id, "# Notes\n\n" + "Context " * 60 + "NOTES_END")
             for index in range(7):
                 db.create_goal(
-                    conn, f"Experiment {index}", detail="Practice " * 60 + "DETAIL_END",
+                    conn,
+                    f"Experiment {index}",
+                    detail="Practice " * 60 + "DETAIL_END",
                     person_handle="alice" if index % 2 else None,
                     now=f"2026-10-0{index + 1}T00:00:00+00:00",
                 )
@@ -121,7 +159,9 @@ class PersonAddTests(PeopleTestBase):
             self.assertIn(text, full)
         recovered = []
         for line in out.splitlines():
-            if line.strip().startswith(("Full notes:", "Full interaction:", "Full goal:", "All goals:")):
+            if line.strip().startswith(
+                ("Full notes:", "Full interaction:", "Full goal:", "All goals:")
+            ):
                 argv = shlex.split(line.split(": ", 1)[1])
                 self.assertEqual(argv[:3], ["commscoach", "--db", str(self.db_path)])
                 rc, detail, err = self._run(*argv[3:])
@@ -141,8 +181,11 @@ class PersonAddTests(PeopleTestBase):
             db.create_feedback(conn, coached.id, "Advice")
         rc, out, err = self._run("person", "prep", "alice", "--brief")
         self.assertEqual(rc, 0, err)
-        commands = [shlex.split(line.split(": ", 1)[1]) for line in out.splitlines()
-                    if line.strip().startswith("Full interaction:")]
+        commands = [
+            shlex.split(line.split(": ", 1)[1])
+            for line in out.splitlines()
+            if line.strip().startswith("Full interaction:")
+        ]
         self.assertEqual(len(commands), 2)
         self.assertEqual({argv[-2] for argv in commands}, {str(uncoached.id), str(coached.id)})
         for argv in commands:
@@ -158,7 +201,9 @@ class PersonAddTests(PeopleTestBase):
 
     def test_brief_prep_empty_sections_and_zero_limits(self) -> None:
         self._seed_person("alice")
-        rc, out, err = self._run("person", "prep", "alice", "--brief", "--recent", "0", "--reviews", "0")
+        rc, out, err = self._run(
+            "person", "prep", "alice", "--brief", "--recent", "0", "--reviews", "0"
+        )
         self.assertEqual(rc, 0, err)
         self.assertIn("(no reviews)", out)
         self.assertIn("(no goals)", out)
@@ -179,9 +224,7 @@ class PersonAddTests(PeopleTestBase):
         self.assertFalse(person.is_self)
 
     def test_add_with_name_and_self(self) -> None:
-        rc, out, _ = self._run(
-            "person", "add", "me", "--name", "Sebastien", "--self"
-        )
+        rc, out, _ = self._run("person", "add", "me", "--name", "Sebastien", "--self")
         self.assertEqual(rc, 0)
         self.assertIn("(self)", out)
         self.assertIn("Sebastien", out)
@@ -216,9 +259,7 @@ class PersonAddTests(PeopleTestBase):
         self.assertIn("non-empty", err)
 
     def test_add_json_output(self) -> None:
-        rc, out, _ = self._run(
-            "--json", "person", "add", "alice", "--name", "Alice"
-        )
+        rc, out, _ = self._run("--json", "person", "add", "alice", "--name", "Alice")
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual(payload["handle"], "alice")
@@ -247,7 +288,16 @@ class PersonPrepTests(PeopleTestBase):
         rc, out, err = self._run("person", "show", "alice", "--recent", "0")
         self.assertEqual(rc, 0, err)
         self.assertNotIn("Practice in three meetings.", out)
-        args = ("person", "prep", "ALICE", "--include-general-goals", "--recent", "0", "--reviews", "0")
+        args = (
+            "person",
+            "prep",
+            "ALICE",
+            "--include-general-goals",
+            "--recent",
+            "0",
+            "--reviews",
+            "0",
+        )
         rc, out, err = self._run(*args)
         self.assertEqual(rc, 0, err)
         self.assertIn("Pause first", out)
@@ -269,14 +319,19 @@ class PersonPrepTests(PeopleTestBase):
             db.set_person_note(conn, alice.id, "Prefers short updates")
             for day in range(1, 7):
                 entry = db.create_entry(
-                    conn, f"Conversation {day}", people=("alice",),
+                    conn,
+                    f"Conversation {day}",
+                    people=("alice",),
                     occurred_at=f"2026-01-0{day}",
                 )
                 db.create_feedback(conn, entry.id, f"Advice {day}")
             for number in range(3):
                 db.create_review(
-                    conn, f"Review {number}", (entry.id,),
-                    scope_kind="person", scope_person_handle="alice",
+                    conn,
+                    f"Review {number}",
+                    (entry.id,),
+                    scope_kind="person",
+                    scope_person_handle="alice",
                 )
             goal = db.create_goal(conn, "Ask a question", person_handle="alice")
             closed = db.create_goal(conn, "Completed", person_handle="alice")
@@ -287,8 +342,15 @@ class PersonPrepTests(PeopleTestBase):
         self.assertEqual(rc, 0, err)
         payload = json.loads(out)
         rc, full, err = self._run(
-            "person", "show", "alice", "--recent", "5", "--with-feedback",
-            "--reviews", "2", "--json",
+            "person",
+            "show",
+            "alice",
+            "--recent",
+            "5",
+            "--with-feedback",
+            "--reviews",
+            "2",
+            "--json",
         )
         self.assertEqual(rc, 0, err)
         self.assertEqual(payload, json.loads(full))
@@ -313,13 +375,23 @@ class PersonPrepTests(PeopleTestBase):
         with closing(db.connect(self.db_path)) as conn:
             entry = db.create_entry(conn, "Conversation", people=("alice",))
             db.create_review(
-                conn, "Advice", (entry.id,),
-                scope_kind="person", scope_person_handle="alice",
+                conn,
+                "Advice",
+                (entry.id,),
+                scope_kind="person",
+                scope_person_handle="alice",
             )
             goal = db.create_goal(conn, "Practice", person_handle="alice")
         for limit in ("0", "1"):
             rc, out, err = self._run(
-                "person", "prep", "alice", "--recent", limit, "--reviews", limit, "--json",
+                "person",
+                "prep",
+                "alice",
+                "--recent",
+                limit,
+                "--reviews",
+                limit,
+                "--json",
             )
             self.assertEqual(rc, 0, err)
             payload = json.loads(out)
@@ -356,9 +428,7 @@ class PersonSelfTests(PeopleTestBase):
         with closing(db.connect(self.db_path)) as conn:
             old_after = db.get_person(conn, old.id)
             new_after = db.get_person(conn, new.id)
-            count = conn.execute(
-                "SELECT COUNT(*) FROM people WHERE is_self = 1"
-            ).fetchone()[0]
+            count = conn.execute("SELECT COUNT(*) FROM people WHERE is_self = 1").fetchone()[0]
         assert old_after is not None and new_after is not None
         self.assertFalse(old_after.is_self)
         self.assertTrue(new_after.is_self)
@@ -374,9 +444,7 @@ class PersonSelfTests(PeopleTestBase):
         rc, _, _ = self._run("person", "self", "me")
         self.assertEqual(rc, 0)
         with closing(db.connect(self.db_path)) as conn:
-            count = conn.execute(
-                "SELECT COUNT(*) FROM people WHERE is_self = 1"
-            ).fetchone()[0]
+            count = conn.execute("SELECT COUNT(*) FROM people WHERE is_self = 1").fetchone()[0]
         self.assertEqual(count, 1)
 
     def test_self_json_output(self) -> None:

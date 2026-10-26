@@ -62,9 +62,7 @@ def resolve_db_path(cli_db: str | os.PathLike[str] | None = None) -> Path:
     resolved_default = default_db_path()
     if not resolved_default.exists() and LEGACY_ICLOUD_DB_PATH.exists():
         mkdir_command = shlex.join(["mkdir", "-p", str(resolved_default.parent)])
-        move_command = shlex.join(
-            ["mv", str(LEGACY_ICLOUD_DB_PATH), str(resolved_default)]
-        )
+        move_command = shlex.join(["mv", str(LEGACY_ICLOUD_DB_PATH), str(resolved_default)])
         raise LegacyDatabaseMigrationRequired(
             f"legacy iCloud database found at {LEGACY_ICLOUD_DB_PATH}; "
             "commscoach will not open it implicitly. Move it to the new default "

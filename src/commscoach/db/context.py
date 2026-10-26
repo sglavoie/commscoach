@@ -45,8 +45,7 @@ _AXIS_ARG_NAMES = {
     "scope_until": "until",
 }
 _SCOPE_ARGS = {
-    kind: tuple(_AXIS_ARG_NAMES[axis] for axis in axes)
-    for kind, axes in _SCOPE_AXES.items()
+    kind: tuple(_AXIS_ARG_NAMES[axis] for axis in axes) for kind, axes in _SCOPE_AXES.items()
 }
 
 
@@ -179,29 +178,30 @@ def get_review_context(
     else:
         latest_reviews = list_reviews(conn, limit=prior_review_limit)
     self_note = get_person_note(conn, self_person.id)
-    scope_person_note = (
-        get_person_note(conn, scope_person.id) if scope_person is not None else None
-    )
+    scope_person_note = get_person_note(conn, scope_person.id) if scope_person is not None else None
     return ReviewContext(
         self_person=self_person,
         self_notes=self_note.body if self_note is not None else None,
         scope_kind=scope_kind,
         scope_limit=limit,
         scope_person=scope_person,
-        scope_person_notes=(
-            scope_person_note.body if scope_person_note is not None else None
-        ),
+        scope_person_notes=(scope_person_note.body if scope_person_note is not None else None),
         scope_tag=scope_tag,
         scope_since=since,
         scope_until=until,
         entries=entry_contexts,
         prior_reviews=tuple(reversed(latest_reviews)),
         goals=list_goals(
-            conn, limit=goal_limit,
+            conn,
+            limit=goal_limit,
             prioritize_person_ids=(scope_person.id,) if scope_person else (),
         ),
         total_entry_count=count_scoped_entries(
-            conn, tag=scope_tag, person_handle=person_handle, since=since, until=until,
+            conn,
+            tag=scope_tag,
+            person_handle=person_handle,
+            since=since,
+            until=until,
         ),
         total_goal_count=conn.execute(
             "SELECT COUNT(*) FROM goals WHERE status = 'active'"
@@ -266,7 +266,9 @@ def get_entry_context(
                 notes=note.body if note is not None else None,
                 history=history,
                 total_history_count=count_entries_with_person(
-                    conn, person.id, exclude_entry_id=entry_id,
+                    conn,
+                    person.id,
+                    exclude_entry_id=entry_id,
                     before=entry.occurred_at or entry.created_at,
                 ),
                 history_limit=history_limit,
@@ -282,7 +284,8 @@ def get_entry_context(
         people=tuple(people),
         prior_feedback=prior_feedback,
         goals=list_goals(
-            conn, limit=goal_limit,
+            conn,
+            limit=goal_limit,
             prioritize_person_ids=tuple(p.id for p in non_self_people),
         ),
         prior_reviews=tuple(reversed(latest_reviews)),

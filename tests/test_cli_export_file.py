@@ -25,7 +25,11 @@ class ExportFileTests(ExportTestBase):
             for format_name in ("markdown", "json"):
                 with self.subTest(destination=destination, format=format_name):
                     rc, out, err = self._run(
-                        "export", "--format", format_name, "--out", str(destination),
+                        "export",
+                        "--format",
+                        format_name,
+                        "--out",
+                        str(destination),
                     )
                     self.assertEqual(rc, 1)
                     self.assertEqual(out, "")
@@ -45,8 +49,13 @@ class ExportFileTests(ExportTestBase):
         destination = self.tmpdir / "existing.md"
         destination.write_text("previous export", encoding="utf-8")
         for operation in ("fsync", "replace"):
-            with self.subTest(operation=operation), mock.patch.object(
-                export.os, operation, side_effect=OSError("disk failure"),
+            with (
+                self.subTest(operation=operation),
+                mock.patch.object(
+                    export.os,
+                    operation,
+                    side_effect=OSError("disk failure"),
+                ),
             ):
                 rc, out, err = self._run("export", "--out", str(destination))
                 self.assertEqual(rc, 1)

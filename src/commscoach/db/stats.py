@@ -135,22 +135,11 @@ def get_stats(
     if until is not None:
         anchor = min(anchor, _local_day(date_bound_timestamp(until, name="until", upper=True)))
     since = date_bound_timestamp(since, name="since") if since is not None else None
-    until = (
-        date_bound_timestamp(until, name="until", upper=True)
-        if until is not None else None
-    )
-    entry_where, entry_params = _where_window(
-        "COALESCE(e.occurred_at, e.created_at)", since, until
-    )
-    review_where, review_params = _where_window(
-        "r.created_at", since, until
-    )
-    open_goal_where, open_goal_params = _where_window(
-        "g.created_at", since, until
-    )
-    closed_goal_where, closed_goal_params = _where_window(
-        "g.closed_at", since, until
-    )
+    until = date_bound_timestamp(until, name="until", upper=True) if until is not None else None
+    entry_where, entry_params = _where_window("COALESCE(e.occurred_at, e.created_at)", since, until)
+    review_where, review_params = _where_window("r.created_at", since, until)
+    open_goal_where, open_goal_params = _where_window("g.created_at", since, until)
+    closed_goal_where, closed_goal_params = _where_window("g.closed_at", since, until)
 
     entry_rows = conn.execute(
         "SELECT e.id, COALESCE(e.occurred_at, e.created_at) AS effective_at "
@@ -166,8 +155,7 @@ def get_stats(
 
     feedback_count = _count(
         conn,
-        "SELECT COUNT(*) FROM feedback f JOIN entries e ON e.id = f.entry_id "
-        f"WHERE {entry_where}",
+        f"SELECT COUNT(*) FROM feedback f JOIN entries e ON e.id = f.entry_id WHERE {entry_where}",
         entry_params,
     )
     entries_with_feedback = _count(
@@ -203,14 +191,12 @@ def get_stats(
     ).fetchone()
     open_goal_count = _count(
         conn,
-        "SELECT COUNT(*) FROM goals g WHERE g.status = 'active' "
-        f"AND {open_goal_where}",
+        f"SELECT COUNT(*) FROM goals g WHERE g.status = 'active' AND {open_goal_where}",
         open_goal_params,
     )
     closed_goal_count = _count(
         conn,
-        "SELECT COUNT(*) FROM goals g WHERE g.status != 'active' "
-        f"AND {closed_goal_where}",
+        f"SELECT COUNT(*) FROM goals g WHERE g.status != 'active' AND {closed_goal_where}",
         closed_goal_params,
     )
 

@@ -94,9 +94,7 @@ class ExportStdoutTests(ExportTestBase):
         self.assertIn(f"### Review {review.id}", out)
         self.assertIn(f"- **Created**: {review.created_at}", out)
         self.assertIn("- **Scope**: latest (context limit 2)", out)
-        self.assertIn(
-            f"- **Covered entry IDs**: {second.id}, {first.id}", out
-        )
+        self.assertIn(f"- **Covered entry IDs**: {second.id}, {first.id}", out)
         self.assertIn("weekly synthesis\nnext step", out)
         self.assertLess(out.find("## Reviews"), out.find("## Entry "))
 
@@ -119,9 +117,7 @@ class ExportStdoutTests(ExportTestBase):
         self.assertEqual(rc, 0)
         self.assertLess(out.find("## Reviews"), out.find("## Goals"))
         self.assertLess(out.find("## Goals"), out.find("## Entry "))
-        self.assertLess(
-            out.find(f"### Goal {active.id}"), out.find(f"### Goal {closed.id}")
-        )
+        self.assertLess(out.find(f"### Goal {active.id}"), out.find(f"### Goal {closed.id}"))
         self.assertIn("- **Person**: @alex", out)
         self.assertIn(f"- **Review**: {review.id}", out)
         self.assertIn("#### Outcome", out)
@@ -201,9 +197,7 @@ class ExportReviewScopeTests(ExportTestBase):
             scope_person_handle="alice",
         )
         _, out, _ = self._run("export")
-        self.assertEqual(
-            self._scope_line(out), "- **Scope**: person @alice (context limit 20)"
-        )
+        self.assertEqual(self._scope_line(out), "- **Scope**: person @alice (context limit 20)")
 
     def test_person_scope_renders_the_stored_handle_casing(self) -> None:
         self._seed_person("Alice")
@@ -271,9 +265,7 @@ class ExportReviewScopeTests(ExportTestBase):
             scope_until="2026-09-01",
         )
         _, out, _ = self._run("export")
-        self.assertEqual(
-            self._scope_line(out), "- **Scope**: range 2026-07-01..2026-09-01"
-        )
+        self.assertEqual(self._scope_line(out), "- **Scope**: range 2026-07-01..2026-09-01")
 
     def test_range_scope_leaves_an_open_bound_empty(self) -> None:
         entry = self._seed_entry("note")

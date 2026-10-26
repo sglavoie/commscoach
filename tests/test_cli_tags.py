@@ -31,9 +31,7 @@ class TagListTests(EntryTestBase):
         rc, out, _ = self._run("tag", "list")
 
         self.assertEqual(rc, 0)
-        self.assertEqual(
-            out.splitlines(), ["conflict  2", "alpha  1", "zeta  1"]
-        )
+        self.assertEqual(out.splitlines(), ["conflict  2", "alpha  1", "zeta  1"])
 
     def test_list_empty_prints_placeholder(self) -> None:
         rc, out, _ = self._run("tag", "list")
@@ -48,9 +46,7 @@ class TagListTests(EntryTestBase):
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual(len(payload), 1)
-        self.assertEqual(
-            set(payload[0]), {"id", "name", "entry_count"}
-        )
+        self.assertEqual(set(payload[0]), {"id", "name", "entry_count"})
         self.assertEqual(payload[0]["name"], "conflict")
         self.assertEqual(payload[0]["entry_count"], 1)
 
@@ -128,9 +124,7 @@ class TagMergeTests(EntryTestBase):
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual([t.name for t in db.list_tags(conn)], ["conflict"])
             self.assertEqual(db.get_entry(conn, both.id).tags, ("conflict",))
-            self.assertEqual(
-                db.get_entry(conn, only_source.id).tags, ("conflict",)
-            )
+            self.assertEqual(db.get_entry(conn, only_source.id).tags, ("conflict",))
 
     def test_merge_confirm_yes_merges(self) -> None:
         self._seed_entry("a", tags=("conflcit",))
@@ -158,9 +152,7 @@ class TagMergeTests(EntryTestBase):
         self._seed_entry("a", tags=("conflcit",))
         self._seed_entry("b", tags=("conflict",))
 
-        rc, out, _ = self._run(
-            "--yes", "--json", "tag", "merge", "conflcit", "conflict"
-        )
+        rc, out, _ = self._run("--yes", "--json", "tag", "merge", "conflcit", "conflict")
 
         self.assertEqual(rc, 0)
         payload = json.loads(out)

@@ -18,16 +18,26 @@ class FeedbackNavigationTests(FeedbackTestBase):
         with closing(db.connect(self.db_path)) as conn:
             db.create_person(conn, "alice")
             entry = db.create_entry(
-                conn, "Original conversation", people=["alice"], tags=["meeting"],
-                source="email", occurred_at="2026-01-02T15:00:00+00:00",
+                conn,
+                "Original conversation",
+                people=["alice"],
+                tags=["meeting"],
+                source="email",
+                occurred_at="2026-01-02T15:00:00+00:00",
             )
             note = db.create_feedback(conn, entry.id, "Selected advice")
             db.create_feedback(conn, entry.id, "Other advice")
             db.update_entry(conn, entry.id, body="Corrected conversation\nFull second line")
         rc, out, err = self._run("feedback", "show", str(note.id), "--with-entry")
         self.assertEqual(rc, 0, err)
-        for text in ("Corrected conversation\nFull second line", "alice", "meeting",
-                     "email", "2026-01-02", "Selected advice"):
+        for text in (
+            "Corrected conversation\nFull second line",
+            "alice",
+            "meeting",
+            "email",
+            "2026-01-02",
+            "Selected advice",
+        ):
             self.assertIn(text, out)
         self.assertLess(out.index("Corrected conversation"), out.index("Selected advice"))
         self.assertNotIn("Other advice", out)
@@ -68,15 +78,15 @@ class FeedbackNavigationTests(FeedbackTestBase):
                 rc, out, err = self._run(*flags, "--limit", str(limit), "--json")
                 self.assertEqual(rc, 0, err)
                 self.assertEqual(len(json.loads(out)), min(limit, 3))
-        self.assertEqual(self._run("feedback", "search", "--query", "missing")[1], "(no feedback)\n")
+        self.assertEqual(
+            self._run("feedback", "search", "--query", "missing")[1], "(no feedback)\n"
+        )
 
 
 class FeedbackAddTests(FeedbackTestBase):
     def test_add_creates_feedback(self) -> None:
         entry = self._seed_entry()
-        rc, out, _ = self._run(
-            "feedback", "add", str(entry.id), "good listening"
-        )
+        rc, out, _ = self._run("feedback", "add", str(entry.id), "good listening")
         self.assertEqual(rc, 0)
         self.assertIn(f"created feedback 1", out)
         self.assertIn("good listening", out)
@@ -86,9 +96,7 @@ class FeedbackAddTests(FeedbackTestBase):
         self.assertEqual(items[0].body, "good listening")
 
     def test_add_unknown_entry_exits_one(self) -> None:
-        rc, _, err = self._run(
-            "feedback", "add", "9999", "body"
-        )
+        rc, _, err = self._run("feedback", "add", "9999", "body")
         self.assertEqual(rc, 1)
         self.assertIn("9999", err)
 
@@ -103,9 +111,7 @@ class FeedbackAddTests(FeedbackTestBase):
 
     def test_add_empty_body_exits_one(self) -> None:
         entry = self._seed_entry()
-        rc, _, err = self._run(
-            "feedback", "add", str(entry.id), "   "
-        )
+        rc, _, err = self._run("feedback", "add", str(entry.id), "   ")
         self.assertEqual(rc, 1)
         self.assertIn("non-empty", err)
 
@@ -127,9 +133,7 @@ class FeedbackAddTests(FeedbackTestBase):
         entry = self._seed_entry()
         body_file = self.tmpdir / "feedback.txt"
         body_file.write_text("from file feedback", encoding="utf-8")
-        rc, _, _ = self._run(
-            "feedback", "add", str(entry.id), f"@{body_file}"
-        )
+        rc, _, _ = self._run("feedback", "add", str(entry.id), f"@{body_file}")
         self.assertEqual(rc, 0)
         with closing(db.connect(self.db_path)) as conn:
             items = db.list_feedback(conn, entry.id)
@@ -137,17 +141,13 @@ class FeedbackAddTests(FeedbackTestBase):
 
     def test_add_body_from_missing_file_exits_one(self) -> None:
         entry = self._seed_entry()
-        rc, _, err = self._run(
-            "feedback", "add", str(entry.id), "@/no/such/file.txt"
-        )
+        rc, _, err = self._run("feedback", "add", str(entry.id), "@/no/such/file.txt")
         self.assertEqual(rc, 1)
         self.assertIn("cannot read body", err)
 
     def test_add_json_output(self) -> None:
         entry = self._seed_entry()
-        rc, out, _ = self._run(
-            "--json", "feedback", "add", str(entry.id), "json body"
-        )
+        rc, out, _ = self._run("--json", "feedback", "add", str(entry.id), "json body")
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual(payload["id"], 1)
@@ -253,8 +253,15 @@ class FeedbackSearchTests(FeedbackTestBase):
                 conn.execute("UPDATE feedback SET created_at = '2026-01-01T00:00:00+00:00'")
         for limit, expected in ((0, []), (1, [second.id]), (20, [second.id, first.id])):
             rc, out, err = self._run(
-                "feedback", "search", "--query", "lead with the ask", "--person", "ALICE",
-                "--limit", str(limit), "--json",
+                "feedback",
+                "search",
+                "--query",
+                "lead with the ask",
+                "--person",
+                "ALICE",
+                "--limit",
+                str(limit),
+                "--json",
             )
             self.assertEqual(rc, 0, err)
             self.assertEqual([f["id"] for f in json.loads(out)], expected)

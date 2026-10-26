@@ -22,7 +22,6 @@ from .serializers import (
 )
 
 
-
 def review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
     return {
         "self": {**person_to_dict(context.self_person), "notes": context.self_notes},
@@ -55,9 +54,7 @@ def review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
             }
             for item in context.entries
         ],
-        "prior_reviews": [
-            review_to_dict(review) for review in context.prior_reviews
-        ],
+        "prior_reviews": [review_to_dict(review) for review in context.prior_reviews],
         "goals": [goal_to_dict(goal) for goal in context.goals],
         "goal_summary": {
             "limit": context.goal_limit,
@@ -99,7 +96,8 @@ def format_review_short(review: db.Review, *, query: str | None = None) -> str:
     if entry_ids:
         parts.append(f"entries:{entry_ids}")
     parts.append(
-        search_excerpt(review.body, query) if query is not None
+        search_excerpt(review.body, query)
+        if query is not None
         else truncate(first_prose_line(review.body))
     )
     return " ".join(parts)
@@ -120,7 +118,10 @@ def emit_review(
 
 
 def emit_reviews(
-    args: argparse.Namespace, reviews: tuple[db.Review, ...], *, query: str | None = None,
+    args: argparse.Namespace,
+    reviews: tuple[db.Review, ...],
+    *,
+    query: str | None = None,
 ) -> None:
     if args.json:
         print_json([review_to_dict(review) for review in reviews])

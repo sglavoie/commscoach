@@ -21,25 +21,43 @@ class ReviewContextTests(DBTestCase):
         for handle in ("alice", "bob", "carol"):
             db.create_person(self.conn, handle)
         entry = db.create_entry(self.conn, "Conversation", people=["alice", "bob", "me"])
-        alice = db.create_goal(self.conn, "Alice", person_handle="alice", now="2026-01-01T00:00:00+00:00")
+        alice = db.create_goal(
+            self.conn, "Alice", person_handle="alice", now="2026-01-01T00:00:00+00:00"
+        )
         bob = db.create_goal(self.conn, "Bob", person_handle="bob", now="2026-01-01T00:00:00+00:00")
         general = db.create_goal(self.conn, "General", now="2026-02-01T00:00:00+00:00")
-        carol = db.create_goal(self.conn, "Carol", person_handle="carol", now="2026-03-01T00:00:00+00:00")
+        carol = db.create_goal(
+            self.conn, "Carol", person_handle="carol", now="2026-03-01T00:00:00+00:00"
+        )
         closed = db.create_goal(self.conn, "Closed Alice", person_handle="alice")
         db.close_goal(self.conn, closed.id)
         for limit in (0, 1, 2, 4, 10):
             with self.subTest(limit=limit):
                 entry_context = db.get_entry_context(self.conn, entry.id, goal_limit=limit)
                 review_context = db.get_review_context(
-                    self.conn, scope_kind="person", person_handle="ALICE", goal_limit=limit,
+                    self.conn,
+                    scope_kind="person",
+                    person_handle="ALICE",
+                    goal_limit=limit,
                 )
-                self.assertEqual([g.id for g in entry_context.goals], [bob.id, alice.id, general.id, carol.id][:limit])
-                self.assertEqual([g.id for g in review_context.goals], [alice.id, general.id, carol.id, bob.id][:limit])
+                self.assertEqual(
+                    [g.id for g in entry_context.goals],
+                    [bob.id, alice.id, general.id, carol.id][:limit],
+                )
+                self.assertEqual(
+                    [g.id for g in review_context.goals],
+                    [alice.id, general.id, carol.id, bob.id][:limit],
+                )
                 self.assertEqual(entry_context.total_goal_count, 4)
                 self.assertEqual(review_context.total_goal_count, 4)
-        for scope in ({}, {"scope_kind": "tag", "tag": "missing"},
-                      {"scope_kind": "range", "since": "2026-01-01"}):
-            self.assertEqual(db.get_review_context(self.conn, goal_limit=1, **scope).goals, (carol,))
+        for scope in (
+            {},
+            {"scope_kind": "tag", "tag": "missing"},
+            {"scope_kind": "range", "since": "2026-01-01"},
+        ):
+            self.assertEqual(
+                db.get_review_context(self.conn, goal_limit=1, **scope).goals, (carol,)
+            )
         alone = db.create_entry(self.conn, "Solo", people=["me"])
         self.assertEqual(db.get_entry_context(self.conn, alone.id, goal_limit=1).goals, (carol,))
 
@@ -48,9 +66,7 @@ class ReviewContextTests(DBTestCase):
         self.me = db.create_person(self.conn, "me", is_self=True)
 
     def test_review_context_returns_latest_entries_oldest_first_with_feedback(self) -> None:
-        with patch_timestamps(
-            "e0", "e1", "e2", "e2", "f0", "f1", "f2", "r0", "r1", "r2", "r3"
-        ):
+        with patch_timestamps("e0", "e1", "e2", "e2", "f0", "f1", "f2", "r0", "r1", "r2", "r3"):
             first = db.create_entry(self.conn, "first")
             second = db.create_entry(self.conn, "second")
             third = db.create_entry(self.conn, "third")
@@ -74,10 +90,7 @@ class ReviewContextTests(DBTestCase):
             [second.id, third.id, fourth.id],
         )
         self.assertTrue(
-            all(
-                isinstance(entry_ctx, ReviewEntryContext)
-                for entry_ctx in context.entries
-            )
+            all(isinstance(entry_ctx, ReviewEntryContext) for entry_ctx in context.entries)
         )
         feedback_by_entry = {
             entry_ctx.entry.id: [feedback.body for feedback in entry_ctx.feedback]
@@ -228,12 +241,8 @@ class EntryContextTests(DBTestCase):
             [item.entry.id for item in alice.history],
             [alice_recent.id, alice_newest.id],
         )
-        self.assertTrue(
-            all(isinstance(item, PersonHistoryItem) for item in alice.history)
-        )
-        self.assertEqual(
-            [item.id for item in alice.history[0].feedback], [feedback.id]
-        )
+        self.assertTrue(all(isinstance(item, PersonHistoryItem) for item in alice.history))
+        self.assertEqual([item.id for item in alice.history[0].feedback], [feedback.id])
         history_ids = {item.entry.id for item in alice.history}
         self.assertNotIn(current.id, history_ids)
         self.assertNotIn(alice_old.id, history_ids)
@@ -254,18 +263,24 @@ class EntryContextTests(DBTestCase):
 
     def test_history_uses_occurrence_time_before_limiting_and_excludes_later_entries(self) -> None:
         current = db.create_entry(
-            self.conn, "backdated target", people=["alice"],
+            self.conn,
+            "backdated target",
+            people=["alice"],
             occurred_at="2026-01-05T09:00:00Z",
         )
         db.create_entry(self.conn, "later, no occurrence time", people=["alice"])
         for day in ("01", "05", "06"):
             db.create_entry(
-                self.conn, f"day {day}", people=["alice"],
+                self.conn,
+                f"day {day}",
+                people=["alice"],
                 occurred_at=f"2026-01-{day}T09:00:00Z",
             )
         # Logged after the target, but actually happened before it.
         prior = db.create_entry(
-            self.conn, "earlier interaction", people=["alice"],
+            self.conn,
+            "earlier interaction",
+            people=["alice"],
             occurred_at="2026-01-04T10:00:00+01:00",
         )
         context = db.get_entry_context(self.conn, current.id, history_limit=1)
@@ -273,8 +288,10 @@ class EntryContextTests(DBTestCase):
 
     def test_history_falls_back_to_creation_time_and_excludes_equal_timestamps(self) -> None:
         with patch_timestamps(
-            "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00",
-            "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+            "2026-01-01T09:00:00+00:00",
+            "2026-01-02T09:00:00+00:00",
+            "2026-01-02T09:00:00+00:00",
+            "2026-01-03T09:00:00+00:00",
         ):
             prior = db.create_entry(self.conn, "prior", people=["alice"])
             current = db.create_entry(self.conn, "target", people=["alice"])
@@ -298,9 +315,7 @@ class EntryContextTests(DBTestCase):
             prior_review_limit=1,
         )
 
-        self.assertEqual(
-            [review.id for review in context.prior_reviews], [latest_review.id]
-        )
+        self.assertEqual([review.id for review in context.prior_reviews], [latest_review.id])
         self.assertNotIn(
             first_review.id,
             [review.id for review in context.prior_reviews],

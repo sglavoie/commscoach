@@ -14,9 +14,7 @@ _ACCEPTED_FORMS = (
     "ISO-8601; now; today/yesterday/tomorrow [TIME]; "
     "[last ]WEEKDAY [TIME]; or N minutes/hours/days/weeks ago"
 )
-_KEYWORD_RE = re.compile(
-    r"^(now|today|yesterday|tomorrow)(?:\s+(.+))?$", re.IGNORECASE
-)
+_KEYWORD_RE = re.compile(r"^(now|today|yesterday|tomorrow)(?:\s+(.+))?$", re.IGNORECASE)
 _WEEKDAY_RE = re.compile(
     r"^(?:last\s+)?"
     r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"

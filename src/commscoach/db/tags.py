@@ -41,9 +41,7 @@ def gc_orphan_tags(conn: sqlite3.Connection) -> None:
     Called after entry deletion or tag replacement so the ``tags`` table stays
     in sync with active links instead of accumulating dead names.
     """
-    conn.execute(
-        "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM entry_tags)"
-    )
+    conn.execute("DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM entry_tags)")
 
 
 def _require_name(value: str, *, what: str = "tag name") -> str:
@@ -101,8 +99,7 @@ def list_tags(
         params.append(limit)
     rows = conn.execute(sql, params).fetchall()
     return tuple(
-        Tag(id=row["id"], name=row["name"], entry_count=row["entry_count"])
-        for row in rows
+        Tag(id=row["id"], name=row["name"], entry_count=row["entry_count"]) for row in rows
     )
 
 

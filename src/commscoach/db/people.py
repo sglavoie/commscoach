@@ -34,15 +34,15 @@ def get_people_activity(conn: sqlite3.Connection) -> dict[int, PersonActivity]:
     ).fetchall()
     return {
         row["id"]: PersonActivity(
-            row["last_logged_interaction"], row["interaction_count"], row["active_goal_count"],
+            row["last_logged_interaction"],
+            row["interaction_count"],
+            row["active_goal_count"],
         )
         for row in rows
     }
 
 
-def _wrap_people_integrity_error(
-    exc: sqlite3.IntegrityError, handle: str | None
-) -> None:
+def _wrap_people_integrity_error(exc: sqlite3.IntegrityError, handle: str | None) -> None:
     """Translate a people-table IntegrityError into a typed DBError. Always raises.
 
     SQLite reports the partial UNIQUE index on ``is_self`` as
@@ -138,14 +138,11 @@ def update_person(
             )
             if handle is not common.UNSET:
                 conn.execute(
-                    "UPDATE reviews SET scope_person_handle = ?"
-                    " WHERE scope_person_id = ?",
+                    "UPDATE reviews SET scope_person_handle = ? WHERE scope_person_id = ?",
                     (handle, person_id),
                 )
     except sqlite3.IntegrityError as exc:
-        _wrap_people_integrity_error(
-            exc, handle if handle is not common.UNSET else None
-        )
+        _wrap_people_integrity_error(exc, handle if handle is not common.UNSET else None)
     updated = get_person(conn, person_id)
     assert updated is not None
     return updated
@@ -169,7 +166,9 @@ def get_person_by_handle(conn: sqlite3.Connection, handle: str) -> Person | None
 
 
 def list_people(
-    conn: sqlite3.Connection, *, query: str | None = None,
+    conn: sqlite3.Connection,
+    *,
+    query: str | None = None,
 ) -> tuple[Person, ...]:
     """Return people self-first, optionally matching a literal name/handle substring."""
     sql = "SELECT * FROM people"
@@ -181,7 +180,8 @@ def list_people(
         sql += " WHERE (handle LIKE ? ESCAPE '!' OR name LIKE ? ESCAPE '!')"
         params = [f"%{literal}%"] * 2
     rows = conn.execute(
-        sql + " ORDER BY is_self DESC, handle COLLATE NOCASE", params,
+        sql + " ORDER BY is_self DESC, handle COLLATE NOCASE",
+        params,
     ).fetchall()
     return tuple(row_to_person(row) for row in rows)
 
@@ -213,8 +213,7 @@ def set_self(conn: sqlite3.Connection, person_id: int) -> Person:
     now = common.utcnow_iso()
     with conn:
         conn.execute(
-            "UPDATE people SET is_self = 0, updated_at = ?"
-            " WHERE is_self = 1 AND id != ?",
+            "UPDATE people SET is_self = 0, updated_at = ? WHERE is_self = 1 AND id != ?",
             (now, person_id),
         )
         conn.execute(
@@ -226,9 +225,7 @@ def set_self(conn: sqlite3.Connection, person_id: int) -> Person:
     return updated
 
 
-def resolve_person_handles(
-    conn: sqlite3.Connection, handles: Iterable[str]
-) -> list[Person]:
+def resolve_person_handles(conn: sqlite3.Connection, handles: Iterable[str]) -> list[Person]:
     """Resolve handles to ``Person`` rows preserving input order and de-duping.
 
     Raises ``PersonNotFoundError`` on the first unknown handle so entry mutation

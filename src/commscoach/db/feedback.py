@@ -18,10 +18,11 @@ def feedback_entry_ids(conn: sqlite3.Connection, entry_ids: Iterable[int]) -> se
     ids = tuple(dict.fromkeys(entry_ids))
     coached: set[int] = set()
     for offset in range(0, len(ids), 500):
-        batch = ids[offset:offset + 500]
+        batch = ids[offset : offset + 500]
         placeholders = ",".join("?" for _ in batch)
         coached.update(
-            row[0] for row in conn.execute(
+            row[0]
+            for row in conn.execute(
                 f"SELECT DISTINCT entry_id FROM feedback WHERE entry_id IN ({placeholders})",
                 batch,
             )
@@ -42,8 +43,7 @@ def create_feedback(
     now = common.utcnow_iso()
     with conn:
         cur = conn.execute(
-            "INSERT INTO feedback (entry_id, body, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?)",
+            "INSERT INTO feedback (entry_id, body, created_at, updated_at) VALUES (?, ?, ?, ?)",
             (entry_id, body, now, now),
         )
     feedback = get_feedback(conn, cur.lastrowid)
@@ -57,38 +57,44 @@ def list_feedback(
 ) -> tuple[Feedback, ...]:
     """Return all feedback for an entry, oldest-first."""
     rows = conn.execute(
-        "SELECT * FROM feedback WHERE entry_id = ?"
-        " ORDER BY created_at ASC, id ASC",
+        "SELECT * FROM feedback WHERE entry_id = ? ORDER BY created_at ASC, id ASC",
         (entry_id,),
     ).fetchall()
     return tuple(row_to_feedback(row) for row in rows)
 
 
 def get_feedback(conn: sqlite3.Connection, feedback_id: int) -> Feedback | None:
-    row = conn.execute(
-        "SELECT * FROM feedback WHERE id = ?", (feedback_id,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone()
     if row is None:
         return None
     return row_to_feedback(row)
 
 
 def search_feedback(
-    conn: sqlite3.Connection, *, query: str,
-    person_handle: str | None = None, limit: int = 20,
+    conn: sqlite3.Connection,
+    *,
+    query: str,
+    person_handle: str | None = None,
+    limit: int = 20,
 ) -> tuple[Feedback, ...]:
     """Find literal body substrings, newest-first, optionally by linked person."""
     if limit < 0:
         raise DBError("limit must be non-negative")
     sql, params = _feedback_search_filter(conn, query, person_handle)
-    return tuple(row_to_feedback(row) for row in conn.execute(
-        "SELECT f.*" + sql + " ORDER BY f.created_at DESC, f.id DESC LIMIT ?",
-        [*params, limit],
-    ))
+    return tuple(
+        row_to_feedback(row)
+        for row in conn.execute(
+            "SELECT f.*" + sql + " ORDER BY f.created_at DESC, f.id DESC LIMIT ?",
+            [*params, limit],
+        )
+    )
 
 
 def count_search_feedback(
-    conn: sqlite3.Connection, *, query: str, person_handle: str | None = None,
+    conn: sqlite3.Connection,
+    *,
+    query: str,
+    person_handle: str | None = None,
 ) -> int:
     """Count matching feedback notes before limiting search results."""
     sql, params = _feedback_search_filter(conn, query, person_handle)
@@ -96,7 +102,9 @@ def count_search_feedback(
 
 
 def _feedback_search_filter(
-    conn: sqlite3.Connection, query: str, person_handle: str | None,
+    conn: sqlite3.Connection,
+    query: str,
+    person_handle: str | None,
 ) -> tuple[str, list[object]]:
     if not query or not query.strip():
         raise DBError("query must be a non-empty string")

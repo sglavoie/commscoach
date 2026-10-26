@@ -21,9 +21,7 @@ from .editor import compose_in_editor
 from .serializers import entry_to_dict, feedback_to_dict
 
 
-FEEDBACK_PREAMBLE = (
-    "Write the feedback body below. Lines beginning with #> are ignored."
-)
+FEEDBACK_PREAMBLE = "Write the feedback body below. Lines beginning with #> are ignored."
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -31,9 +29,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "feedback",
         help="Manage coaching feedback notes attached to entries.",
     )
-    feedback_sub = feedback_parser.add_subparsers(
-        dest="feedback_command", metavar="SUBCOMMAND"
-    )
+    feedback_sub = feedback_parser.add_subparsers(dest="feedback_command", metavar="SUBCOMMAND")
 
     def _show_feedback_help(_args: argparse.Namespace) -> int:
         feedback_parser.print_help()
@@ -41,9 +37,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     feedback_parser.set_defaults(func=_show_feedback_help)
 
-    add = feedback_sub.add_parser(
-        "add", help="Attach a feedback note to an existing entry."
-    )
+    add = feedback_sub.add_parser("add", help="Attach a feedback note to an existing entry.")
     add.add_argument("entry_id", type=int, metavar="ENTRY_ID")
     add.add_argument(
         "body",
@@ -56,23 +50,28 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     add.set_defaults(func=cmd_feedback_add)
 
-    lst = feedback_sub.add_parser(
-        "list", help="List feedback notes for an entry, oldest first."
-    )
+    lst = feedback_sub.add_parser("list", help="List feedback notes for an entry, oldest first.")
     lst.add_argument("entry_id", type=int, metavar="ENTRY_ID")
     lst.set_defaults(func=cmd_feedback_list)
 
     search = feedback_sub.add_parser("search", help="Search stored coaching text.")
     search.add_argument(
-        "--query", required=True, metavar="TEXT",
+        "--query",
+        required=True,
+        metavar="TEXT",
         help="Literal case-insensitive substring to find in feedback bodies.",
     )
     search.add_argument(
-        "--person", default=None, metavar="HANDLE",
+        "--person",
+        default=None,
+        metavar="HANDLE",
         help="Only feedback on entries linked to this person.",
     )
     search.add_argument(
-        "--limit", type=non_negative_int, default=20, metavar="N",
+        "--limit",
+        type=non_negative_int,
+        default=20,
+        metavar="N",
         help="Maximum results (default: 20); text output reports omitted matches.",
     )
     search.set_defaults(func=cmd_feedback_search)
@@ -80,7 +79,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     show = feedback_sub.add_parser("show", help="Show one feedback note by id.")
     show.add_argument("feedback_id", type=int, metavar="FEEDBACK_ID")
     show.add_argument(
-        "--with-entry", action="store_true",
+        "--with-entry",
+        action="store_true",
         help="Include the linked entry's full current text and metadata.",
     )
     show.set_defaults(func=cmd_feedback_show)
@@ -105,10 +105,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _format_feedback_human(feedback: db.Feedback) -> str:
-    header = (
-        f"[{feedback.id}] entry {feedback.entry_id}"
-        f" created {feedback.created_at}"
-    )
+    header = f"[{feedback.id}] entry {feedback.entry_id} created {feedback.created_at}"
     return "\n".join([header, "---", feedback.body])
 
 
@@ -118,12 +115,10 @@ PREVIEW_LINES = 3
 
 def _format_feedback_short(feedback: db.Feedback, *, query: str | None = None) -> str:
     """Render a listing block: an id/time/entry header over indented prose."""
-    header = (
-        f"[{feedback.id}] {format_stamp(feedback.created_at)}"
-        f" · entry {feedback.entry_id}"
-    )
+    header = f"[{feedback.id}] {format_stamp(feedback.created_at)} · entry {feedback.entry_id}"
     preview = (
-        search_excerpt(feedback.body, query) if query is not None
+        search_excerpt(feedback.body, query)
+        if query is not None
         else " · ".join(prose_lines(feedback.body))
     )
     wrapped = textwrap.wrap(preview, PREVIEW_WIDTH)
@@ -148,7 +143,10 @@ def _emit_feedback(
 
 
 def _emit_feedback_list(
-    args: argparse.Namespace, items: tuple[db.Feedback, ...], *, query: str | None = None,
+    args: argparse.Namespace,
+    items: tuple[db.Feedback, ...],
+    *,
+    query: str | None = None,
 ) -> None:
     if args.json:
         print_json([feedback_to_dict(f) for f in items])
@@ -213,11 +211,15 @@ def cmd_feedback_show(args: argparse.Namespace) -> int:
 def cmd_feedback_search(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         items = db.search_feedback(
-            conn, query=args.query, person_handle=args.person, limit=args.limit,
+            conn,
+            query=args.query,
+            person_handle=args.person,
+            limit=args.limit,
         )
         total = (
             db.count_search_feedback(conn, query=args.query, person_handle=args.person)
-            if not args.json else len(items)
+            if not args.json
+            else len(items)
         )
     _emit_feedback_list(args, items, query=args.query)
     if not args.json and total > len(items):
@@ -262,9 +264,7 @@ def cmd_feedback_rm(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         if db.get_feedback(conn, args.feedback_id) is None:
             raise db.FeedbackNotFoundError(args.feedback_id)
-        if not confirm(
-            f"Delete feedback {args.feedback_id}?", assume_yes=args.yes
-        ):
+        if not confirm(f"Delete feedback {args.feedback_id}?", assume_yes=args.yes):
             raise db.DBError("aborted")
         deleted = db.delete_feedback(conn, args.feedback_id)
     if not deleted:

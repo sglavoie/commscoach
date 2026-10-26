@@ -26,10 +26,18 @@ class FeedbackExcerptTests(FeedbackTestBase):
         self.assertLess(len(out), 400)
         rc, out, err = self._run("feedback", "search", "--query", "lead with the ask", "--json")
         self.assertEqual(rc, 0, err)
-        self.assertEqual(json.loads(out), [{
-            "id": note.id, "entry_id": entry.id, "body": body,
-            "created_at": note.created_at, "updated_at": note.updated_at,
-        }])
+        self.assertEqual(
+            json.loads(out),
+            [
+                {
+                    "id": note.id,
+                    "entry_id": entry.id,
+                    "body": body,
+                    "created_at": note.created_at,
+                    "updated_at": note.updated_at,
+                }
+            ],
+        )
         rc, out, err = self._run("feedback", "list", str(entry.id))
         self.assertEqual(rc, 0, err)
         self.assertNotIn("Lead with the ASK", out)
@@ -65,9 +73,7 @@ class FeedbackEditTests(FeedbackTestBase):
         entry = self._seed_entry()
         feedback = self._seed_feedback(entry.id, "first draft")
 
-        rc, out, _ = self._run(
-            "feedback", "edit", str(feedback.id), "--body", "corrected note"
-        )
+        rc, out, _ = self._run("feedback", "edit", str(feedback.id), "--body", "corrected note")
 
         self.assertEqual(rc, 0)
         self.assertIn(f"updated feedback {feedback.id}", out)
@@ -103,9 +109,7 @@ class FeedbackEditTests(FeedbackTestBase):
         body_file = self.tmpdir / "correction.txt"
         body_file.write_text("from file correction", encoding="utf-8")
 
-        rc, _, _ = self._run(
-            "feedback", "edit", str(feedback.id), "--body", f"@{body_file}"
-        )
+        rc, _, _ = self._run("feedback", "edit", str(feedback.id), "--body", f"@{body_file}")
 
         self.assertEqual(rc, 0)
         with closing(db.connect(self.db_path)) as conn:
@@ -124,8 +128,9 @@ class FeedbackEditTests(FeedbackTestBase):
 
         tty = mock.Mock()
         tty.isatty.return_value = True
-        with mock.patch.object(cli_feedback.sys, "stdin", tty), mock.patch.object(
-            cli_feedback, "compose_in_editor", side_effect=compose
+        with (
+            mock.patch.object(cli_feedback.sys, "stdin", tty),
+            mock.patch.object(cli_feedback, "compose_in_editor", side_effect=compose),
         ):
             rc, _, _ = self._run("feedback", "edit", str(feedback.id), "--body")
 
@@ -139,8 +144,9 @@ class FeedbackEditTests(FeedbackTestBase):
         composed = mock.Mock()
         tty = mock.Mock()
         tty.isatty.return_value = True
-        with mock.patch.object(cli_feedback.sys, "stdin", tty), mock.patch.object(
-            cli_feedback, "compose_in_editor", composed
+        with (
+            mock.patch.object(cli_feedback.sys, "stdin", tty),
+            mock.patch.object(cli_feedback, "compose_in_editor", composed),
         ):
             rc, _, err = self._run("feedback", "edit", "9999", "--body")
 
@@ -232,9 +238,7 @@ class FeedbackRmTests(FeedbackTestBase):
         entry = self._seed_entry()
         feedback = self._seed_feedback(entry.id, "delete me")
 
-        rc, out, _ = self._run(
-            "--yes", "--json", "feedback", "rm", str(feedback.id)
-        )
+        rc, out, _ = self._run("--yes", "--json", "feedback", "rm", str(feedback.id))
 
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out), {"deleted": True, "id": feedback.id})

@@ -65,9 +65,7 @@ class SchemaInvariantTests(unittest.TestCase):
         with closing(db.connect(self.db_path)) as conn:
             self._insert_person(conn, "a", is_self=0)
             self._insert_person(conn, "b", is_self=0)
-            (count,) = conn.execute(
-                "SELECT COUNT(*) FROM people WHERE is_self = 0"
-            ).fetchone()
+            (count,) = conn.execute("SELECT COUNT(*) FROM people WHERE is_self = 0").fetchone()
             self.assertEqual(count, 2)
 
     def test_is_self_rejects_non_boolean(self) -> None:
@@ -100,8 +98,7 @@ class SchemaInvariantTests(unittest.TestCase):
                 (entry_id, tag_id),
             )
             conn.execute(
-                "INSERT INTO feedback (entry_id, body, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?)",
+                "INSERT INTO feedback (entry_id, body, created_at, updated_at) VALUES (?, ?, ?, ?)",
                 (entry_id, "good job", NOW, NOW),
             )
             conn.commit()
@@ -162,9 +159,7 @@ class SchemaInvariantTests(unittest.TestCase):
                     (entry_id, 9999),
                 )
 
-    def _insert_scoped_review(
-        self, conn: sqlite3.Connection, **scope: object
-    ) -> sqlite3.Cursor:
+    def _insert_scoped_review(self, conn: sqlite3.Connection, **scope: object) -> sqlite3.Cursor:
         """Insert a review with every scope column stated explicitly."""
         columns = (
             "scope_kind",
@@ -211,9 +206,7 @@ class SchemaInvariantTests(unittest.TestCase):
             self.assertEqual(count, len(accepted))
 
     def test_reviews_scope_kind_rejects_unknown_kind(self) -> None:
-        with closing(db.connect(self.db_path)) as conn, self.assertRaises(
-            sqlite3.IntegrityError
-        ):
+        with closing(db.connect(self.db_path)) as conn, self.assertRaises(sqlite3.IntegrityError):
             self._insert_scoped_review(conn, scope_kind="all")
 
     def test_reviews_scope_check_matrix_rejects_mismatched_axes(self) -> None:
@@ -253,15 +246,11 @@ class SchemaInvariantTests(unittest.TestCase):
                 {"scope_kind": "range", "scope_limit": 20},
             )
             for scope in rejected:
-                with self.subTest(scope=scope), self.assertRaises(
-                    sqlite3.IntegrityError
-                ):
+                with self.subTest(scope=scope), self.assertRaises(sqlite3.IntegrityError):
                     self._insert_scoped_review(conn, **scope)
 
     def test_reviews_scope_limit_rejects_negative(self) -> None:
-        with closing(db.connect(self.db_path)) as conn, self.assertRaises(
-            sqlite3.IntegrityError
-        ):
+        with closing(db.connect(self.db_path)) as conn, self.assertRaises(sqlite3.IntegrityError):
             self._insert_scoped_review(conn, scope_kind="latest", scope_limit=-1)
 
     def test_deleting_person_nulls_scope_link_and_keeps_the_handle(self) -> None:
@@ -295,8 +284,7 @@ class SchemaInvariantTests(unittest.TestCase):
             entry_id = self._insert_entry(conn)
             review_id = self._insert_review(conn)
             conn.execute(
-                "INSERT INTO review_entries (review_id, entry_id, position)"
-                " VALUES (?, ?, 0)",
+                "INSERT INTO review_entries (review_id, entry_id, position) VALUES (?, ?, 0)",
                 (review_id, entry_id),
             )
             conn.commit()
@@ -315,8 +303,7 @@ class SchemaInvariantTests(unittest.TestCase):
             entry_id = self._insert_entry(conn)
             review_id = self._insert_review(conn)
             conn.execute(
-                "INSERT INTO review_entries (review_id, entry_id, position)"
-                " VALUES (?, ?, 0)",
+                "INSERT INTO review_entries (review_id, entry_id, position) VALUES (?, ?, 0)",
                 (review_id, entry_id),
             )
             conn.commit()

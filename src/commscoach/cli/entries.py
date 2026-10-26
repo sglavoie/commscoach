@@ -43,9 +43,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "entry",
         help="Manage communication entries.",
     )
-    entry_sub = entry_parser.add_subparsers(
-        dest="entry_command", metavar="SUBCOMMAND"
-    )
+    entry_sub = entry_parser.add_subparsers(dest="entry_command", metavar="SUBCOMMAND")
 
     def _show_entry_help(_args: argparse.Namespace) -> int:
         entry_parser.print_help()
@@ -99,7 +97,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     show = entry_sub.add_parser("show", help="Show one entry by id.")
     show.add_argument("entry_id", type=int, metavar="ENTRY_ID")
     show.add_argument(
-        "--with-feedback", action="store_true",
+        "--with-feedback",
+        action="store_true",
         help="Include full feedback notes, oldest first.",
     )
     show.set_defaults(func=cmd_entry_show)
@@ -159,10 +158,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     for noun in ("tag", "person"):
         for action in ("add", "remove"):
             edit.add_argument(
-                f"--{action}-{noun}", action="append", default=[],
+                f"--{action}-{noun}",
+                action="append",
+                default=[],
                 metavar="TAG" if noun == "tag" else "HANDLE",
-                help=(f"{action.capitalize()} a linked {noun} without replacing "
-                      "the others (repeatable)."),
+                help=(
+                    f"{action.capitalize()} a linked {noun} without replacing "
+                    "the others (repeatable)."
+                ),
             )
     edit.set_defaults(func=cmd_entry_edit)
 
@@ -195,7 +198,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--tag", default=None, metavar="TAG", help="Filter by a single normalized tag."
     )
     srch.add_argument(
-        "--source", default=None, metavar="SOURCE",
+        "--source",
+        default=None,
+        metavar="SOURCE",
         help="Filter by channel or medium (case-insensitive exact match).",
     )
     srch.add_argument(
@@ -211,11 +216,15 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Show entries without feedback (the coaching backlog).",
     )
     srch.add_argument(
-        "--limit", type=non_negative_int, default=None, metavar="N",
+        "--limit",
+        type=non_negative_int,
+        default=None,
+        metavar="N",
         help="Maximum results (default: all); text output reports omitted matches.",
     )
     srch.add_argument(
-        "--oldest-first", action="store_true",
+        "--oldest-first",
+        action="store_true",
         help="Return the oldest matching entries first, before applying --limit.",
     )
     srch.set_defaults(func=cmd_entry_search)
@@ -227,13 +236,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     rm.set_defaults(func=cmd_entry_rm)
 
 
-
 def cmd_entry_add(args: argparse.Namespace) -> int:
-    occurred_at = (
-        parse_when_or_raise(args.occurred_at)
-        if args.occurred_at is not None
-        else None
-    )
+    occurred_at = parse_when_or_raise(args.occurred_at) if args.occurred_at is not None else None
     with open_db(args) as conn:
         body = read_body_arg(
             args.body,
@@ -273,10 +277,7 @@ def cmd_entry_show(args: argparse.Namespace) -> int:
         emit_entry(args, entry)
         if args.with_feedback:
             print("\nFeedback:")
-            print(
-                "\n\n".join(_format_feedback_human(item) for item in feedback)
-                or "(no feedback)"
-            )
+            print("\n\n".join(_format_feedback_human(item) for item in feedback) or "(no feedback)")
     return 0
 
 
@@ -286,12 +287,8 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
     if args.clear_people and args.people is not None:
         raise db.DBError("--clear-people cannot be combined with --person")
     if (args.add_tag or args.remove_tag) and (args.tags is not None or args.clear_tags):
-        raise db.DBError(
-            "--add-tag/--remove-tag cannot be combined with --tag/--clear-tags"
-        )
-    if (args.add_person or args.remove_person) and (
-        args.people is not None or args.clear_people
-    ):
+        raise db.DBError("--add-tag/--remove-tag cannot be combined with --tag/--clear-tags")
+    if (args.add_person or args.remove_person) and (args.people is not None or args.clear_people):
         raise db.DBError(
             "--add-person/--remove-person cannot be combined with --person/--clear-people"
         )
@@ -328,9 +325,7 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
     elif args.people is not None:
         update_kwargs["people"] = tuple(args.people)
 
-    has_link_edits = bool(
-        args.add_tag or args.remove_tag or args.add_person or args.remove_person
-    )
+    has_link_edits = bool(args.add_tag or args.remove_tag or args.add_person or args.remove_person)
     if not update_kwargs and args.body != "" and not has_link_edits:
         raise db.DBError(
             "entry edit requires at least one of "
@@ -366,19 +361,30 @@ def cmd_entry_edit(args: argparse.Namespace) -> int:
         body_changed = entry.body != current.body
         has_feedback = body_changed and bool(db.feedback_entry_ids(conn, (entry.id,)))
         review_ids = (
-            [row[0] for row in conn.execute(
-                "SELECT review_id FROM review_entries WHERE entry_id = ? ORDER BY review_id",
-                (entry.id,),
-            )] if body_changed else []
+            [
+                row[0]
+                for row in conn.execute(
+                    "SELECT review_id FROM review_entries WHERE entry_id = ? ORDER BY review_id",
+                    (entry.id,),
+                )
+            ]
+            if body_changed
+            else []
         )
     emit_entry(args, entry, human_prefix="updated")
     if has_feedback or review_ids:
         command = command_prefix(args)
         print("Existing coaching may refer to the previous text.", file=sys.stderr)
         if has_feedback:
-            print(shlex.join([*command, "entry", "show", str(entry.id), "--with-feedback"]), file=sys.stderr)
+            print(
+                shlex.join([*command, "entry", "show", str(entry.id), "--with-feedback"]),
+                file=sys.stderr,
+            )
         for review_id in review_ids:
-            print(shlex.join([*command, "review", "show", str(review_id), "--with-entries"]), file=sys.stderr)
+            print(
+                shlex.join([*command, "review", "show", str(review_id), "--with-entries"]),
+                file=sys.stderr,
+            )
     return 0
 
 
@@ -393,12 +399,10 @@ def cmd_entry_list(args: argparse.Namespace) -> int:
         )
         total = (
             db.count_search_entries(conn, since=since, until=until)
-            if not args.json and args.limit is not None else len(entries)
+            if not args.json and args.limit is not None
+            else len(entries)
         )
-        coached = (
-            db.feedback_entry_ids(conn, (e.id for e in entries))
-            if not args.json else set()
-        )
+        coached = db.feedback_entry_ids(conn, (e.id for e in entries)) if not args.json else set()
     emit_entries(args, entries, coached)
     if not args.json and total > len(entries):
         print(f"Showing {len(entries)} of {total} entries.")
@@ -424,29 +428,34 @@ def cmd_entry_search(args: argparse.Namespace) -> int:
         )
         total = (
             db.count_search_entries(
-                conn, query=args.query, source=args.source, tag=args.tag,
-                person_handle=args.person, since=since, until=until,
+                conn,
+                query=args.query,
+                source=args.source,
+                tag=args.tag,
+                person_handle=args.person,
+                since=since,
+                until=until,
                 without_feedback=args.no_feedback,
                 mode="like" if args.exact else "auto",
             )
-            if not args.json and args.limit is not None else len(entries)
+            if not args.json and args.limit is not None
+            else len(entries)
         )
         if args.query and not args.json:
             snippets = (
                 db.search_entry_snippets(conn, args.query, (e.id for e in entries))
-                if not args.exact else {}
+                if not args.exact
+                else {}
             )
             excerpts = {
                 entry.id: (
-                    " ".join(snippets[entry.id].split()) if entry.id in snippets
+                    " ".join(snippets[entry.id].split())
+                    if entry.id in snippets
                     else search_excerpt(entry.body, args.query)
                 )
                 for entry in entries
             }
-        coached = (
-            db.feedback_entry_ids(conn, (e.id for e in entries))
-            if not args.json else set()
-        )
+        coached = db.feedback_entry_ids(conn, (e.id for e in entries)) if not args.json else set()
     emit_entries(args, entries, coached, excerpts=excerpts)
     if not args.json and total > len(entries):
         print(f"Showing {len(entries)} of {total} matching entries.")
@@ -458,10 +467,12 @@ def cmd_entry_rm(args: argparse.Namespace) -> int:
         if db.get_entry(conn, args.entry_id) is None:
             raise db.EntryNotFoundError(args.entry_id)
         feedback_count = conn.execute(
-            "SELECT COUNT(*) FROM feedback WHERE entry_id = ?", (args.entry_id,),
+            "SELECT COUNT(*) FROM feedback WHERE entry_id = ?",
+            (args.entry_id,),
         ).fetchone()[0]
         review_count = conn.execute(
-            "SELECT COUNT(*) FROM review_entries WHERE entry_id = ?", (args.entry_id,),
+            "SELECT COUNT(*) FROM review_entries WHERE entry_id = ?",
+            (args.entry_id,),
         ).fetchone()[0]
         prompt = (
             f"Delete entry {args.entry_id}? This will delete {feedback_count} feedback "

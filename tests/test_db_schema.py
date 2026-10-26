@@ -64,9 +64,7 @@ class InitDbSchemaTests(unittest.TestCase):
             "idx_goals_review_id",
         ):
             self.assertIn(required, indexes)
-        self.assertIn(
-            "COALESCE(occurred_at, created_at) DESC", effective_index_sql
-        )
+        self.assertIn("COALESCE(occurred_at, created_at) DESC", effective_index_sql)
 
     def test_init_stamps_schema_version(self) -> None:
         db.init_db(self.db_path)
@@ -82,9 +80,7 @@ class InitDbSchemaTests(unittest.TestCase):
         db.init_db(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(
-                conn.execute(
-                    "SELECT value FROM _meta WHERE key = 'fts5'"
-                ).fetchone()["value"],
+                conn.execute("SELECT value FROM _meta WHERE key = 'fts5'").fetchone()["value"],
                 "1",
             )
             self.assertIn("entries_fts", table_names(conn))
@@ -94,9 +90,7 @@ class InitDbSchemaTests(unittest.TestCase):
             ).fetchone()["sql"]
             triggers = {
                 row["name"]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type = 'trigger'"
-                )
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")
             }
             db.validate_schema(conn)
         self.assertIn("content='entries'", fts_sql)
@@ -116,9 +110,7 @@ class InitDbSchemaTests(unittest.TestCase):
             db.init_db(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(
-                conn.execute(
-                    "SELECT value FROM _meta WHERE key = 'fts5'"
-                ).fetchone()["value"],
+                conn.execute("SELECT value FROM _meta WHERE key = 'fts5'").fetchone()["value"],
                 "0",
             )
             self.assertNotIn("entries_fts", table_names(conn))
@@ -173,9 +165,7 @@ class InitDbSchemaTests(unittest.TestCase):
         paths.ensure_data_dir(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
             conn.executescript(db_schema.SCHEMA_V1_SQL)
-            conn.execute(
-                "INSERT INTO _meta (key, value) VALUES ('schema_version', '1')"
-            )
+            conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', '1')")
             conn.execute(
                 "INSERT INTO entries (body, source, occurred_at, created_at, updated_at)"
                 " VALUES ('legacy', NULL, '2026-06-20T14:00:00-04:00', ?, ?)",
@@ -183,9 +173,10 @@ class InitDbSchemaTests(unittest.TestCase):
             )
             conn.commit()
 
-        with mock.patch.object(
-            db_schema, "_configure_fts5", side_effect=RuntimeError("boom")
-        ), self.assertRaises(RuntimeError):
+        with (
+            mock.patch.object(db_schema, "_configure_fts5", side_effect=RuntimeError("boom")),
+            self.assertRaises(RuntimeError),
+        ):
             db.init_db(self.db_path)
 
         with closing(db.connect(self.db_path)) as conn:
@@ -234,12 +225,8 @@ class InitDbSchemaTests(unittest.TestCase):
         paths.ensure_data_dir(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
             conn.executescript(db_schema.SCHEMA_V1_SQL)
-            conn.execute(
-                "CREATE INDEX idx_entries_occurred_at ON entries (occurred_at)"
-            )
-            conn.execute(
-                "INSERT INTO _meta (key, value) VALUES ('schema_version', '1')"
-            )
+            conn.execute("CREATE INDEX idx_entries_occurred_at ON entries (occurred_at)")
+            conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', '1')")
             conn.execute(
                 "INSERT INTO people (handle, name, is_self, created_at, updated_at)"
                 " VALUES (?, ?, 1, ?, ?)",
@@ -291,9 +278,7 @@ class InitDbSchemaTests(unittest.TestCase):
         with closing(db.connect(self.db_path)) as conn:
             conn.executescript(db_schema.SCHEMA_V1_SQL)
             conn.executescript(db_schema.SCHEMA_V2_SQL)
-            conn.execute(
-                "INSERT INTO _meta (key, value) VALUES ('schema_version', '2')"
-            )
+            conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', '2')")
             conn.execute(
                 "INSERT INTO entries (body, source, occurred_at, created_at, updated_at)"
                 " VALUES ('kept entry', NULL, NULL, ?, ?)",
@@ -375,8 +360,9 @@ class ValidateBackupSourceTests(unittest.TestCase):
         self.db_path = Path(self._tmp.name) / "data" / "commscoach.sqlite3"
 
     def _assert_rejected(self) -> None:
-        with closing(db.connect(self.db_path)) as conn, self.assertRaisesRegex(
-            db.DBError, "run 'commscoach init' first"
+        with (
+            closing(db.connect(self.db_path)) as conn,
+            self.assertRaisesRegex(db.DBError, "run 'commscoach init' first"),
         ):
             db.validate_backup_source(conn)
 
@@ -396,8 +382,7 @@ class ValidateBackupSourceTests(unittest.TestCase):
         future = db.SCHEMA_VERSION + 1
         with closing(db.connect(self.db_path)) as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO _meta (key, value)"
-                " VALUES ('schema_version', ?)",
+                "INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)",
                 (str(future),),
             )
             conn.commit()

@@ -76,9 +76,7 @@ class PortingCLITests(unittest.TestCase):
         self.assertEqual(rc, 0, err)
         self.assertEqual(json.loads(out)["format_version"], 2)
 
-        rc, _, err = self._run(
-            self.source_path, "export", "--json", "--format", "markdown"
-        )
+        rc, _, err = self._run(self.source_path, "export", "--json", "--format", "markdown")
         self.assertEqual(rc, 1)
         self.assertIn("--json conflicts with --format markdown", err)
 
@@ -115,9 +113,10 @@ class PortingCLITests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         self.assertIn("imported from", stdout)
-        with closing(db.connect(self.source_path)) as source, closing(
-            db.connect(self.target_path)
-        ) as target:
+        with (
+            closing(db.connect(self.source_path)) as source,
+            closing(db.connect(self.target_path)) as target,
+        ):
             self.assertEqual(db.dump_to_dict(target), db.dump_to_dict(source))
 
     def test_import_from_stdin(self) -> None:
@@ -134,9 +133,7 @@ class PortingCLITests(unittest.TestCase):
         archive = self.tmpdir / "archive.json"
         archive.write_text(json.dumps(self._export_payload()), encoding="utf-8")
 
-        rc, stdout, _ = self._run(
-            self.target_path, "import", str(archive), "--dry-run"
-        )
+        rc, stdout, _ = self._run(self.target_path, "import", str(archive), "--dry-run")
 
         self.assertEqual(rc, 0)
         self.assertIn("no data written", stdout)
@@ -149,9 +146,7 @@ class PortingCLITests(unittest.TestCase):
         # A v3 dump restored into a v4 database is the normal migration path;
         # the schema-version mismatch is reported, not refused.
         with self.assertWarns(RuntimeWarning):
-            rc, stdout, _ = self._run(
-                self.target_path, "import", str(archive), "--dry-run"
-            )
+            rc, stdout, _ = self._run(self.target_path, "import", str(archive), "--dry-run")
 
         self.assertEqual(rc, 0)
         self.assertIn("no data written", stdout)

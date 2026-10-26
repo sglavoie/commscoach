@@ -33,9 +33,7 @@ class GoalCrudTests(GoalTestBase):
         second = self._seed_goal("second")
         with closing(db.connect(self.db_path)) as conn:
             db.close_goal(conn, second.id, dropped=True)
-        rc, out, _ = self._run(
-            "--json", "goal", "list", "--status", "all", "--limit", "2"
-        )
+        rc, out, _ = self._run("--json", "goal", "list", "--status", "all", "--limit", "2")
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual([row["id"] for row in payload], [first.id, second.id])
@@ -94,9 +92,7 @@ class GoalCrudTests(GoalTestBase):
     def test_edit_human_updates_and_clears(self) -> None:
         self._seed_person()
         with closing(db.connect(self.db_path)) as conn:
-            goal = db.create_goal(
-                conn, "old", detail="old detail", person_handle="alex"
-            )
+            goal = db.create_goal(conn, "old", detail="old detail", person_handle="alex")
         rc, out, _ = self._run(
             "goal",
             "edit",
@@ -134,9 +130,7 @@ class GoalCrudTests(GoalTestBase):
 
     def test_edit_mutual_exclusion_and_empty_edit_exit_one(self) -> None:
         goal = self._seed_goal()
-        rc, _, err = self._run(
-            "goal", "edit", str(goal.id), "--detail", "x", "--clear-detail"
-        )
+        rc, _, err = self._run("goal", "edit", str(goal.id), "--detail", "x", "--clear-detail")
         self.assertEqual(rc, 1)
         self.assertIn("cannot be combined", err)
         rc, _, err = self._run("goal", "edit", str(goal.id))
@@ -159,9 +153,7 @@ class GoalCrudTests(GoalTestBase):
 
     def test_close_json_dropped(self) -> None:
         goal = self._seed_goal()
-        rc, out, _ = self._run(
-            "--json", "goal", "close", str(goal.id), "--dropped"
-        )
+        rc, out, _ = self._run("--json", "goal", "close", str(goal.id), "--dropped")
         self.assertEqual(rc, 0)
         payload = json.loads(out)
         self.assertEqual(payload["status"], "dropped")
@@ -194,7 +186,6 @@ class GoalCrudTests(GoalTestBase):
         self.assertEqual(rc, 0)
         for verb in ("add", "list", "show", "edit", "close", "rm"):
             self.assertIn(verb, out)
-
 
 
 class GoalEmptyTextTests(GoalTestBase):

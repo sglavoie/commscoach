@@ -15,27 +15,27 @@ from commscoach import paths
 
 class ResolveDBPathTests(unittest.TestCase):
     def test_default_when_no_overrides(self):
-        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
-            os.environ, {"HOME": td}, clear=True
-        ), mock.patch.object(
-            paths, "LEGACY_ICLOUD_DB_PATH", Path(td) / "missing-legacy.sqlite3"
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.dict(os.environ, {"HOME": td}, clear=True),
+            mock.patch.object(paths, "LEGACY_ICLOUD_DB_PATH", Path(td) / "missing-legacy.sqlite3"),
         ):
             self.assertEqual(paths.resolve_db_path(), paths.default_db_path())
 
     def test_env_overrides_default_and_legacy(self):
-        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
-            os.environ, {paths.ENV_VAR: "/tmp/env.sqlite3"}
-        ), mock.patch.object(
-            paths, "LEGACY_ICLOUD_DB_PATH", Path(td) / "legacy.sqlite3"
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.dict(os.environ, {paths.ENV_VAR: "/tmp/env.sqlite3"}),
+            mock.patch.object(paths, "LEGACY_ICLOUD_DB_PATH", Path(td) / "legacy.sqlite3"),
         ):
             paths.LEGACY_ICLOUD_DB_PATH.touch()
             self.assertEqual(paths.resolve_db_path(), Path("/tmp/env.sqlite3"))
 
     def test_cli_overrides_env_default_and_legacy(self):
-        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
-            os.environ, {paths.ENV_VAR: "/tmp/env.sqlite3"}
-        ), mock.patch.object(
-            paths, "LEGACY_ICLOUD_DB_PATH", Path(td) / "legacy.sqlite3"
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.dict(os.environ, {paths.ENV_VAR: "/tmp/env.sqlite3"}),
+            mock.patch.object(paths, "LEGACY_ICLOUD_DB_PATH", Path(td) / "legacy.sqlite3"),
         ):
             paths.LEGACY_ICLOUD_DB_PATH.touch()
             self.assertEqual(
@@ -48,10 +48,10 @@ class ResolveDBPathTests(unittest.TestCase):
             self.assertEqual(paths.resolve_db_path(""), Path("/tmp/env.sqlite3"))
 
     def test_empty_env_falls_through_to_default(self):
-        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
-            os.environ, {"HOME": td, paths.ENV_VAR: ""}, clear=True
-        ), mock.patch.object(
-            paths, "LEGACY_ICLOUD_DB_PATH", Path(td) / "missing-legacy.sqlite3"
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.dict(os.environ, {"HOME": td, paths.ENV_VAR: ""}, clear=True),
+            mock.patch.object(paths, "LEGACY_ICLOUD_DB_PATH", Path(td) / "missing-legacy.sqlite3"),
         ):
             self.assertEqual(paths.resolve_db_path(), paths.default_db_path())
 
@@ -63,26 +63,26 @@ class ResolveDBPathTests(unittest.TestCase):
             self.assertTrue(resolved.is_absolute())
 
     def test_xdg_data_home_is_honored(self):
-        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
-            os.environ,
-            {"HOME": str(Path(td) / "home"), "XDG_DATA_HOME": str(Path(td) / "xdg")},
-            clear=True,
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.dict(
+                os.environ,
+                {"HOME": str(Path(td) / "home"), "XDG_DATA_HOME": str(Path(td) / "xdg")},
+                clear=True,
+            ),
         ):
             expected_dir = Path(td) / "xdg" / "commscoach"
             self.assertEqual(paths.default_data_dir(), expected_dir)
-            self.assertEqual(
-                paths.default_db_path(), expected_dir / "commscoach.sqlite3"
-            )
+            self.assertEqual(paths.default_db_path(), expected_dir / "commscoach.sqlite3")
 
     def test_xdg_unset_uses_local_share_under_current_home(self):
-        with tempfile.TemporaryDirectory() as td, mock.patch.dict(
-            os.environ, {"HOME": td}, clear=True
+        with (
+            tempfile.TemporaryDirectory() as td,
+            mock.patch.dict(os.environ, {"HOME": td}, clear=True),
         ):
             expected_dir = Path(td) / ".local" / "share" / "commscoach"
             self.assertEqual(paths.default_data_dir(), expected_dir)
-            self.assertEqual(
-                paths.default_db_path(), expected_dir / "commscoach.sqlite3"
-            )
+            self.assertEqual(paths.default_db_path(), expected_dir / "commscoach.sqlite3")
 
     def test_legacy_database_requires_explicit_migration(self):
         with tempfile.TemporaryDirectory() as td:
@@ -90,13 +90,12 @@ class ResolveDBPathTests(unittest.TestCase):
             legacy = root / "Legacy Mobile Documents" / "commscoach.sqlite3"
             legacy.parent.mkdir()
             legacy.touch()
-            with mock.patch.dict(
-                os.environ, {"XDG_DATA_HOME": str(root / "xdg")}, clear=True
-            ), mock.patch.object(paths, "LEGACY_ICLOUD_DB_PATH", legacy):
+            with (
+                mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(root / "xdg")}, clear=True),
+                mock.patch.object(paths, "LEGACY_ICLOUD_DB_PATH", legacy),
+            ):
                 target = paths.default_db_path()
-                with self.assertRaises(
-                    paths.LegacyDatabaseMigrationRequired
-                ) as raised:
+                with self.assertRaises(paths.LegacyDatabaseMigrationRequired) as raised:
                     paths.resolve_db_path()
 
             message = str(raised.exception)
@@ -109,17 +108,16 @@ class ResolveDBPathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             legacy = root / "missing-legacy.sqlite3"
-            with mock.patch.dict(
-                os.environ, {"XDG_DATA_HOME": str(root / "xdg")}, clear=True
-            ), mock.patch.object(paths, "LEGACY_ICLOUD_DB_PATH", legacy):
+            with (
+                mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(root / "xdg")}, clear=True),
+                mock.patch.object(paths, "LEGACY_ICLOUD_DB_PATH", legacy),
+            ):
                 self.assertEqual(paths.resolve_db_path(), paths.default_db_path())
 
     def test_existing_default_skips_legacy_check_entirely(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            with mock.patch.dict(
-                os.environ, {"XDG_DATA_HOME": str(root / "xdg")}, clear=True
-            ):
+            with mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(root / "xdg")}, clear=True):
                 target = paths.default_db_path()
                 target.parent.mkdir(parents=True)
                 target.touch()

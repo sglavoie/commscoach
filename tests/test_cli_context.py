@@ -47,9 +47,7 @@ class ContextTestBase(unittest.TestCase):
         source: str | None = None,
     ) -> db.Entry:
         with closing(db.connect(self.db_path)) as conn:
-            return db.create_entry(
-                conn, body, source=source, tags=tags, people=people
-            )
+            return db.create_entry(conn, body, source=source, tags=tags, people=people)
 
     def _seed_feedback(self, entry_id: int, body: str) -> db.Feedback:
         with closing(db.connect(self.db_path)) as conn:
@@ -66,31 +64,56 @@ class ContextSuccessTests(ContextTestBase):
             second = db.create_entry(conn, "second", people=("alice",), occurred_at="2026-01-02")
             fallback = db.create_entry(conn, "creation fallback", people=("alice",))
             with conn:
-                conn.execute("UPDATE entries SET created_at = ? WHERE id = ?",
-                             ("2026-01-03T00:00:00+00:00", fallback.id))
-            target = db.create_entry(conn, "target", people=("alice", "bob"), occurred_at="2026-02-01")
+                conn.execute(
+                    "UPDATE entries SET created_at = ? WHERE id = ?",
+                    ("2026-01-03T00:00:00+00:00", fallback.id),
+                )
+            target = db.create_entry(
+                conn, "target", people=("alice", "bob"), occurred_at="2026-02-01"
+            )
             db.create_entry(conn, "same instant", people=("alice",), occurred_at="2026-02-01")
             db.create_entry(conn, "later", people=("alice",), occurred_at="2026-03-01")
             db.create_entry(conn, "unlinked", occurred_at="2026-01-01")
-        for limit, ids in ((0, []), (1, [fallback.id]), (3, [first.id, second.id, fallback.id]),
-                           (5, [first.id, second.id, fallback.id])):
+        for limit, ids in (
+            (0, []),
+            (1, [fallback.id]),
+            (3, [first.id, second.id, fallback.id]),
+            (5, [first.id, second.id, fallback.id]),
+        ):
             with self.subTest(limit=limit):
                 rc, out, err = self._run("context", str(target.id), "--history", str(limit))
                 self.assertEqual(rc, 0, err)
                 people = {p["handle"]: p for p in json.loads(out)["people"]}
                 self.assertEqual([h["entry"]["id"] for h in people["alice"]["history"]], ids)
-                self.assertEqual(people["alice"]["history_summary"], {
-                    "limit": limit, "count": len(ids), "total_count": 3, "truncated": len(ids) < 3,
-                })
-                self.assertEqual(people["bob"]["history_summary"], {
-                    "limit": limit, "count": 0, "total_count": 0, "truncated": False,
-                })
+                self.assertEqual(
+                    people["alice"]["history_summary"],
+                    {
+                        "limit": limit,
+                        "count": len(ids),
+                        "total_count": 3,
+                        "truncated": len(ids) < 3,
+                    },
+                )
+                self.assertEqual(
+                    people["bob"]["history_summary"],
+                    {
+                        "limit": limit,
+                        "count": 0,
+                        "total_count": 0,
+                        "truncated": False,
+                    },
+                )
 
     def test_self_notes_are_in_both_contexts_and_follow_edits_and_clearing(self):
         self._seed_self("me")
         entry = self._seed_entry("A conversation")
         commands = (("context", str(entry.id)), ("review", "context"))
-        for expected in (None, "Be direct without sounding abrupt.", "Prefer short examples.", None):
+        for expected in (
+            None,
+            "Be direct without sounding abrupt.",
+            "Prefer short examples.",
+            None,
+        ):
             if expected is None:
                 rc, _, err = self._run("person", "edit", "me", "--clear-notes")
             else:
@@ -121,11 +144,12 @@ class ContextSuccessTests(ContextTestBase):
             assert alice is not None
             db.set_person_note(conn, alice.id, "Use concise asks")
             prior_entry = db.create_entry(
-                conn, "prior hello", people=["alice"], occurred_at="2020-01-01T09:00:00Z",
+                conn,
+                "prior hello",
+                people=["alice"],
+                occurred_at="2020-01-01T09:00:00Z",
             )
-            history_feedback = db.create_feedback(
-                conn, prior_entry.id, "Good follow-through"
-            )
+            history_feedback = db.create_feedback(conn, prior_entry.id, "Good follow-through")
             review = db.create_review(conn, "weekly synthesis", [prior_entry.id])
             goal = db.create_goal(conn, "Ask one question")
 
@@ -152,9 +176,7 @@ class ContextSuccessTests(ContextTestBase):
         self.assertEqual(payload["people"][0]["handle"], "alice")
         people_handles = sorted(p["handle"] for p in payload["people"])
         self.assertEqual(people_handles, ["alice", "bob"])
-        alice_payload = next(
-            p for p in payload["people"] if p["handle"] == "alice"
-        )
+        alice_payload = next(p for p in payload["people"] if p["handle"] == "alice")
         self.assertEqual(alice_payload["notes"], "Use concise asks")
         self.assertEqual(alice_payload["history"][0]["entry"]["id"], prior_entry.id)
         self.assertEqual(
@@ -167,20 +189,14 @@ class ContextSuccessTests(ContextTestBase):
             [f["id"] for f in payload["prior_feedback"]],
             [first.id, second.id],
         )
-        self.assertEqual(
-            payload["prior_feedback"][0]["body"], "first note"
-        )
+        self.assertEqual(payload["prior_feedback"][0]["body"], "first note")
         self.assertEqual([item["id"] for item in payload["goals"]], [goal.id])
-        self.assertEqual(
-            [item["id"] for item in payload["prior_reviews"]], [review.id]
-        )
+        self.assertEqual([item["id"] for item in payload["prior_reviews"]], [review.id])
 
     def test_context_excludes_self_from_people(self) -> None:
         me = self._seed_self("me")
         self._seed_person("alice")
-        entry = self._seed_entry(
-            "with self linked", people=("me", "alice")
-        )
+        entry = self._seed_entry("with self linked", people=("me", "alice"))
 
         rc, out, _ = self._run("context", str(entry.id))
         self.assertEqual(rc, 0)
@@ -190,9 +206,7 @@ class ContextSuccessTests(ContextTestBase):
         people_handles = [p["handle"] for p in payload["people"]]
         self.assertEqual(people_handles, ["alice"])
         # entry.people retains the faithful link list, including self
-        entry_people_handles = sorted(
-            p["handle"] for p in payload["entry"]["people"]
-        )
+        entry_people_handles = sorted(p["handle"] for p in payload["entry"]["people"])
         self.assertEqual(entry_people_handles, ["alice", "me"])
 
     def test_context_empty_prior_feedback(self) -> None:
@@ -314,18 +328,28 @@ class ContextSuccessTests(ContextTestBase):
             for dropped in (False, True):
                 goal = db.create_goal(conn, "closed")
                 db.close_goal(conn, goal.id, dropped=dropped)
-        for flags, count, limit in (((), 10, 10), (("--goal-limit", "0"), 0, 0),
-                                     (("--goal-limit", "2"), 2, 2),
-                                     (("--goal-limit", "20"), 12, 20)):
+        for flags, count, limit in (
+            ((), 10, 10),
+            (("--goal-limit", "0"), 0, 0),
+            (("--goal-limit", "2"), 2, 2),
+            (("--goal-limit", "20"), 12, 20),
+        ):
             with self.subTest(flags=flags):
                 rc, out, err = self._run("context", str(entry.id), *flags)
                 self.assertEqual(rc, 0, err)
                 payload = json.loads(out)
-                self.assertEqual(payload["goal_summary"], {
-                    "limit": limit, "count": count, "total_count": 12, "truncated": count < 12,
-                })
-                self.assertEqual([g["id"] for g in payload["goals"]],
-                                 [g.id for g in reversed(goals)][:count])
+                self.assertEqual(
+                    payload["goal_summary"],
+                    {
+                        "limit": limit,
+                        "count": count,
+                        "total_count": 12,
+                        "truncated": count < 12,
+                    },
+                )
+                self.assertEqual(
+                    [g["id"] for g in payload["goals"]], [g.id for g in reversed(goals)][:count]
+                )
 
 
 class ContextFailureTests(ContextTestBase):

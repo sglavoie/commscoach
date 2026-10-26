@@ -14,8 +14,6 @@ from .common import (
 from .serializers import entry_to_dict
 
 
-
-
 def format_entry_human(entry: db.Entry) -> str:
     header_parts = [f"[{entry.id}]", f"created {entry.created_at}"]
     if entry.occurred_at:
@@ -33,7 +31,10 @@ def format_entry_human(entry: db.Entry) -> str:
 
 
 def format_entry_short(
-    entry: db.Entry, *, has_feedback: bool = False, excerpt: str | None = None,
+    entry: db.Entry,
+    *,
+    has_feedback: bool = False,
+    excerpt: str | None = None,
 ) -> str:
     parts = [f"[{entry.id}]", format_stamp(entry.occurred_at or entry.created_at)]
     if entry.source:
@@ -62,8 +63,11 @@ def emit_entry(
 
 
 def emit_entries(
-    args: argparse.Namespace, entries: tuple[db.Entry, ...], coached: set[int],
-    *, excerpts: dict[int, str] | None = None,
+    args: argparse.Namespace,
+    entries: tuple[db.Entry, ...],
+    coached: set[int],
+    *,
+    excerpts: dict[int, str] | None = None,
 ) -> None:
     if args.json:
         print_json([entry_to_dict(e) for e in entries])
@@ -72,7 +76,10 @@ def emit_entries(
         print("(no entries)")
         return
     for entry in entries:
-        print(format_entry_short(
-            entry, has_feedback=entry.id in coached,
-            excerpt=excerpts.get(entry.id) if excerpts is not None else None,
-        ))
+        print(
+            format_entry_short(
+                entry,
+                has_feedback=entry.id in coached,
+                excerpt=excerpts.get(entry.id) if excerpts is not None else None,
+            )
+        )

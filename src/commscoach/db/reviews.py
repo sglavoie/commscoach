@@ -73,9 +73,7 @@ def _validate_scope(
     the lookup happens before any write.
     """
     if scope_kind not in SCOPE_KINDS:
-        raise DBError(
-            "review scope_kind must be one of: " + ", ".join(SCOPE_KINDS)
-        )
+        raise DBError("review scope_kind must be one of: " + ", ".join(SCOPE_KINDS))
     supplied = {
         "scope_person_handle": scope_person_handle,
         "scope_tag": scope_tag,
@@ -85,9 +83,7 @@ def _validate_scope(
     owned = _SCOPE_AXES[scope_kind]
     for name, value in supplied.items():
         if value is not None and name not in owned:
-            raise DBError(
-                f"review scope_kind '{scope_kind}' does not accept {name}"
-            )
+            raise DBError(f"review scope_kind '{scope_kind}' does not accept {name}")
 
     axes: dict[str, Any] = {
         "scope_person_handle": None,
@@ -106,17 +102,11 @@ def _validate_scope(
         axes["scope_tag"] = normalized
     elif scope_kind == "range":
         if scope_since is None and scope_until is None:
-            raise DBError(
-                "review scope_kind 'range' requires scope_since or scope_until"
-            )
+            raise DBError("review scope_kind 'range' requires scope_since or scope_until")
         if scope_since is not None:
-            axes["scope_since"] = _validate_scope_date(
-                scope_since, what="review scope_since"
-            )
+            axes["scope_since"] = _validate_scope_date(scope_since, what="review scope_since")
         if scope_until is not None:
-            axes["scope_until"] = _validate_scope_date(
-                scope_until, what="review scope_until"
-            )
+            axes["scope_until"] = _validate_scope_date(scope_until, what="review scope_until")
         validate_range_bounds(
             axes["scope_since"],
             axes["scope_until"],
@@ -185,8 +175,7 @@ def create_review(
         review_id = cur.lastrowid
         for position, entry in enumerate(entries):
             conn.execute(
-                "INSERT INTO review_entries (review_id, entry_id, position)"
-                " VALUES (?, ?, ?)",
+                "INSERT INTO review_entries (review_id, entry_id, position) VALUES (?, ?, ?)",
                 (review_id, entry.id, position),
             )
     review = get_review(conn, review_id)
@@ -222,7 +211,10 @@ def list_reviews(
     if limit is not None and limit < 0:
         raise DBError("limit must be non-negative")
     filters, params = _review_filters(
-        scope_kind=scope_kind, person_handle=person_handle, tag=tag, query=query,
+        scope_kind=scope_kind,
+        person_handle=person_handle,
+        tag=tag,
+        query=query,
     )
     sql = "SELECT * FROM reviews" + filters + " ORDER BY created_at DESC, id DESC"
     if limit is not None:
@@ -233,20 +225,29 @@ def list_reviews(
 
 
 def count_reviews(
-    conn: sqlite3.Connection, *, scope_kind: str | None = None,
-    person_handle: str | None = None, tag: str | None = None,
+    conn: sqlite3.Connection,
+    *,
+    scope_kind: str | None = None,
+    person_handle: str | None = None,
+    tag: str | None = None,
     query: str | None = None,
 ) -> int:
     """Count stored reviews using the same filters as list_reviews."""
     filters, params = _review_filters(
-        scope_kind=scope_kind, person_handle=person_handle, tag=tag, query=query,
+        scope_kind=scope_kind,
+        person_handle=person_handle,
+        tag=tag,
+        query=query,
     )
     return conn.execute("SELECT COUNT(*) FROM reviews" + filters, params).fetchone()[0]
 
 
 def _review_filters(
-    *, scope_kind: str | None, person_handle: str | None,
-    tag: str | None, query: str | None,
+    *,
+    scope_kind: str | None,
+    person_handle: str | None,
+    tag: str | None,
+    query: str | None,
 ) -> tuple[str, list[Any]]:
     where: list[str] = []
     params: list[Any] = []
@@ -258,9 +259,7 @@ def _review_filters(
         params.append(f"%{literal}%")
     if scope_kind is not None:
         if scope_kind not in SCOPE_KINDS:
-            raise DBError(
-                "review scope_kind must be one of: " + ", ".join(SCOPE_KINDS)
-            )
+            raise DBError("review scope_kind must be one of: " + ", ".join(SCOPE_KINDS))
         where.append("scope_kind = ?")
         params.append(scope_kind)
     if person_handle is not None:

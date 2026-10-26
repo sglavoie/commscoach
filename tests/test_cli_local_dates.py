@@ -29,24 +29,18 @@ class LocalDateTests(EntryTestBase):
             "2026-10-03T05:59:59.999999+00:00",  # final local microsecond
             "2026-10-03T06:00:00+00:00",  # next local day
         ]
-        entries = [
-            self._seed_entry(str(i), occurred_at=ts) for i, ts in enumerate(stamps)
-        ]
+        entries = [self._seed_entry(str(i), occurred_at=ts) for i, ts in enumerate(stamps)]
         expected = {entry.id for entry in entries[1:4]}
         bounds = ("--since", "2026-10-02", "--until", "2026-10-02")
         for command in (("entry", "list"), ("entry", "search")):
             with self.subTest(command=command):
-                self.assertEqual(
-                    {row["id"] for row in self._json(*command, *bounds)}, expected
-                )
+                self.assertEqual({row["id"] for row in self._json(*command, *bounds)}, expected)
         self.assertEqual(self._json("stats", *bounds)["entry_count"], 3)
         context = self._json("review", "context", *bounds)
         self.assertEqual({row["entry"]["id"] for row in context["entries"]}, expected)
         self.assertEqual(context["scope"]["since"], "2026-10-02T06:00:00+00:00")
         self.assertEqual(context["scope"]["until"], "2026-10-03T05:59:59.999999+00:00")
-        review = self._json(
-            "review", "add", "Summary", *bounds, "--entry", str(entries[2].id)
-        )
+        review = self._json("review", "add", "Summary", *bounds, "--entry", str(entries[2].id))
         self.assertEqual(review["scope_since"], context["scope"]["since"])
         self.assertEqual(review["scope_until"], context["scope"]["until"])
         # Export/import must preserve the resolved scope without a migration.
@@ -112,9 +106,7 @@ class LocalDateTests(EntryTestBase):
                 closed = db.create_goal(conn, "Closed")
                 db.close_goal(conn, closed.id)
         bounds = ("--since", "2026-10-02", "--until", "2026-10-02")
-        self.assertEqual(
-            [row["id"] for row in self._json("entry", "list", *bounds)], [entry.id]
-        )
+        self.assertEqual([row["id"] for row in self._json("entry", "list", *bounds)], [entry.id])
         stats = self._json("stats", *bounds)
         for key in (
             "entry_count",
@@ -140,8 +132,6 @@ class LocalDateTests(EntryTestBase):
                 ),
             ):
                 with self.subTest(day=day):
-                    context = self._json(
-                        "review", "context", "--since", day, "--until", day
-                    )
+                    context = self._json("review", "context", "--since", day, "--until", day)
                     self.assertEqual(context["scope"]["since"], start)
                     self.assertEqual(context["scope"]["until"], end)

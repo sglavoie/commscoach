@@ -27,7 +27,9 @@ class ReviewContextTests(ReviewTestBase):
                         db.clear_person_note(conn, person.id)
                     else:
                         db.set_person_note(conn, person.id, expected)
-                    context = db.get_review_context(conn, scope_kind="person", person_handle="ALICE")
+                    context = db.get_review_context(
+                        conn, scope_kind="person", person_handle="ALICE"
+                    )
                     self.assertEqual(context.scope_person_notes, expected)
                 rc, out, err = self._run("review", "context", "--person", "ALICE")
                 self.assertEqual(rc, 0, err)
@@ -74,17 +76,21 @@ class ReviewContextTests(ReviewTestBase):
             [item["entry"]["id"] for item in payload["entries"]],
             [second.id, third.id],
         )
-        feedback_by_entry = {
-            item["entry"]["id"]: item["feedback"] for item in payload["entries"]
-        }
+        feedback_by_entry = {item["entry"]["id"]: item["feedback"] for item in payload["entries"]}
         self.assertEqual(feedback_by_entry[second.id][0]["body"], "second note")
         self.assertEqual(feedback_by_entry[third.id], [])
         self.assertEqual([row["id"] for row in payload["prior_reviews"]], [prior.id])
         self.assertEqual(payload["prior_reviews"][0]["entry_ids"], [first.id])
         self.assertEqual([row["id"] for row in payload["goals"]], [goal.id])
-        self.assertEqual(payload["goal_summary"], {
-            "limit": 10, "count": 1, "total_count": 1, "truncated": False,
-        })
+        self.assertEqual(
+            payload["goal_summary"],
+            {
+                "limit": 10,
+                "count": 1,
+                "total_count": 1,
+                "truncated": False,
+            },
+        )
 
     def test_context_missing_self_exits_one(self) -> None:
         self._seed_entry("orphan")
@@ -114,9 +120,7 @@ class ReviewContextTests(ReviewTestBase):
         self._seed_review("third review", [entry.id])
         latest = self._seed_review("latest review", [entry.id])
 
-        rc, out, _ = self._run(
-            "review", "context", "--prior-review-limit", "1"
-        )
+        rc, out, _ = self._run("review", "context", "--prior-review-limit", "1")
 
         self.assertEqual(rc, 0)
         payload = json.loads(out)
@@ -130,9 +134,7 @@ class ReviewContextTests(ReviewTestBase):
         entry = self._seed_entry("entry")
         self._seed_review("prior review", [entry.id])
 
-        rc, out, _ = self._run(
-            "review", "context", "--prior-review-limit", "0"
-        )
+        rc, out, _ = self._run("review", "context", "--prior-review-limit", "0")
 
         self.assertEqual(rc, 0)
         payload = json.loads(out)
@@ -161,9 +163,15 @@ class ReviewContextTests(ReviewTestBase):
 
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out)["goals"], [])
-        self.assertEqual(json.loads(out)["goal_summary"], {
-            "limit": 0, "count": 0, "total_count": 1, "truncated": True,
-        })
+        self.assertEqual(
+            json.loads(out)["goal_summary"],
+            {
+                "limit": 0,
+                "count": 0,
+                "total_count": 1,
+                "truncated": True,
+            },
+        )
 
     def test_goal_completeness_excludes_closed_goals(self) -> None:
         self._seed_self()
@@ -175,9 +183,15 @@ class ReviewContextTests(ReviewTestBase):
         rc, out, err = self._run("review", "context", "--goal-limit", "1")
         self.assertEqual(rc, 0, err)
         payload = json.loads(out)
-        self.assertEqual(payload["goal_summary"], {
-            "limit": 1, "count": 1, "total_count": 2, "truncated": True,
-        })
+        self.assertEqual(
+            payload["goal_summary"],
+            {
+                "limit": 1,
+                "count": 1,
+                "total_count": 2,
+                "truncated": True,
+            },
+        )
         self.assertEqual(payload["scope"]["total_entry_count"], 0)
         self.assertFalse(payload["scope"]["entries_truncated"])
 
@@ -194,9 +208,7 @@ class ScopedPriorReviewTests(ScopedContextBase):
 
         payload = self._scope("--person", "alice")
 
-        self.assertEqual(
-            [row["id"] for row in payload["prior_reviews"]], [about_alice.id]
-        )
+        self.assertEqual([row["id"] for row in payload["prior_reviews"]], [about_alice.id])
         self.assertNotIn(general.id, [row["id"] for row in payload["prior_reviews"]])
 
     def test_prior_reviews_carry_the_new_scope_keys(self) -> None:

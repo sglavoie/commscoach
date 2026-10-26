@@ -97,18 +97,9 @@ CREATE TABLE IF NOT EXISTS {table} (
 # A table rebuild drops the table's indexes with it, so the rebuild replays
 # these one by one; the cumulative DDL below runs the same list as a script.
 _REVIEWS_INDEX_STATEMENTS = (
-    (
-        "CREATE INDEX IF NOT EXISTS idx_reviews_created_at"
-        " ON reviews (created_at, id)"
-    ),
-    (
-        "CREATE INDEX IF NOT EXISTS idx_reviews_scope"
-        " ON reviews (scope_kind, created_at)"
-    ),
-    (
-        "CREATE INDEX IF NOT EXISTS idx_reviews_scope_person_id"
-        " ON reviews (scope_person_id)"
-    ),
+    ("CREATE INDEX IF NOT EXISTS idx_reviews_created_at ON reviews (created_at, id)"),
+    ("CREATE INDEX IF NOT EXISTS idx_reviews_scope ON reviews (scope_kind, created_at)"),
+    ("CREATE INDEX IF NOT EXISTS idx_reviews_scope_person_id ON reviews (scope_person_id)"),
 )
 
 SCHEMA_V2_SQL = (

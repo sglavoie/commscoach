@@ -15,9 +15,7 @@ from typing import Callable, Iterator
 from .. import db
 
 COMMENT_MARKER = "#>"
-_drafts: ContextVar[list[tuple[Path, str]] | None] = ContextVar(
-    "editor_drafts", default=None
-)
+_drafts: ContextVar[list[tuple[Path, str]] | None] = ContextVar("editor_drafts", default=None)
 
 
 def _finish_draft(path: Path, *, recover: bool, template: str = "") -> None:
@@ -73,9 +71,7 @@ def editor_command() -> list[str]:
 def strip_comment_lines(text: str) -> str:
     """Remove editor instruction lines without treating Markdown as comments."""
     return "".join(
-        line
-        for line in text.splitlines(keepends=True)
-        if not line.startswith(COMMENT_MARKER)
+        line for line in text.splitlines(keepends=True) if not line.startswith(COMMENT_MARKER)
     )
 
 
@@ -95,8 +91,7 @@ def compose_in_editor(
     try:
         os.fchmod(fd, 0o600)
         comment_preamble = "\n".join(
-            f"{COMMENT_MARKER} {line}" if line else COMMENT_MARKER
-            for line in preamble.splitlines()
+            f"{COMMENT_MARKER} {line}" if line else COMMENT_MARKER for line in preamble.splitlines()
         )
         initial = comment_preamble
         if template:

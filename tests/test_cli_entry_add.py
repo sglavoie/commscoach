@@ -61,9 +61,7 @@ class EntryAddTests(EntryTestBase):
 
     def test_add_unknown_person_exits_one(self) -> None:
         with mock.patch.object(cli_people, "confirm", return_value=False):
-            rc, _, err = self._run(
-                "entry", "add", "body", "--person", "ghost"
-            )
+            rc, _, err = self._run("entry", "add", "body", "--person", "ghost")
         self.assertEqual(rc, 1)
         self.assertIn("ghost", err)
         with closing(db.connect(self.db_path)) as conn:
@@ -105,9 +103,7 @@ class EntryAddTests(EntryTestBase):
             self.assertEqual(db.list_entries(conn), ())
 
     def test_add_comma_delimited_tags(self) -> None:
-        rc, _, _ = self._run(
-            "entry", "add", "body", "--tag", "alpha, Beta,alpha"
-        )
+        rc, _, _ = self._run("entry", "add", "body", "--tag", "alpha, Beta,alpha")
         self.assertEqual(rc, 0)
         with closing(db.connect(self.db_path)) as conn:
             entry = db.get_entry(conn, 1)
@@ -120,9 +116,7 @@ class EntryAddTests(EntryTestBase):
         self.assertIn("non-empty", err)
 
     def test_add_bad_occurred_at_exits_one_without_writing(self) -> None:
-        rc, _, err = self._run(
-            "entry", "add", "body", "--occurred-at", "yesterdya"
-        )
+        rc, _, err = self._run("entry", "add", "body", "--occurred-at", "yesterdya")
         self.assertEqual(rc, 1)
         self.assertIn("accepted forms", err)
         with closing(db.connect(self.db_path)) as conn:
@@ -159,9 +153,7 @@ class EntryAddTests(EntryTestBase):
         self.assertIn("cannot read body: not valid UTF-8", err)
 
     def test_add_out_of_range_occurred_at_exits_one(self) -> None:
-        rc, _, err = self._run(
-            "entry", "add", "body", "--occurred-at", "999999999 days ago"
-        )
+        rc, _, err = self._run("entry", "add", "body", "--occurred-at", "999999999 days ago")
         self.assertEqual(rc, 1)
         self.assertIn("out of range", err)
 

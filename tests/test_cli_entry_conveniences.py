@@ -14,36 +14,71 @@ from .cli_entry_case import EntryTestBase
 class EntryConvenienceTests(EntryTestBase):
     def test_source_filter_combines_with_existing_filters_and_order(self):
         self._create_person("alice")
-        older = self._seed_entry("Ask", source="Email", people=("alice",),
-                                 tags=("work",), occurred_at="2026-01-01")
-        self._seed_entry("Ask", source="email", people=("alice",),
-                         tags=("work",), occurred_at="2026-02-01")
-        self._seed_entry("Ask", source="slack", people=("alice",),
-                         tags=("work",), occurred_at="2025-12-01")
+        older = self._seed_entry(
+            "Ask", source="Email", people=("alice",), tags=("work",), occurred_at="2026-01-01"
+        )
+        self._seed_entry(
+            "Ask", source="email", people=("alice",), tags=("work",), occurred_at="2026-02-01"
+        )
+        self._seed_entry(
+            "Ask", source="slack", people=("alice",), tags=("work",), occurred_at="2025-12-01"
+        )
         self._seed_entry("Ask", source="email", tags=("work",), occurred_at="2026-01-01")
         self._seed_entry("Ask", source="email", people=("alice",), occurred_at="2026-01-01")
         self._seed_entry("Ask", people=("alice",), tags=("work",), occurred_at="2026-01-01")
-        self._seed_entry("Other", source="email", people=("alice",),
-                         tags=("work",), occurred_at="2026-01-01")
-        self._seed_entry("Ask", source="email", people=("alice",),
-                         tags=("work",), occurred_at="2025-01-01")
-        coached = self._seed_entry("Ask", source="email", people=("alice",),
-                                   tags=("work",), occurred_at="2025-12-01")
+        self._seed_entry(
+            "Other", source="email", people=("alice",), tags=("work",), occurred_at="2026-01-01"
+        )
+        self._seed_entry(
+            "Ask", source="email", people=("alice",), tags=("work",), occurred_at="2025-01-01"
+        )
+        coached = self._seed_entry(
+            "Ask", source="email", people=("alice",), tags=("work",), occurred_at="2025-12-01"
+        )
         with closing(db.connect(self.db_path)) as conn:
             db.create_feedback(conn, coached.id, "Already coached")
         rc, out, err = self._run(
-            "entry", "search", "--source", "EMAIL", "--person", "ALICE",
-            "--tag", "work", "--query", "Ask", "--no-feedback",
-            "--since", "2025-12-01", "--until", "2026-02-02",
-            "--oldest-first", "--limit", "1", "--json",
+            "entry",
+            "search",
+            "--source",
+            "EMAIL",
+            "--person",
+            "ALICE",
+            "--tag",
+            "work",
+            "--query",
+            "Ask",
+            "--no-feedback",
+            "--since",
+            "2025-12-01",
+            "--until",
+            "2026-02-02",
+            "--oldest-first",
+            "--limit",
+            "1",
+            "--json",
         )
         self.assertEqual(rc, 0, err)
         self.assertEqual([row["id"] for row in json.loads(out)], [older.id])
         rc, out, err = self._run(
-            "entry", "search", "--source", "EMAIL", "--person", "ALICE",
-            "--tag", "work", "--query", "Ask", "--no-feedback",
-            "--since", "2025-12-01", "--until", "2026-02-02",
-            "--oldest-first", "--limit", "1",
+            "entry",
+            "search",
+            "--source",
+            "EMAIL",
+            "--person",
+            "ALICE",
+            "--tag",
+            "work",
+            "--query",
+            "Ask",
+            "--no-feedback",
+            "--since",
+            "2025-12-01",
+            "--until",
+            "2026-02-02",
+            "--oldest-first",
+            "--limit",
+            "1",
         )
         self.assertEqual(rc, 0, err)
         self.assertIn(f"[{older.id}]", out)
@@ -60,7 +95,13 @@ class EntryConvenienceTests(EntryTestBase):
         for query, extra, total in cases:
             with self.subTest(query=query, extra=extra):
                 rc, out, err = self._run(
-                    "entry", "search", "--query", query, "--limit", "1", *extra,
+                    "entry",
+                    "search",
+                    "--query",
+                    query,
+                    "--limit",
+                    "1",
+                    *extra,
                 )
                 self.assertEqual(rc, 0, err)
                 self.assertIn(f"Showing 1 of {total} matching entries.", out)
@@ -73,8 +114,12 @@ class EntryConvenienceTests(EntryTestBase):
     def test_search_totals_only_appear_when_human_results_are_omitted(self):
         for _ in range(2):
             self._seed_entry("matching")
-        for flags in ((), ("--limit", "2"), ("--limit", "3"),
-                      ("--query", "absent", "--limit", "1")):
+        for flags in (
+            (),
+            ("--limit", "2"),
+            ("--limit", "3"),
+            ("--query", "absent", "--limit", "1"),
+        ):
             with self.subTest(flags=flags):
                 rc, out, err = self._run("entry", "search", *flags)
                 self.assertEqual(rc, 0, err)
@@ -93,7 +138,14 @@ class EntryConvenienceTests(EntryTestBase):
         self._seed_entry("10% better", source="email-thread")
         for flags in ((), ("--exact",)):
             rc, out, err = self._run(
-                "entry", "search", "--source", "EMAIL", "--query", "%", "--json", *flags,
+                "entry",
+                "search",
+                "--source",
+                "EMAIL",
+                "--query",
+                "%",
+                "--json",
+                *flags,
             )
             self.assertEqual(rc, 0, err)
             self.assertEqual([row["id"] for row in json.loads(out)], [match.id])
@@ -101,15 +153,26 @@ class EntryConvenienceTests(EntryTestBase):
     def test_incremental_links_preserve_other_links_and_normalize(self):
         for handle in ("alice", "bob", "carol"):
             self._create_person(handle)
-        entry = self._seed_entry(
-            tags=("keep", "drop"), people=("alice", "bob")
-        )
+        entry = self._seed_entry(tags=("keep", "drop"), people=("alice", "bob"))
         rc, out, err = self._run(
-            "--json", "entry", "edit", str(entry.id),
-            "--add-tag", "NEW,keep", "--add-tag", "new",
-            "--remove-tag", " DROP,absent ",
-            "--add-person", "CAROL", "--add-person", "ALICE",
-            "--remove-person", "BOB", "--remove-person", "absent",
+            "--json",
+            "entry",
+            "edit",
+            str(entry.id),
+            "--add-tag",
+            "NEW,keep",
+            "--add-tag",
+            "new",
+            "--remove-tag",
+            " DROP,absent ",
+            "--add-person",
+            "CAROL",
+            "--add-person",
+            "ALICE",
+            "--remove-person",
+            "BOB",
+            "--remove-person",
+            "absent",
         )
         self.assertEqual(rc, 0, err)
         payload = json.loads(out)
@@ -140,8 +203,14 @@ class EntryConvenienceTests(EntryTestBase):
     def test_add_person_uses_existing_confirmation_flow(self):
         entry = self._seed_entry(tags=("keep",))
         rc, _, _ = self._run(
-            "entry", "edit", str(entry.id), "--add-person", "new",
-            "--remove-tag", "keep", stdin=io.StringIO(),
+            "entry",
+            "edit",
+            str(entry.id),
+            "--add-person",
+            "new",
+            "--remove-tag",
+            "keep",
+            stdin=io.StringIO(),
         )
         self.assertEqual(rc, 1)
         with closing(db.connect(self.db_path)) as conn:
@@ -189,11 +258,20 @@ class EntryConvenienceTests(EntryTestBase):
         self._seed_entry("other tag", occurred_at="2025-01-01")
         with closing(db.connect(self.db_path)) as conn:
             db.create_feedback(conn, coached.id, "done")
-        for extra, expected in ((["--oldest-first"], [oldest.id, tied.id]),
-                                ([], [newest.id, tied.id])):
+        for extra, expected in (
+            (["--oldest-first"], [oldest.id, tied.id]),
+            ([], [newest.id, tied.id]),
+        ):
             rc, out, err = self._run(
-                "--json", "entry", "search", "--no-feedback", "--tag", "work",
-                "--limit", "2", *extra,
+                "--json",
+                "entry",
+                "search",
+                "--no-feedback",
+                "--tag",
+                "work",
+                "--limit",
+                "2",
+                *extra,
             )
             self.assertEqual(rc, 0, err)
             self.assertEqual([e["id"] for e in json.loads(out)], expected)

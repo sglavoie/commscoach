@@ -158,10 +158,7 @@ def format_scope(review: db.Review, *, separator: str = ":") -> str:
     if kind == "tag" and review.scope_tag:
         return f"{kind}{separator}{review.scope_tag}"
     if kind == "range" and (review.scope_since or review.scope_until):
-        return (
-            f"{kind}{separator}"
-            f"{review.scope_since or ''}..{review.scope_until or ''}"
-        )
+        return f"{kind}{separator}{review.scope_since or ''}..{review.scope_until or ''}"
     return kind
 
 
@@ -257,18 +254,12 @@ def parse_date_bounds(args: argparse.Namespace) -> tuple[str | None, str | None]
     """Resolve and validate shared CLI date bounds."""
     now = datetime.now()
     since = (
-        parse_date_bound(args.since, flag="--since", now=now)
-        if args.since is not None
-        else None
+        parse_date_bound(args.since, flag="--since", now=now) if args.since is not None else None
     )
     until = (
-        parse_date_bound(args.until, flag="--until", now=now)
-        if args.until is not None
-        else None
+        parse_date_bound(args.until, flag="--until", now=now) if args.until is not None else None
     )
-    db.validate_range_bounds(
-        since, until, since_name="--since", until_name="--until"
-    )
+    db.validate_range_bounds(since, until, since_name="--since", until_name="--until")
     return since, until
 
 

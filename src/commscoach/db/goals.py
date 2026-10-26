@@ -27,17 +27,13 @@ def _validate_status(status: Any) -> str:
     return status
 
 
-def _resolve_person(
-    conn: sqlite3.Connection, person_handle: str | None
-) -> Person | None:
+def _resolve_person(conn: sqlite3.Connection, person_handle: str | None) -> Person | None:
     if person_handle is None:
         return None
     return resolve_person_handles(conn, (person_handle,))[0]
 
 
-def _resolve_review(
-    conn: sqlite3.Connection, review_id: int | None
-) -> Review | None:
+def _resolve_review(conn: sqlite3.Connection, review_id: int | None) -> Review | None:
     if review_id is None:
         return None
     review = get_review(conn, review_id)
@@ -102,15 +98,9 @@ def update_goal(
     if status is not common.UNSET:
         status = _validate_status(status)
     person = (
-        _resolve_person(conn, person_handle)
-        if person_handle is not common.UNSET
-        else common.UNSET
+        _resolve_person(conn, person_handle) if person_handle is not common.UNSET else common.UNSET
     )
-    review = (
-        _resolve_review(conn, review_id)
-        if review_id is not common.UNSET
-        else common.UNSET
-    )
+    review = _resolve_review(conn, review_id) if review_id is not common.UNSET else common.UNSET
 
     updates: list[str] = []
     params: list[Any] = []
@@ -170,8 +160,7 @@ def close_goal(
     closed_at = current.closed_at if current.status == status else timestamp
     with conn:
         conn.execute(
-            "UPDATE goals SET status = ?, outcome = ?, closed_at = ?, updated_at = ?"
-            " WHERE id = ?",
+            "UPDATE goals SET status = ?, outcome = ?, closed_at = ?, updated_at = ? WHERE id = ?",
             (status, outcome, closed_at, timestamp, goal_id),
         )
     goal = get_goal(conn, goal_id)
@@ -210,8 +199,12 @@ def list_goals(
     if limit is not None and limit < 0:
         raise DBError("limit must be non-negative")
     filters, params = _goal_filters(
-        conn, status=status, person_handle=person_handle,
-        include_general=include_general, review_id=review_id, query=query,
+        conn,
+        status=status,
+        person_handle=person_handle,
+        include_general=include_general,
+        review_id=review_id,
+        query=query,
     )
     sql = "SELECT * FROM goals" + filters
     direction = "ASC" if oldest_first else "DESC"
@@ -234,22 +227,34 @@ def list_goals(
 
 
 def count_goals(
-    conn: sqlite3.Connection, *, status: str | None = "active",
-    person_handle: str | None = None, include_general: bool = False,
-    review_id: int | None = None, query: str | None = None,
+    conn: sqlite3.Connection,
+    *,
+    status: str | None = "active",
+    person_handle: str | None = None,
+    include_general: bool = False,
+    review_id: int | None = None,
+    query: str | None = None,
 ) -> int:
     """Count goals using the same filters as list_goals, without a limit."""
     filters, params = _goal_filters(
-        conn, status=status, person_handle=person_handle,
-        include_general=include_general, review_id=review_id, query=query,
+        conn,
+        status=status,
+        person_handle=person_handle,
+        include_general=include_general,
+        review_id=review_id,
+        query=query,
     )
     return conn.execute("SELECT COUNT(*) FROM goals" + filters, params).fetchone()[0]
 
 
 def _goal_filters(
-    conn: sqlite3.Connection, *, status: str | None,
-    person_handle: str | None, include_general: bool,
-    review_id: int | None, query: str | None,
+    conn: sqlite3.Connection,
+    *,
+    status: str | None,
+    person_handle: str | None,
+    include_general: bool,
+    review_id: int | None,
+    query: str | None,
 ) -> tuple[str, list[Any]]:
     if status is not None:
         status = _validate_status(status)
@@ -261,10 +266,14 @@ def _goal_filters(
         if not query.strip():
             raise DBError("query must be a non-empty string")
         literal = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
-        where.append("(" + " OR ".join(
-            f"{column} LIKE ? ESCAPE '!' COLLATE NOCASE"
-            for column in ("title", "detail", "outcome")
-        ) + ")")
+        where.append(
+            "("
+            + " OR ".join(
+                f"{column} LIKE ? ESCAPE '!' COLLATE NOCASE"
+                for column in ("title", "detail", "outcome")
+            )
+            + ")"
+        )
         params.extend([f"%{literal}%"] * 3)
     if status is not None:
         where.append("status = ?")
@@ -273,8 +282,7 @@ def _goal_filters(
         person = _resolve_person(conn, person_handle)
         person_filter = "goals.person_id = ?"
         where.append(
-            f"({person_filter} OR goals.person_id IS NULL)"
-            if include_general else person_filter
+            f"({person_filter} OR goals.person_id IS NULL)" if include_general else person_filter
         )
         params.append(person.id)
     if review_id is not None:

@@ -54,9 +54,7 @@ class ReviewCrudTests(DBTestCase):
         with self.assertRaises(db.EntryNotFoundError):
             db.create_review(self.conn, "review", [self.first.id, 9999])
         self.assertEqual(db.list_reviews(self.conn), ())
-        (count,) = self.conn.execute(
-            "SELECT COUNT(*) FROM review_entries"
-        ).fetchone()
+        (count,) = self.conn.execute("SELECT COUNT(*) FROM review_entries").fetchone()
         self.assertEqual(count, 0)
 
     def test_create_review_rejects_negative_scope_limit(self) -> None:
@@ -68,9 +66,7 @@ class ReviewCrudTests(DBTestCase):
             db.create_review(self.conn, "review", [self.first.id], scope_kind="all")
 
     def test_get_review_returns_hydrated_review_or_none(self) -> None:
-        created = db.create_review(
-            self.conn, "review", [self.first.id, self.second.id]
-        )
+        created = db.create_review(self.conn, "review", [self.first.id, self.second.id])
         loaded = db.get_review(self.conn, created.id)
         self.assertEqual(loaded, created)
         self.assertIsNone(db.get_review(self.conn, 9999))
@@ -98,9 +94,7 @@ class ReviewCrudTests(DBTestCase):
             db.list_reviews(self.conn, limit=-1)
 
     def test_delete_review_returns_true_and_cascades_review_entries(self) -> None:
-        review = db.create_review(
-            self.conn, "review", [self.first.id, self.second.id]
-        )
+        review = db.create_review(self.conn, "review", [self.first.id, self.second.id])
 
         self.assertTrue(db.delete_review(self.conn, review.id))
         self.assertIsNone(db.get_review(self.conn, review.id))
@@ -174,9 +168,7 @@ class ReviewScopeTests(DBTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.alice = db.create_person(self.conn, "Alice")
-        self.entry = db.create_entry(
-            self.conn, "standup", people=["alice"], tags=["conflict"]
-        )
+        self.entry = db.create_entry(self.conn, "standup", people=["alice"], tags=["conflict"])
 
     def _create(self, **scope: object) -> Review:
         return db.create_review(self.conn, "synthesis", [self.entry.id], **scope)
@@ -227,9 +219,7 @@ class ReviewScopeTests(DBTestCase):
         self.assertIsNone(review.scope_person_handle)
 
     def test_create_range_scope_accepts_one_or_both_bounds(self) -> None:
-        both = self._create(
-            scope_kind="range", scope_since="2026-01-01", scope_until="2026-01-31"
-        )
+        both = self._create(scope_kind="range", scope_since="2026-01-01", scope_until="2026-01-31")
         self.assertEqual((both.scope_since, both.scope_until), ("2026-01-01", "2026-01-31"))
 
         since_only = self._create(scope_kind="range", scope_since="2026-02-01")
@@ -251,18 +241,12 @@ class ReviewScopeTests(DBTestCase):
             {"scope_kind": "latest", "scope_person_handle": "alice"},
             {"scope_kind": "latest", "scope_since": "2026-01-01"},
             {"scope_kind": "latest", "scope_until": "2026-01-01"},
-            {"scope_kind": "person", "scope_person_handle": "alice",
-             "scope_tag": "conflict"},
-            {"scope_kind": "person", "scope_person_handle": "alice",
-             "scope_since": "2026-01-01"},
-            {"scope_kind": "tag", "scope_tag": "conflict",
-             "scope_person_handle": "alice"},
-            {"scope_kind": "tag", "scope_tag": "conflict",
-             "scope_until": "2026-01-01"},
-            {"scope_kind": "range", "scope_since": "2026-01-01",
-             "scope_tag": "conflict"},
-            {"scope_kind": "range", "scope_since": "2026-01-01",
-             "scope_person_handle": "alice"},
+            {"scope_kind": "person", "scope_person_handle": "alice", "scope_tag": "conflict"},
+            {"scope_kind": "person", "scope_person_handle": "alice", "scope_since": "2026-01-01"},
+            {"scope_kind": "tag", "scope_tag": "conflict", "scope_person_handle": "alice"},
+            {"scope_kind": "tag", "scope_tag": "conflict", "scope_until": "2026-01-01"},
+            {"scope_kind": "range", "scope_since": "2026-01-01", "scope_tag": "conflict"},
+            {"scope_kind": "range", "scope_since": "2026-01-01", "scope_person_handle": "alice"},
         )
         for scope in mismatches:
             with self.subTest(scope=scope), self.assertRaises(db.DBError):
@@ -294,9 +278,7 @@ class ReviewScopeTests(DBTestCase):
 
     def test_create_rejects_a_range_that_ends_before_it_starts(self) -> None:
         with self.assertRaises(db.DBError):
-            self._create(
-                scope_kind="range", scope_since="2026-02-01", scope_until="2026-01-01"
-            )
+            self._create(scope_kind="range", scope_since="2026-02-01", scope_until="2026-01-01")
         self._assert_no_reviews()
 
     def test_create_unknown_person_handle_raises_without_writing(self) -> None:
@@ -304,9 +286,7 @@ class ReviewScopeTests(DBTestCase):
             self._create(scope_kind="person", scope_person_handle="nobody")
 
         self._assert_no_reviews()
-        (count,) = self.conn.execute(
-            "SELECT COUNT(*) FROM review_entries"
-        ).fetchone()
+        (count,) = self.conn.execute("SELECT COUNT(*) FROM review_entries").fetchone()
         self.assertEqual(count, 0)
 
     def _assert_no_reviews(self) -> None:
@@ -319,23 +299,33 @@ class ListReviewsScopeFilterTests(DBTestCase):
         db.create_person(self.conn, "Alice")
         db.create_person(self.conn, "Bob")
         entry = db.create_entry(self.conn, "standup", people=["alice", "bob"])
-        self.latest = db.create_review(
-            self.conn, "latest", [entry.id], scope_limit=5
-        )
+        self.latest = db.create_review(self.conn, "latest", [entry.id], scope_limit=5)
         self.alice_review = db.create_review(
-            self.conn, "alice", [entry.id], scope_kind="person",
+            self.conn,
+            "alice",
+            [entry.id],
+            scope_kind="person",
             scope_person_handle="alice",
         )
         self.bob_review = db.create_review(
-            self.conn, "bob", [entry.id], scope_kind="person",
+            self.conn,
+            "bob",
+            [entry.id],
+            scope_kind="person",
             scope_person_handle="bob",
         )
         self.tag_review = db.create_review(
-            self.conn, "conflict", [entry.id], scope_kind="tag",
+            self.conn,
+            "conflict",
+            [entry.id],
+            scope_kind="tag",
             scope_tag="conflict",
         )
         self.range_review = db.create_review(
-            self.conn, "range", [entry.id], scope_kind="range",
+            self.conn,
+            "range",
+            [entry.id],
+            scope_kind="range",
             scope_since="2026-01-01",
         )
 

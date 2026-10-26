@@ -97,8 +97,12 @@ class ParseWhenTests(unittest.TestCase):
 
 class ParseBoundTests(unittest.TestCase):
     def test_bare_days_cover_the_whole_local_day(self):
-        for text, day in (("today", "2026-08-25"), ("yesterday", "2026-08-24"),
-                          ("last monday", "2026-08-24"), ("2026-08-24", "2026-08-24")):
+        for text, day in (
+            ("today", "2026-08-25"),
+            ("yesterday", "2026-08-24"),
+            ("last monday", "2026-08-24"),
+            ("2026-08-24", "2026-08-24"),
+        ):
             with self.subTest(text=text):
                 start = datetime.fromisoformat(parse_bound(text, now=NOW))
                 end = datetime.fromisoformat(parse_bound(text, upper=True, now=NOW))
@@ -106,8 +110,14 @@ class ParseBoundTests(unittest.TestCase):
                 self.assertEqual(end - start, timedelta(days=1, microseconds=-1))
 
     def test_clock_and_elapsed_time_expressions_stay_exact(self):
-        for text in ("now", "2 hours ago", "3 days ago", "today 9am", "last monday 10:30",
-                     "2026-08-20T14:30:00.123456+02:00"):
+        for text in (
+            "now",
+            "2 hours ago",
+            "3 days ago",
+            "today 9am",
+            "last monday 10:30",
+            "2026-08-20T14:30:00.123456+02:00",
+        ):
             with self.subTest(text=text):
                 expected = parse_when(text, now=NOW)
                 self.assertEqual(parse_bound(text, now=NOW), expected)
@@ -116,7 +126,9 @@ class ParseBoundTests(unittest.TestCase):
     def test_positive_offset_day_is_not_shifted_to_previous_local_date(self):
         now = datetime(2026, 8, 25, 12, tzinfo=ZoneInfo("Asia/Tokyo"))
         self.assertEqual(parse_bound("today", now=now), "2026-08-24T15:00:00+00:00")
-        self.assertEqual(parse_bound("today", upper=True, now=now), "2026-08-25T14:59:59.999999+00:00")
+        self.assertEqual(
+            parse_bound("today", upper=True, now=now), "2026-08-25T14:59:59.999999+00:00"
+        )
 
 
 if __name__ == "__main__":

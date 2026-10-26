@@ -39,7 +39,8 @@ def date_bound_timestamp(value: str, *, name: str, upper: bool = False) -> str:
     normalized = normalize_date_bound(value, name=name)
     if len(normalized) == 10:
         stamp = datetime.combine(
-            date.fromisoformat(normalized), time.max if upper else time.min,
+            date.fromisoformat(normalized),
+            time.max if upper else time.min,
             tzinfo=timezone.utc,
         )
     else:
@@ -58,9 +59,7 @@ def validate_range_bounds(
     """Reject reversed inclusive date/timestamp ranges; open ranges are valid."""
     if since is None or until is None:
         return
-    normalized_since = datetime.fromisoformat(
-        date_bound_timestamp(since, name=since_name)
-    )
+    normalized_since = datetime.fromisoformat(date_bound_timestamp(since, name=since_name))
     normalized_until = datetime.fromisoformat(
         date_bound_timestamp(until, name=until_name, upper=True)
     )

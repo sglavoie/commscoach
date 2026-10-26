@@ -63,10 +63,13 @@ class EntryEditTests(EntryTestBase):
 
         tty = mock.Mock()
         tty.isatty.return_value = True
-        with mock.patch.object(cli_entries.sys, "stdin", tty), mock.patch.object(
-            cli_entries,
-            "compose_in_editor",
-            side_effect=compose,
+        with (
+            mock.patch.object(cli_entries.sys, "stdin", tty),
+            mock.patch.object(
+                cli_entries,
+                "compose_in_editor",
+                side_effect=compose,
+            ),
         ):
             rc, _, _ = self._run("entry", "edit", str(entry.id), "--body")
         self.assertEqual(rc, 0)
@@ -79,9 +82,7 @@ class EntryEditTests(EntryTestBase):
         entry = self._seed_entry("old body")
         body_file = self.tmpdir / "new.txt"
         body_file.write_text("from file edit", encoding="utf-8")
-        rc, _, _ = self._run(
-            "entry", "edit", str(entry.id), "--body", f"@{body_file}"
-        )
+        rc, _, _ = self._run("entry", "edit", str(entry.id), "--body", f"@{body_file}")
         self.assertEqual(rc, 0)
         with closing(db.connect(self.db_path)) as conn:
             updated = db.get_entry(conn, entry.id)
@@ -108,9 +109,7 @@ class EntryEditTests(EntryTestBase):
 
     def test_edit_empty_occurred_at_clears_it(self) -> None:
         entry = self._seed_entry("body", occurred_at="2026-01-01")
-        rc, _, _ = self._run(
-            "entry", "edit", str(entry.id), "--occurred-at", ""
-        )
+        rc, _, _ = self._run("entry", "edit", str(entry.id), "--occurred-at", "")
         self.assertEqual(rc, 0)
         with closing(db.connect(self.db_path)) as conn:
             updated = db.get_entry(conn, entry.id)
@@ -118,12 +117,8 @@ class EntryEditTests(EntryTestBase):
         self.assertIsNone(updated.occurred_at)
 
     def test_edit_bad_occurred_at_exits_one_without_changing_entry(self) -> None:
-        entry = self._seed_entry(
-            "body", occurred_at="2026-01-01T00:00:00+00:00"
-        )
-        rc, _, err = self._run(
-            "entry", "edit", str(entry.id), "--occurred-at", "next week"
-        )
+        entry = self._seed_entry("body", occurred_at="2026-01-01T00:00:00+00:00")
+        rc, _, err = self._run("entry", "edit", str(entry.id), "--occurred-at", "next week")
         self.assertEqual(rc, 1)
         self.assertIn("accepted forms", err)
         with closing(db.connect(self.db_path)) as conn:

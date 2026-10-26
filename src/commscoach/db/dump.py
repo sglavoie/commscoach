@@ -106,9 +106,7 @@ def _row_dict(row: sqlite3.Row, columns: tuple[str, ...]) -> dict[str, Any]:
     return {column: row[column] for column in columns}
 
 
-def _dump_rows(
-    conn: sqlite3.Connection, table: str
-) -> list[dict[str, Any]]:
+def _dump_rows(conn: sqlite3.Connection, table: str) -> list[dict[str, Any]]:
     columns = _TABLE_COLUMNS[table]
     order_column = "person_id" if table == "person_notes" else "id"
     rows = conn.execute(
@@ -152,8 +150,7 @@ def _dump_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         entry["person_ids"] = [
             row[0]
             for row in conn.execute(
-                "SELECT person_id FROM entry_people"
-                " WHERE entry_id = ? ORDER BY person_id",
+                "SELECT person_id FROM entry_people WHERE entry_id = ? ORDER BY person_id",
                 (entry_id,),
             ).fetchall()
         ]
@@ -244,9 +241,7 @@ def _validate_row(table: str, index: int, row: Any) -> None:
         raise DumpFormatError(f"{location} must be an object")
     optional = _OPTIONAL_TABLE_COLUMNS.get(table, frozenset())
     missing = [
-        column
-        for column in _TABLE_COLUMNS[table]
-        if column not in row and column not in optional
+        column for column in _TABLE_COLUMNS[table] if column not in row and column not in optional
     ]
     if missing:
         raise DumpFormatError(f"{location} is missing column {missing[0]!r}")
@@ -269,9 +264,7 @@ def _validate_row(table: str, index: int, row: Any) -> None:
                 raise DumpFormatError(f"{entry_location} must be an object")
             for key in ("entry_id", "position"):
                 if key not in linked_entry:
-                    raise DumpFormatError(
-                        f"{entry_location} is missing column {key!r}"
-                    )
+                    raise DumpFormatError(f"{entry_location} is missing column {key!r}")
                 _require_int(linked_entry[key], f"{entry_location}.{key}")
 
 
@@ -339,9 +332,7 @@ def _restore_sequences(conn: sqlite3.Connection, sequences: Mapping[str, int]) -
             (seq, table),
         )
         if updated.rowcount == 0:
-            conn.execute(
-                "INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", (table, seq)
-            )
+            conn.execute("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", (table, seq))
 
 
 def _restore_rows(conn: sqlite3.Connection, data: Mapping[str, Any]) -> None:
@@ -367,8 +358,7 @@ def _restore_rows(conn: sqlite3.Connection, data: Mapping[str, Any]) -> None:
         _insert_row(conn, "reviews", review)
         for linked_entry in review.get("entries", []):
             conn.execute(
-                "INSERT INTO review_entries (review_id, entry_id, position)"
-                " VALUES (?, ?, ?)",
+                "INSERT INTO review_entries (review_id, entry_id, position) VALUES (?, ?, ?)",
                 (review["id"], linked_entry["entry_id"], linked_entry["position"]),
             )
     for row in data.get("person_notes", []):
@@ -391,9 +381,7 @@ def load_from_dict(
     """
     validate_dump(data)
     if _database_has_data(conn):
-        raise DatabaseNotEmptyError(
-            "database is not empty; import requires an empty database"
-        )
+        raise DatabaseNotEmptyError("database is not empty; import requires an empty database")
 
     foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
     if not foreign_keys:
@@ -423,9 +411,7 @@ def load_from_dict(
         conn.execute(f"RELEASE {savepoint}")
         if isinstance(exc, DBError):
             raise
-        if isinstance(
-            exc, (sqlite3.Error, KeyError, TypeError, ValueError, OverflowError)
-        ):
+        if isinstance(exc, (sqlite3.Error, KeyError, TypeError, ValueError, OverflowError)):
             raise DumpFormatError(f"cannot import dump: {exc}") from exc
         raise
     if dry_run:

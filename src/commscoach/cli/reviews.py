@@ -30,9 +30,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "review",
         help="Manage stored review syntheses.",
     )
-    review_sub = review_parser.add_subparsers(
-        dest="review_command", metavar="SUBCOMMAND"
-    )
+    review_sub = review_parser.add_subparsers(dest="review_command", metavar="SUBCOMMAND")
 
     def _show_review_help(_args: argparse.Namespace) -> int:
         review_parser.print_help()
@@ -135,23 +133,36 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     search = review_sub.add_parser("search", help="Search stored review bodies.")
     search.add_argument(
-        "--query", required=True, metavar="TEXT",
+        "--query",
+        required=True,
+        metavar="TEXT",
         help="Literal case-insensitive substring to find in review bodies.",
     )
     search.add_argument(
-        "--limit", type=non_negative_int, default=20, metavar="N",
+        "--limit",
+        type=non_negative_int,
+        default=20,
+        metavar="N",
         help="Maximum results (default: 20); text output reports omitted matches.",
     )
     search.add_argument(
-        "--scope", choices=db.SCOPE_KINDS, default=None, dest="scope_kind",
+        "--scope",
+        choices=db.SCOPE_KINDS,
+        default=None,
+        dest="scope_kind",
         help="Only search reviews with this scope kind.",
     )
     search.add_argument(
-        "--person", default=None, dest="person_handle", metavar="HANDLE",
+        "--person",
+        default=None,
+        dest="person_handle",
+        metavar="HANDLE",
         help="Only search reviews scoped to HANDLE, including deleted people.",
     )
     search.add_argument(
-        "--tag", default=None, metavar="NAME",
+        "--tag",
+        default=None,
+        metavar="NAME",
         help="Only search reviews scoped to tag NAME.",
     )
     search.set_defaults(func=cmd_review_list)
@@ -159,12 +170,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     show = review_sub.add_parser("show", help="Show one review by id.")
     show.add_argument("review_id", type=int, metavar="REVIEW_ID")
     show.add_argument(
-        "--with-goals", action="store_true",
+        "--with-goals",
+        action="store_true",
         help="Include linked goals of every status, with details and outcomes.",
     )
     show.set_defaults(func=cmd_review_show)
     show.add_argument(
-        "--with-entries", action="store_true",
+        "--with-entries",
+        action="store_true",
         help="Show surviving linked entries in full (already included in JSON).",
     )
 
@@ -185,7 +198,6 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     rm = review_sub.add_parser("rm", help="Delete one review.")
     rm.add_argument("review_id", type=int, metavar="REVIEW_ID")
     rm.set_defaults(func=cmd_review_rm)
-
 
 
 def cmd_review_context(args: argparse.Namespace) -> int:
@@ -251,8 +263,11 @@ def cmd_review_list(args: argparse.Namespace) -> int:
         )
         total = (
             db.count_reviews(
-                conn, scope_kind=args.scope_kind, person_handle=args.person_handle,
-                tag=args.tag, query=query,
+                conn,
+                scope_kind=args.scope_kind,
+                person_handle=args.person_handle,
+                tag=args.tag,
+                query=query,
             )
             if not args.json and args.limit is not None
             else len(reviews)
@@ -268,23 +283,24 @@ def cmd_review_show(args: argparse.Namespace) -> int:
         review = db.get_review(conn, args.review_id)
         if review is None:
             raise db.ReviewNotFoundError(args.review_id)
-        goals = (
-            db.list_goals(conn, status=None, review_id=review.id)
-            if args.with_goals else ()
-        )
+        goals = db.list_goals(conn, status=None, review_id=review.id) if args.with_goals else ()
     if args.with_goals and args.json:
-        print_json({
-            **review_to_dict(review),
-            "goals": [goal_to_dict(goal) for goal in goals],
-        })
+        print_json(
+            {
+                **review_to_dict(review),
+                "goals": [goal_to_dict(goal) for goal in goals],
+            }
+        )
         return 0
     emit_review(args, review)
     if args.with_entries and not args.json:
         from .entries_format import format_entry_human
 
         print("\nLinked entries (current text):")
-        print("\n\n".join(format_entry_human(entry) for entry in review.entries)
-              or "(no linked entries remain)")
+        print(
+            "\n\n".join(format_entry_human(entry) for entry in review.entries)
+            or "(no linked entries remain)"
+        )
     if args.with_goals:
         from .goals import _format_goal_human
 

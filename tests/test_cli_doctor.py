@@ -110,16 +110,12 @@ class DoctorCommandTests(unittest.TestCase):
         paths.ensure_data_dir(self.db_path)
         with closing(sqlite3.connect(self.db_path)) as conn:
             conn.executescript(schema.SCHEMA_V1_SQL)
-            conn.execute(
-                "INSERT INTO _meta (key, value) VALUES ('schema_version', '1')"
-            )
+            conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', '1')")
             conn.commit()
         paths.secure_file(self.db_path)
         rc, payload = self.run_doctor()
         self.assertEqual(rc, 1)
-        self.assertEqual(
-            self.checks_by_name(payload)["schema_version"]["status"], "fail"
-        )
+        self.assertEqual(self.checks_by_name(payload)["schema_version"]["status"], "fail")
 
     def test_foreign_key_violation_fails(self) -> None:
         db.init_db(self.db_path)
@@ -148,9 +144,7 @@ class DoctorCommandTests(unittest.TestCase):
             fh.write(b"\x00" * 256)
         rc, payload = self.run_doctor()
         self.assertEqual(rc, 1)
-        self.assertTrue(
-            any(item["status"] == "fail" for item in payload["checks"])
-        )
+        self.assertTrue(any(item["status"] == "fail" for item in payload["checks"]))
 
     def test_unparsable_occurrence_warns_without_failure(self) -> None:
         db.init_db(self.db_path)
@@ -168,15 +162,11 @@ class DoctorCommandTests(unittest.TestCase):
 
     def test_sync_artifacts_warn_without_failure(self) -> None:
         db.init_db(self.db_path)
-        conflict = self.db_path.with_name(
-            "commscoach (Laptop's conflicted copy).sqlite3"
-        )
+        conflict = self.db_path.with_name("commscoach (Laptop's conflicted copy).sqlite3")
         conflict.touch()
         rc, payload = self.run_doctor()
         self.assertEqual(rc, 0)
-        self.assertEqual(
-            self.checks_by_name(payload)["sync_artifacts"]["status"], "warn"
-        )
+        self.assertEqual(self.checks_by_name(payload)["sync_artifacts"]["status"], "warn")
 
     def test_healthy_database_emits_checks_in_the_expected_order(self) -> None:
         db.init_db(self.db_path)
@@ -187,9 +177,7 @@ class DoctorCommandTests(unittest.TestCase):
         _, payload = self.run_doctor()
         self.assertEqual(self.check_names(payload), _EXPECTED_CHECK_ORDER)
         self.assertEqual(self.checks_by_name(payload)["db_present"]["status"], "fail")
-        self.assertIn(
-            "not run", self.checks_by_name(payload)["review_scope"]["message"]
-        )
+        self.assertIn("not run", self.checks_by_name(payload)["review_scope"]["message"])
 
     def test_not_downloaded_database_emits_every_check_in_order(self) -> None:
         self.db_path.parent.mkdir(parents=True)

@@ -43,8 +43,7 @@ class TagNotFoundError(DBError):
 class DuplicateTagError(DBError):
     def __init__(self, name: str) -> None:
         super().__init__(
-            f"tag {name!r} already exists;"
-            " use 'commscoach tag merge' to combine the two"
+            f"tag {name!r} already exists; use 'commscoach tag merge' to combine the two"
         )
         self.name = name
 

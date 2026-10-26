@@ -70,9 +70,7 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
                 "SELECT review_id, entry_id, position FROM review_entries"
                 " ORDER BY review_id, position",
             )
-            self.before_goals = _rows(
-                conn, "SELECT id, title, review_id FROM goals ORDER BY id"
-            )
+            self.before_goals = _rows(conn, "SELECT id, title, review_id FROM goals ORDER BY id")
 
     def test_migration_stamps_v4_and_keeps_the_table_set(self) -> None:
         db.init_db(self.db_path)
@@ -123,9 +121,7 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
         db.init_db(self.db_path)
 
         with closing(db.connect(self.db_path)) as conn:
-            after = _rows(
-                conn, "SELECT id, title, review_id FROM goals ORDER BY id"
-            )
+            after = _rows(conn, "SELECT id, title, review_id FROM goals ORDER BY id")
 
         self.assertEqual(after, self.before_goals)
         self.assertEqual([row["review_id"] for row in after], [1, 2])
@@ -135,9 +131,7 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
 
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
-            self.assertEqual(
-                [row[0] for row in conn.execute("PRAGMA integrity_check")], ["ok"]
-            )
+            self.assertEqual([row[0] for row in conn.execute("PRAGMA integrity_check")], ["ok"])
             indexes = index_names(conn)
 
         for required in (
@@ -202,9 +196,10 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
 
         paths.ensure_data_dir(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
-            with mock.patch.object(
-                db_schema, "_rebuild_reviews_table", side_effect=sabotage
-            ), self.assertRaisesRegex(RuntimeError, "rebuild exploded"):
+            with (
+                mock.patch.object(db_schema, "_rebuild_reviews_table", side_effect=sabotage),
+                self.assertRaisesRegex(RuntimeError, "rebuild exploded"),
+            ):
                 db_schema._apply_schema(conn)
 
             (foreign_keys,) = conn.execute("PRAGMA foreign_keys").fetchone()
@@ -212,8 +207,7 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
             self.assertEqual(
                 _rows(
                     conn,
-                    f"SELECT {', '.join(_OLD_REVIEW_COLUMNS)} FROM reviews"
-                    " ORDER BY id",
+                    f"SELECT {', '.join(_OLD_REVIEW_COLUMNS)} FROM reviews ORDER BY id",
                 ),
                 self.before_reviews,
             )
@@ -231,18 +225,19 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
             )
             self.assertEqual(db.get_schema_version(conn), 3)
             self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
-            self.assertEqual(
-                [row[0] for row in conn.execute("PRAGMA integrity_check")], ["ok"]
-            )
+            self.assertEqual([row[0] for row in conn.execute("PRAGMA integrity_check")], ["ok"])
 
     def test_failed_verification_leaves_the_database_untouched(self) -> None:
         paths.ensure_data_dir(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
-            with mock.patch.object(
-                db_schema,
-                "_verify_reviews_rebuild",
-                side_effect=db.DBError("verification refused"),
-            ), self.assertRaisesRegex(db.DBError, "verification refused"):
+            with (
+                mock.patch.object(
+                    db_schema,
+                    "_verify_reviews_rebuild",
+                    side_effect=db.DBError("verification refused"),
+                ),
+                self.assertRaisesRegex(db.DBError, "verification refused"),
+            ):
                 db_schema._apply_schema(conn)
 
             (foreign_keys,) = conn.execute("PRAGMA foreign_keys").fetchone()
@@ -251,8 +246,7 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
             self.assertEqual(
                 _rows(
                     conn,
-                    f"SELECT {', '.join(_OLD_REVIEW_COLUMNS)} FROM reviews"
-                    " ORDER BY id",
+                    f"SELECT {', '.join(_OLD_REVIEW_COLUMNS)} FROM reviews ORDER BY id",
                 ),
                 self.before_reviews,
             )
