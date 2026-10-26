@@ -20,6 +20,7 @@ from .common import (
     handle_arg,
     non_negative_int,
     open_db,
+    plural,
     print_json,
     read_body_arg,
     read_body_or_raise,
@@ -317,6 +318,13 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                 person_handle=person.handle,
                 include_general=getattr(args, "include_general_goals", False),
             )
+            hidden_general = (
+                conn.execute(
+                    "SELECT COUNT(*) FROM goals WHERE status = 'active' AND person_id IS NULL"
+                ).fetchone()[0]
+                if args.person_command == "prep" and not args.include_general_goals
+                else 0
+            )
             feedback = (
                 {entry.id: db.list_feedback(conn, entry.id) for entry in entries}
                 if args.with_feedback
@@ -391,6 +399,9 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                     print(f"  All goals: {shlex.join(full)}")
             else:
                 _emit_goals(args, goals, with_detail=True)
+            if hidden_general:
+                full = [*command, "person", "prep", person.handle, "--include-general-goals"]
+                print(f"  {plural(hidden_general, 'general goal')} not shown: {shlex.join(full)}")
         print("\nRecent interactions:")
         if args.with_feedback and entries:
             for index, entry in enumerate(entries):
@@ -404,7 +415,7 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                             f"  Feedback [{note.id}]: {truncate(first_prose_line(note.body), width=180)}"
                             for note in feedback[entry.id][-1:]
                         )
-                        or "(no feedback)"
+                        or "  (no feedback)"
                     )
                     if len(feedback[entry.id]) > 1:
                         print(f"  Showing latest of {len(feedback[entry.id])} feedback notes.")

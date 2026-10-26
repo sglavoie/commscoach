@@ -211,7 +211,9 @@ class PersonAddTests(PeopleTestBase):
         self.assertIn("(no goals)", out)
         with closing(db.connect(self.db_path)) as conn:
             db.create_entry(conn, "Uncoached", people=["alice"])
-        self.assertIn("(no feedback)", self._run("person", "prep", "alice", "--brief")[1])
+        self.assertIn(
+            "Feedback:\n  (no feedback)", self._run("person", "prep", "alice", "--brief")[1]
+        )
 
     def test_add_minimal_creates_person(self) -> None:
         rc, out, _ = self._run("person", "add", "alice")
@@ -287,6 +289,9 @@ class PersonPrepTests(PeopleTestBase):
         self.assertEqual(rc, 0, err)
         self.assertIn("  Practice in three meetings.\n  Start with the decision needed.", out)
         self.assertNotIn("Pause first", out)
+        # Only the active general goal counts, and the hint names the flag.
+        self.assertIn("  1 general goal not shown: ", out)
+        self.assertIn("person prep alice --include-general-goals", out)
         rc, out, err = self._run("person", "show", "alice", "--recent", "0")
         self.assertEqual(rc, 0, err)
         self.assertNotIn("Practice in three meetings.", out)
@@ -305,6 +310,7 @@ class PersonPrepTests(PeopleTestBase):
         self.assertIn("Pause first", out)
         self.assertIn("(general)", out)
         self.assertIn("  Take one breath.", out)
+        self.assertNotIn("not shown", out)
         for excluded in ("Bob only", "Completed general", "Dropped general"):
             self.assertNotIn(excluded, out)
         rc, out, err = self._run(*args, "--json")
