@@ -214,6 +214,28 @@ class DumpRoundTripTests(DBTestCase):
         self.assertEqual(scoped["june"]["scope_since"], "2026-06-01")
         self.assertEqual(scoped["june"]["scope_until"], "2026-06-30")
 
+    def test_review_scope_tags_are_normalized_or_rejected(self) -> None:
+        # A scope may name a tag deleted since, so no tags row carries it along.
+        self.conn.execute(
+            "INSERT INTO reviews (body, scope_kind, scope_tag, created_at, updated_at)"
+            " VALUES ('old theme', 'tag', '#Conflict', ?, ?)",
+            (STAMP, STAMP),
+        )
+        self.conn.commit()
+        payload = db.dump_to_dict(self.conn)
+        restored = self._fresh_connection()
+        db.load_from_dict(restored, payload)
+        (review,) = db.list_reviews(restored, scope_kind="tag", tag="conflict")
+        self.assertEqual(review.scope_tag, "conflict")
+
+        for value in ("#", "  ", 7):
+            payload["reviews"][-1]["scope_tag"] = value
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(db.DumpFormatError, r"reviews\[\d+\]\.scope_tag"),
+            ):
+                db.validate_dump(payload)
+
     def test_format_version_one_archive_restores_with_null_scope_columns(self) -> None:
         # Hand-built: exactly what a pre-v4 export produced, with no scope
         # columns beyond scope_kind/scope_limit on the reviews rows.

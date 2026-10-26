@@ -220,8 +220,9 @@ def renormalize_tag_names(conn: sqlite3.Connection) -> None:
     """Bring stored tag names up to the current ``normalize_tag`` rules.
 
     Names stored under older rules (decomposed accents, a leading ``#``) are
-    renamed, or folded into the tag they now equal, carrying tag-scoped
-    reviews along as ``merge_tags`` does. The caller owns the transaction.
+    renamed, or folded into the tag they now equal. Review scopes are
+    normalized on their own, since one may name a tag deleted since. The
+    caller owns the transaction.
     """
     for row in conn.execute("SELECT id, name FROM tags ORDER BY id").fetchall():
         old_name, new_name = row["name"], normalize_tag(row["name"])
@@ -237,7 +238,14 @@ def renormalize_tag_names(conn: sqlite3.Connection) -> None:
             )
             conn.execute("DELETE FROM entry_tags WHERE tag_id = ?", (row["id"],))
             conn.execute("DELETE FROM tags WHERE id = ?", (row["id"],))
-        conn.execute("UPDATE reviews SET scope_tag = ? WHERE scope_tag = ?", (new_name, old_name))
+    for row in conn.execute(
+        "SELECT DISTINCT scope_tag FROM reviews WHERE scope_tag IS NOT NULL"
+    ).fetchall():
+        old_name, new_name = row["scope_tag"], normalize_tag(row["scope_tag"])
+        if new_name != old_name and new_name:
+            conn.execute(
+                "UPDATE reviews SET scope_tag = ? WHERE scope_tag = ?", (new_name, old_name)
+            )
 
 
 @common.writes

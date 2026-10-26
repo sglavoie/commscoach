@@ -297,6 +297,11 @@ def _validate_row(table: str, index: int, row: Any) -> None:
             for value_index, value in enumerate(values):
                 _require_int(value, f"{location}.{key}[{value_index}]")
     elif table == "reviews":
+        scope_tag = row.get("scope_tag")
+        if scope_tag is not None and (
+            not isinstance(scope_tag, str) or not normalize_tag(scope_tag)
+        ):
+            raise DumpFormatError(f"{location}.scope_tag must be null or a non-empty tag name")
         linked_entries = row.get("entries", [])
         if not isinstance(linked_entries, list):
             raise DumpFormatError(f"{location}.entries must be an array")
