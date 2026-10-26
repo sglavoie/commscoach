@@ -2,7 +2,7 @@
 
 [Back to the quick start](../README.md#quick-start)
 
-See also: [storage, capture, tags, and review scopes](reference.md), [coaching and skill integration](reference-coaching.md), [goals, stats, and operations](reference-operations.md).
+See also: [storage, capture, tags, and review scopes](reference.md) and [goals, stats, and operations](reference-operations.md).
 
 ## Finding past coaching and relationship context
 
@@ -75,6 +75,8 @@ commscoach person show jdoe --reviews 2
 ```
 
 This option works independently of `--recent`. It includes person-scoped reviews, not general or tag reviews that happen to cover an interaction with that person. Human output shows `(no reviews)` when none match; JSON adds a `recent_reviews` array only when `--reviews` is supplied. `--reviews 0` returns an empty array, and negative limits are rejected. Renaming a person's handle carries their review history into this view as well.
+
+`person self HANDLE` marks an existing person as you (the coached self), moving the self flag from any previous self profile; create one directly with `person add HANDLE --self`. Coaching context requires a self profile.
 
 `person rm HANDLE` reports how many private notes will be deleted, entry links
 removed, and goals and person-scoped reviews detached before asking for confirmation.

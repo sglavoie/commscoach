@@ -70,7 +70,7 @@ commscoach entry search --source email --person jdoe --since "30 days ago"
 
 `entry search --source` matches the complete stored channel or medium case-insensitively (`email` matches `Email`, but not `email-thread`). It combines with the existing query, tag, person, date, and feedback filters, and is applied before ordering and limiting results.
 
-`--oldest-first` applies to `entry search` and orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. By default, when SQLite has FTS5, `entry search --query` matches whole words, accent-insensitively: `meet` does not match `meeting`. Append `*` for a prefix (`meet*`), and quote phrases (`"lead with the ask"`); without FTS5 it falls back to substring matching. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters. Feedback, review, and goal searches always use substring matching.
+`entry list --limit N` and `review list --limit N` cap the newest results shown. `--oldest-first` applies to `entry search` and orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. By default, when SQLite has FTS5, `entry search --query` matches whole words, accent-insensitively: `meet` does not match `meeting`. Append `*` for a prefix (`meet*`), and quote phrases (`"lead with the ask"`); without FTS5 it falls back to substring matching. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters. Feedback, review, and goal searches always use substring matching.
 
 When `entry search --limit N` omits matches, human output ends with a count such
 as `Showing 5 of 23 matching entries.` The total respects every search filter,
@@ -97,6 +97,13 @@ written. JSON adds an `entry` object only when this flag is supplied; plain
 `feedback show ID` is unchanged.
 
 `entry rm ID` includes the counts of feedback notes to delete and review links to remove in its confirmation. The reviews themselves remain. `--yes` continues to bypass confirmation.
+
+`entry edit ID` replaces links with `--tag TAG` and `--person HANDLE` (both repeatable; tags also accept comma-separated values) and removes them all with `--clear-tags` or `--clear-people`:
+
+```sh
+commscoach entry edit 42 --tag 1on1,review --person jdoe
+commscoach entry edit 42 --clear-tags
+```
 
 Incremental edits let you change links without replacing the existing lists:
 
@@ -231,4 +238,4 @@ The JSON review shape carries that stored handle as its own `scope_person_handle
 
 `commscoach person edit alice --handle ally` carries the rename into that stored handle, the same way `tag rename` carries a tag rename into tag-scoped reviews. The person's review history follows them: `review list --person ally` finds it, a `review context --person ally` counts it among the prior reviews, and every surface prints `@ally`. Delete them afterwards and `@ally` — the handle they last had — is what remains as history.
 
-See also: [storage, capture, tags, and review scopes](reference.md), [coaching and skill integration](reference-coaching.md), [goals, stats, and operations](reference-operations.md).
+See also: [coaching and skill integration](reference-coaching.md) and [goals, stats, and operations](reference-operations.md).

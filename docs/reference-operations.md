@@ -2,7 +2,7 @@
 
 [Back to the quick start](../README.md#quick-start)
 
-See also: [storage, capture, tags, and review scopes](reference.md), [coaching and skill integration](reference-coaching.md), [goals, stats, and operations](reference-operations.md).
+See also: [storage, capture, tags, and review scopes](reference.md) and [coaching and skill integration](reference-coaching.md).
 
 ## Goals and stats
 
@@ -15,15 +15,18 @@ commscoach goal list
 commscoach goal list --oldest-first --limit 5
 commscoach goal show 1
 commscoach goal edit 1 --person jdoe
+commscoach goal edit 1 --clear-person            # make it a general goal
+commscoach goal edit 1 --title "Lead with the decision needed"
 commscoach goal edit 1 --detail                 # edit existing detail in $EDITOR
 commscoach goal edit 1 --outcome                # correct outcome, preserving status
 commscoach goal edit 1 --clear-outcome
 commscoach goal close 1 --outcome               # compose or revise the outcome in $EDITOR
 commscoach goal close 1 --outcome "Led with the decision needed in three meetings."
 commscoach goal close 2 --dropped --outcome "Role changed; this scenario no longer applies."
+commscoach goal rm 2                             # delete permanently (asks first)
 ```
 
-`goal close` marks a goal done; add `--dropped` when it is no longer relevant. Goal details and outcomes also accept `-` for stdin or `@PATH`.
+`goal close` marks a goal done; add `--dropped` when it is no longer relevant. `goal rm ID` deletes a goal outright after confirmation (`--yes` skips it); prefer `goal close --dropped` to keep the history. Goal details and outcomes also accept `-` for stdin or `@PATH`.
 
 For `goal add --detail`, `goal edit --detail`, and `goal close --outcome`, passing the flag without a value opens `$VISUAL`/`$EDITOR`, pre-filled with the existing text (or blank for a new goal or unset field). These commands use the same draft recovery as entry editing and reject empty editor drafts. Goal creation validates the database, title, person, and review references before opening the editor. Use `goal edit --clear-detail` to remove detail. Non-interactive callers must supply text, `-`, or `@PATH`; omitting the flag entirely keeps the existing behavior.
 
@@ -49,7 +52,10 @@ Use `stats` for stored activity and coverage numbers rather than reconstructing 
 ```sh
 commscoach stats
 commscoach --json stats --since "30 days ago" --until today --weeks 8
+commscoach stats --top 10                       # longer top tags/sources/people lists
 ```
+
+`--top N` (default 5) caps each ranked list and `--weeks N` (default 12) caps the weekly buckets shown; both accept zero.
 
 The summary includes entry, people, tag, feedback, review, and goal counts; feedback coverage; first/last activity; entries per week; current and longest weekly streaks; weekly buckets; and top tags, sources, and people. Weeks are local Monday-to-Sunday weeks. The current streak counts consecutive active weeks up to this week (or the `--until` week); it stays alive while the current week has no entries yet, and drops to 0 once a full week is missed. The backlog hint after the human summary is printed to stderr, so it does not mix into piped output.
 
