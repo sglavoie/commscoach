@@ -145,6 +145,20 @@ class InitDbSchemaTests(unittest.TestCase):
                 [match.id],
             )
 
+    def test_init_repairs_fts_triggers_before_backfilling_entry_bodies(self) -> None:
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            entry = db.create_entry(conn, "body")
+            conn.execute("UPDATE entries SET occurred_at = 'whenever' WHERE id = ?", (entry.id,))
+            # As on a build that cannot load the FTS table, while its triggers remain.
+            conn.execute("DROP TABLE entries_fts")
+            conn.execute("DELETE FROM _meta WHERE key = 'occurred_at_utc_backfill_v2'")
+            conn.commit()
+        with mock.patch.object(db_schema, "_probe_fts5", return_value=False):
+            db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertIn("whenever", db.get_entry(conn, entry.id).body)
+
     def test_init_backfills_fts_once_when_counts_differ(self) -> None:
         paths.ensure_data_dir(self.db_path)
         with closing(db.connect(self.db_path)) as conn:

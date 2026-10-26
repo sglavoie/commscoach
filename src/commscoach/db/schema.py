@@ -479,7 +479,6 @@ def _apply_schema_steps(conn: sqlite3.Connection) -> None:
     # ASCII-only indexes cannot serve.
     conn.execute("DROP INDEX IF EXISTS idx_entries_source_nocase")
     conn.execute("DROP INDEX IF EXISTS idx_reviews_scope_person_handle_lower")
-    _normalize_occurred_at_once(conn)
     # Must precede SCHEMA_V2_SQL: that script now creates
     # idx_reviews_scope_person_id, which cannot be built against a pre-v4
     # reviews table.
@@ -488,4 +487,8 @@ def _apply_schema_steps(conn: sqlite3.Connection) -> None:
     _execute_script(conn, SCHEMA_V3_SQL)
     _normalize_names_once(conn)
     _configure_fts5(conn)
+    # After the FTS5 step: this rewrites entry bodies, which fires the sync
+    # triggers, and those must already be repaired (or dropped on a build
+    # without FTS5) for the very database doctor tells to run init.
+    _normalize_occurred_at_once(conn)
     _set_schema_version(conn, SCHEMA_VERSION)
