@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import sqlite3
 import stat
 import tempfile
 import unittest
@@ -267,6 +268,38 @@ class ExitCodeTests(unittest.TestCase):
             rc = cli.main(["init"])
         self.assertEqual(rc, 1)
         self.assertIn("interrupted", err_buf.getvalue())
+
+    def test_sqlite_error_maps_to_exit_one_with_message(self) -> None:
+        def boom(_args: object) -> int:
+            raise sqlite3.OperationalError("database is locked")
+
+        err_buf = io.StringIO()
+        with mock.patch.object(cli_app, "cmd_init", boom), redirect_stderr(err_buf):
+            rc = cli.main(["init"])
+        self.assertEqual(rc, 1)
+        self.assertIn("database error: database is locked", err_buf.getvalue())
+
+    def test_broken_pipe_maps_to_exit_one_quietly(self) -> None:
+        def boom(_args: object) -> int:
+            raise BrokenPipeError()
+
+        err_buf = io.StringIO()
+        with mock.patch.object(cli_app, "cmd_init", boom), mock.patch.object(
+            cli_app, "_silence_stdout"
+        ) as silence, redirect_stderr(err_buf):
+            rc = cli.main(["init"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(err_buf.getvalue(), "")
+        silence.assert_called_once()
+
+    def test_empty_db_flag_is_argparse_error(self) -> None:
+        for argv in (["--db", "", "entry", "list"], ["entry", "list", "--db", " "]):
+            with self.subTest(argv=argv):
+                err_buf = io.StringIO()
+                with redirect_stderr(err_buf), self.assertRaises(SystemExit) as ctx:
+                    cli.main(argv)
+                self.assertEqual(ctx.exception.code, 2)
+                self.assertIn("--db: must not be empty", err_buf.getvalue())
 
     def test_unexpected_exception_propagates(self) -> None:
         def boom(_args: object) -> int:

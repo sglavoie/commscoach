@@ -184,6 +184,21 @@ class DraftRecoveryTests(EntryTestBase):
         assert self.draft_path is not None
         self.assertFalse(self.draft_path.exists())
 
+    def test_cancelled_edit_of_unchanged_text_leaves_no_draft(self) -> None:
+        with closing(db.connect(self.db_path)) as conn:
+            entry = db.create_entry(conn, "Private original text")
+
+        def run(command):
+            self.draft_path = Path(command[-1])
+            return 1  # e.g. vim's :cq without touching the buffer
+
+        with mock.patch.object(editor.subprocess, "call", side_effect=run):
+            rc, _, err = self._run("entry", "edit", str(entry.id), "--body")
+        self.assertEqual(rc, 1)
+        self.assertNotIn("Draft saved", err)
+        assert self.draft_path is not None
+        self.assertFalse(self.draft_path.exists())
+
     def test_invalid_utf8_draft_is_retained(self) -> None:
         def run(command):
             self.draft_path = Path(command[-1])
@@ -199,7 +214,8 @@ class DraftRecoveryTests(EntryTestBase):
     def test_unexpected_database_error_also_keeps_draft(self) -> None:
         with mock.patch.object(editor.subprocess, "call", side_effect=self._write_draft), \
                 mock.patch.object(db, "create_entry", side_effect=sqlite3.OperationalError("locked")):
-            with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
-                self._run("entry", "add")
+            rc, _, err = self._run("entry", "add")
+        self.assertEqual(rc, 1)
+        self.assertIn("database error: locked", err)
         assert self.draft_path is not None
         self.assertIn("My unsaved text", self.draft_path.read_text(encoding="utf-8"))

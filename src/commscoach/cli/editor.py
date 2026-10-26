@@ -15,17 +15,24 @@ from typing import Callable, Iterator
 from .. import db
 
 COMMENT_MARKER = "#>"
-_drafts: ContextVar[list[Path] | None] = ContextVar("editor_drafts", default=None)
+_drafts: ContextVar[list[tuple[Path, str]] | None] = ContextVar(
+    "editor_drafts", default=None
+)
 
 
-def _finish_draft(path: Path, *, recover: bool) -> None:
-    """Keep nonempty failed drafts, without masking the original error."""
+def _finish_draft(path: Path, *, recover: bool, template: str = "") -> None:
+    """Keep failed drafts holding new text, without masking the original error.
+
+    A draft that is empty or still equal to its starting ``template`` holds
+    nothing worth recovering (e.g. the user quit the editor with ``:cq``), and
+    keeping it would only leave a private copy of the original text behind.
+    """
     try:
         if recover:
             raw = path.read_bytes()
             # Preserve undecodable text too: a broken encoding must not lose work.
             body = strip_comment_lines(raw.decode("utf-8", errors="replace")).strip()
-            if body:
+            if body and body != template.strip():
                 path.chmod(0o600)
                 print(f"Draft saved for recovery: {path}", file=sys.stderr)
                 return
@@ -39,7 +46,7 @@ def _finish_draft(path: Path, *, recover: bool) -> None:
 @contextmanager
 def recover_editor_drafts() -> Iterator[None]:
     """Retain editor files until the entire CLI command succeeds."""
-    drafts: list[Path] = []
+    drafts: list[tuple[Path, str]] = []
     token = _drafts.set(drafts)
     succeeded = False
     try:
@@ -47,8 +54,8 @@ def recover_editor_drafts() -> Iterator[None]:
         succeeded = True
     finally:
         _drafts.reset(token)
-        for path in drafts:
-            _finish_draft(path, recover=not succeeded)
+        for path, template in drafts:
+            _finish_draft(path, recover=not succeeded, template=template)
 
 
 def editor_command() -> list[str]:
@@ -83,7 +90,7 @@ def compose_in_editor(
     path = Path(raw_path)
     drafts = _drafts.get()
     if drafts is not None:
-        drafts.append(path)
+        drafts.append((path, template))
     succeeded = False
     try:
         os.fchmod(fd, 0o600)
@@ -116,4 +123,4 @@ def compose_in_editor(
         if fd >= 0:
             os.close(fd)
         if drafts is None:
-            _finish_draft(path, recover=not succeeded)
+            _finish_draft(path, recover=not succeeded, template=template)

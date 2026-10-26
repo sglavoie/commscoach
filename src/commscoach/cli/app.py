@@ -4,13 +4,17 @@ Exit codes follow the project contract:
 
 - ``0`` success.
 - ``1`` semantic user error (any ``db.DBError`` raised by a handler, a rejected
-  confirmation, or ``KeyboardInterrupt``).
+  confirmation, or ``KeyboardInterrupt``), an unexpected SQLite error, or a
+  closed output pipe.
 - ``2`` argparse syntax error (raised by ``argparse`` itself).
 """
 
 from __future__ import annotations
 
 import argparse
+import os
+import sqlite3
+import sys
 from typing import Callable
 
 from .. import __version__, db
@@ -75,6 +79,7 @@ def _add_global_flags(parser: argparse.ArgumentParser, *, child: bool = False) -
     parser.add_argument(
         "--db",
         default=default,
+        type=_db_path_arg,
         metavar="PATH",
         help="Override the SQLite DB path (also reads $COMMSCOACH_DB).",
     )
@@ -91,6 +96,14 @@ def _add_global_flags(parser: argparse.ArgumentParser, *, child: bool = False) -
         default=argparse.SUPPRESS if child else False,
         help="Skip confirmation prompts.",
     )
+
+
+def _db_path_arg(value: str) -> str:
+    # An empty --db (typically an unset "$VAR") must not silently fall back to
+    # the real default database.
+    if not value.strip():
+        raise argparse.ArgumentTypeError("must not be empty")
+    return value
 
 
 def _add_global_flags_to_children(parser: argparse.ArgumentParser) -> None:
@@ -134,10 +147,28 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         with recover_editor_drafts():
-            return int(func(args) or 0)
+            code = int(func(args) or 0)
+        sys.stdout.flush()
+        return code
     except db.DBError as exc:
         print_err(str(exc))
+        return 1
+    except sqlite3.Error as exc:
+        print_err(f"database error: {exc}")
+        return 1
+    except BrokenPipeError:
+        # The reader went away (e.g. `| head`). Point stdout at devnull so the
+        # interpreter's final flush does not raise a second time.
+        _silence_stdout()
         return 1
     except KeyboardInterrupt:
         print_err("interrupted")
         return 1
+
+
+def _silence_stdout() -> None:
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+    except (OSError, ValueError, AttributeError):
+        pass
