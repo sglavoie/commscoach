@@ -172,15 +172,26 @@ class EnsureDataDirTests(unittest.TestCase):
             mode = stat.S_IMODE(parent.stat().st_mode)
             self.assertEqual(mode, 0o700)
 
-    def test_tightens_existing_dir_permissions(self):
+    def test_tightens_existing_default_data_dir(self):
         with tempfile.TemporaryDirectory() as td:
-            data_dir = Path(td) / "data"
+            data_dir = Path(td) / "commscoach"
             data_dir.mkdir()
             os.chmod(data_dir, 0o755)
-            db_path = data_dir / "commscoach.sqlite3"
-            paths.ensure_data_dir(db_path)
+            with mock.patch.dict(os.environ, {"XDG_DATA_HOME": td}):
+                paths.ensure_data_dir(data_dir / "commscoach.sqlite3")
             mode = stat.S_IMODE(data_dir.stat().st_mode)
             self.assertEqual(mode, 0o700)
+
+    def test_leaves_existing_user_chosen_dir_untouched(self):
+        with tempfile.TemporaryDirectory() as td:
+            shared = Path(td) / "shared"
+            shared.mkdir()
+            os.chmod(shared, 0o755)
+            with mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(Path(td) / "xdg")}):
+                paths.ensure_data_dir(shared / "journal.sqlite3")
+                paths.ensure_data_dir(shared / "new" / "journal.sqlite3")
+            self.assertEqual(stat.S_IMODE(shared.stat().st_mode), 0o755)
+            self.assertEqual(stat.S_IMODE((shared / "new").stat().st_mode), 0o700)
 
 
 class SecureFileTests(unittest.TestCase):

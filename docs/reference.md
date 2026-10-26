@@ -30,7 +30,7 @@ SQLite databases are a poor fit for file-sync conflict resolution. iCloud can ev
 
 ### Privacy
 
-The database is created with mode `0600` and its parent directory with mode `0700`. Backups and file exports are also written with mode `0600`. Treat all of them as private personal data.
+The database is created with mode `0600`. Directories commscoach creates for it get mode `0700`, and the default data directory is kept at `0700`; an existing directory you choose with `--db` or `backup --out` keeps its permissions. Backups and file exports are also written with mode `0600`. Treat all of them as private personal data.
 
 ## Capture and dates
 

@@ -88,14 +88,20 @@ def init_db(db_path: Path | str | None = None) -> Path:
     """Create the data dir, apply schema v4, and chmod the DB file.
 
     Idempotent: re-running ``init_db`` on an existing DB leaves data intact and
-    reaffirms the DB parent directory at ``0o700`` and the DB file at ``0o600``.
-    Returns the resolved DB path.
+    reaffirms the DB file at ``0o600`` (and the default data directory at
+    ``0o700``; see :func:`paths.ensure_data_dir`). Returns the resolved DB path.
     """
     resolved = Path(db_path).expanduser() if db_path is not None else paths.resolve_db_path()
-    paths.ensure_data_dir(resolved)
+    try:
+        paths.ensure_data_dir(resolved)
+    except OSError as exc:
+        raise DBError(f"cannot create data directory for {resolved}: {exc}") from exc
     with closing(connect(resolved)) as conn:
         _apply_schema(conn)
-    paths.secure_file(resolved)
+    try:
+        paths.secure_file(resolved)
+    except OSError as exc:
+        raise DBError(f"cannot secure database file {resolved}: {exc}") from exc
     return resolved
 
 

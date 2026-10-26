@@ -112,7 +112,7 @@ commscoach doctor --quick              # PRAGMA quick_check instead of integrity
 commscoach --json doctor
 ```
 
-`backup` uses SQLite's online backup API to create a consistent `0600` copy. Without `--out`, it writes a timestamped file under the database's `backups/` directory. `--keep N` prunes older standard timestamped backups in that output directory. It accepts any schema version so it can snapshot a database before [migrating](#schema-version-and-migration) it; it still refuses a file that is not a commscoach database.
+`backup` uses SQLite's online backup API to create a consistent `0600` copy. Without `--out`, it writes a timestamped file under the database's `backups/` directory. `--keep N` prunes older standard timestamped backups (`commscoach-YYYYMMDDTHHMMSSZ.sqlite3`) in that output directory; other files, including the live database, are never pruned. Two backups in the same second get a `-2` suffix instead of overwriting each other. It accepts any schema version so it can snapshot a database before [migrating](#schema-version-and-migration) it; it still refuses a file that is not a commscoach database.
 
 ```sh
 commscoach backup

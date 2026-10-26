@@ -114,15 +114,34 @@ def conflict_copies(db_path: Path | str) -> tuple[Path, ...]:
 
 
 def ensure_data_dir(db_path: Path) -> Path:
-    """Ensure the DB's parent directory exists with ``0o700`` permissions.
+    """Ensure the DB's parent directory exists, keeping private dirs ``0o700``.
 
-    Creates missing parent directories, then tightens the final directory's mode
-    to ``0o700``. Returns the resolved parent directory.
+    Directories this call creates get ``0o700``. An existing directory is only
+    tightened when it is the default data directory (or a directory beneath
+    it): a user-chosen location such as ``--db ~/journal.sqlite3`` or
+    ``backup --out ~/Desktop/x.sqlite3`` must not have its permissions changed.
+    Returns the parent directory.
     """
     parent = Path(db_path).expanduser().parent
+    missing = []
+    for ancestor in (parent, *parent.parents):
+        if ancestor.exists():
+            break
+        missing.append(ancestor)
     parent.mkdir(parents=True, exist_ok=True)
-    os.chmod(parent, DATA_DIR_MODE)
+    for created in missing:
+        os.chmod(created, DATA_DIR_MODE)
+    if not missing and _within_default_data_dir(parent):
+        os.chmod(parent, DATA_DIR_MODE)
     return parent
+
+
+def _within_default_data_dir(directory: Path) -> bool:
+    try:
+        directory.resolve().relative_to(default_data_dir().resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def secure_file(path: Path) -> None:

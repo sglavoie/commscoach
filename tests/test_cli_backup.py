@@ -93,6 +93,44 @@ class BackupCommandTests(unittest.TestCase):
         self.assertTrue(created[1].exists())
         self.assertTrue(created[2].exists())
 
+    def test_keep_never_prunes_the_live_database_or_unrelated_files(self) -> None:
+        folder = Path(self._tmp.name) / "flat"
+        folder.mkdir()
+        live = folder / "commscoach-2025.sqlite3"
+        db.init_db(live)
+        unrelated = folder / "commscoach-notes.sqlite3"
+        unrelated.touch()
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = cli.main(
+                [
+                    "--json", "--db", str(live), "backup",
+                    "--out", str(folder / "commscoach-20260101T000000Z.sqlite3"),
+                    "--keep", "0",
+                ]
+            )
+        self.assertEqual(rc, 0)
+        self.assertTrue(live.exists())
+        self.assertTrue(unrelated.exists())
+        self.assertEqual(
+            json.loads(out.getvalue())["pruned"],
+            [str(folder / "commscoach-20260101T000000Z.sqlite3")],
+        )
+
+    def test_same_second_default_backups_do_not_overwrite(self) -> None:
+        args = Namespace(db=str(self.db_path), out=None, keep=None, json=True)
+        now = datetime(2026, 8, 25, 12, 0, 0, tzinfo=timezone.utc)
+        created: list[Path] = []
+        for _ in range(2):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                backup_cli.cmd_backup(args, now=now)
+            created.append(Path(json.loads(out.getvalue())["backup_path"]))
+        self.assertEqual(
+            [path.name for path in created],
+            ["commscoach-20260825T120000Z.sqlite3", "commscoach-20260825T120000Z-2.sqlite3"],
+        )
+
     def test_backup_during_open_write_transaction_is_valid(self) -> None:
         destination = Path(self._tmp.name) / "copies" / "live.sqlite3"
         with closing(sqlite3.connect(self.db_path)) as writer, closing(

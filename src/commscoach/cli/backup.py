@@ -44,7 +44,14 @@ def default_backup_path(db_path: Path, *, now: datetime | None = None) -> Path:
     if current.tzinfo is None:
         current = current.replace(tzinfo=timezone.utc)
     stamp = current.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return db_path.parent / "backups" / f"{BACKUP_PREFIX}{stamp}{BACKUP_SUFFIX}"
+    directory = db_path.parent / "backups"
+    candidate = directory / f"{BACKUP_PREFIX}{stamp}{BACKUP_SUFFIX}"
+    counter = 1
+    # Two backups within one second must not overwrite each other.
+    while candidate.exists():
+        counter += 1
+        candidate = directory / f"{BACKUP_PREFIX}{stamp}-{counter}{BACKUP_SUFFIX}"
+    return candidate
 
 
 def cmd_backup(args: argparse.Namespace, *, now: datetime | None = None) -> int:
@@ -61,7 +68,11 @@ def cmd_backup(args: argparse.Namespace, *, now: datetime | None = None) -> int:
     # would make this command useless at the one moment it matters most.
     with open_db(args, allow_legacy_schema=True) as conn:
         created = db.backup_database(conn, destination)
-    removed = db.prune_backups(created.parent, args.keep) if args.keep is not None else ()
+    removed = (
+        db.prune_backups(created.parent, args.keep, protect=source_path)
+        if args.keep is not None
+        else ()
+    )
     payload = {
         "backup_path": str(created),
         "pruned": [str(path) for path in removed],
