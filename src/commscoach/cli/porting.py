@@ -43,6 +43,10 @@ def _read_dump(path_arg: str) -> Any:
         )
     except OSError as exc:
         raise db.DumpFormatError(f"cannot read import: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise db.DumpFormatError(
+            f"cannot read import: not valid UTF-8 ({exc.reason})"
+        ) from exc
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:

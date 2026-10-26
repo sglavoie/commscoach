@@ -11,7 +11,7 @@ class TimeParseError(ValueError):
 
 
 _ACCEPTED_FORMS = (
-    "ISO-8601; now/today/yesterday/tomorrow [TIME]; "
+    "ISO-8601; now; today/yesterday/tomorrow [TIME]; "
     "[last ]WEEKDAY [TIME]; or N minutes/hours/days/weeks ago"
 )
 _KEYWORD_RE = re.compile(
@@ -90,6 +90,14 @@ def _canonical(dt: datetime, reference: datetime) -> str:
 
 def parse_when(text: str, *, now: datetime | None = None) -> str:
     """Parse a supported human timestamp into a UTC ISO-8601 string."""
+    try:
+        return _parse_when(text, now=now)
+    except OverflowError as exc:
+        # e.g. "999999999 days ago" or a year-1 timestamp with a positive offset.
+        raise TimeParseError(f"timestamp {text!r} is out of range") from exc
+
+
+def _parse_when(text: str, *, now: datetime | None) -> str:
     if not isinstance(text, str):
         raise _error(str(text))
     value = text.strip()
@@ -109,7 +117,9 @@ def parse_when(text: str, *, now: datetime | None = None) -> str:
     if match:
         keyword = match.group(1).lower()
         clock_text = match.group(2)
-        if keyword == "now" and clock_text is None:
+        if keyword == "now":
+            if clock_text is not None:
+                raise _error(text)
             return _canonical(reference, reference)
         clock = _parse_clock(clock_text, text) if clock_text else time()
         offsets = {"now": 0, "today": 0, "yesterday": -1, "tomorrow": 1}

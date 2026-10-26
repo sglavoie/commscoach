@@ -82,10 +82,17 @@ class ParseWhenTests(unittest.TestCase):
             "Aug 20",
             "in 2h",
             "2h",
+            "now 9am",
         ):
             with self.subTest(value=value), self.assertRaises(TimeParseError) as raised:
                 parse_when(value, now=NOW)
             self.assertIn("accepted forms", str(raised.exception))
+
+    def test_out_of_range_values_raise_time_parse_error(self) -> None:
+        for value in ("999999999 days ago", "0001-01-01T00:00:00+05:00"):
+            with self.subTest(value=value), self.assertRaises(TimeParseError) as raised:
+                parse_when(value, now=NOW)
+            self.assertIn("out of range", str(raised.exception))
 
 
 class ParseBoundTests(unittest.TestCase):

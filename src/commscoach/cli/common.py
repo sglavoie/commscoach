@@ -172,6 +172,8 @@ def read_body_or_raise(value: str) -> str:
         return read_body(value)
     except OSError as exc:
         raise db.DBError(f"cannot read body: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise db.DBError(f"cannot read body: not valid UTF-8 ({exc.reason})") from exc
 
 
 def read_body_arg(

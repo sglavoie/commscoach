@@ -141,6 +141,20 @@ class EntryAddTests(EntryTestBase):
         self.assertEqual(rc, 1)
         self.assertIn("cannot read body", err)
 
+    def test_add_body_from_non_utf8_file_exits_one(self) -> None:
+        body_file = self.tmpdir / "bad.txt"
+        body_file.write_bytes(b"bad \xff text")
+        rc, _, err = self._run("entry", "add", f"@{body_file}")
+        self.assertEqual(rc, 1)
+        self.assertIn("cannot read body: not valid UTF-8", err)
+
+    def test_add_out_of_range_occurred_at_exits_one(self) -> None:
+        rc, _, err = self._run(
+            "entry", "add", "body", "--occurred-at", "999999999 days ago"
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("out of range", err)
+
     def test_add_json_output_includes_entry_fields(self) -> None:
         self._create_person("alice")
         rc, out, _ = self._run(

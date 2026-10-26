@@ -212,6 +212,15 @@ class PortingCLITests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("invalid JSON", stderr)
 
+    def test_non_utf8_archive_exits_one(self) -> None:
+        archive = self.tmpdir / "bad.json"
+        archive.write_bytes(b"{\xff}")
+
+        rc, _, stderr = self._run(self.target_path, "import", str(archive))
+
+        self.assertEqual(rc, 1)
+        self.assertIn("not valid UTF-8", stderr)
+
     def test_help_describes_lossless_boundaries(self) -> None:
         out = io.StringIO()
         with redirect_stdout(out):
