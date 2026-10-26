@@ -115,7 +115,7 @@ Use this flow for requests that ask for a synthesis across a slice of communicat
 
 A review answers a question about a slice of the journal, and that slice is its scope. Decide the scope first, because it decides which `review context` command runs.
 
-Scope is **single-axis**: the latest entries, *or* one person, *or* one tag, *or* one date range — never a combination. Flags from two axes exit 1 (`--person cannot be combined with --tag`).
+Scope is **single-axis**: the latest entries, *or* one person, *or* one tag, *or* one date range — never a combination. Flags from two axes are a usage error and exit 2 (`--person cannot be combined with --tag`).
 
 | Request | Axis flag | Scope kind |
 | --- | --- | --- |
@@ -133,7 +133,7 @@ commscoach review context --since 2026-07-01 --until 2026-09-30
 
 Scope rules:
 
-- Do not pass `--scope KIND`. It is an optional assertion that must agree with the axis flags, so passing it only adds a way to exit 1. Let the kind be derived from the flags.
+- Do not pass `--scope KIND`. It is an optional assertion that must agree with the axis flags, so passing it only adds a way to fail with a usage error. Let the kind be derived from the flags.
 - `--since` and `--until` accept ISO-8601 or relative dates ("12 weeks ago", "today"). Either bound alone selects `range`. Bounds are inclusive against when the entry occurred, falling back to when it was created.
 - Resolve named calendar periods from the current local date before fetching context. "Last quarter" means the previous completed calendar quarter; "last month" and "last year" likewise mean completed calendar periods. Pass explicit first and last dates (the CLI includes both full local days), and state that window in the review. For example, on October 4, 2026, last quarter is `--since 2026-07-01 --until 2026-09-30`. Reserve rolling windows such as `--since "12 weeks ago" --until today` for requests for the past 12 weeks; use fiscal periods only when the user's fiscal calendar is known.
 - Handles and tag names match case-insensitively. The tag is normalized before matching and stored normalized, so `--tag Conflict` both scopes and stores `conflict`.
@@ -238,6 +238,7 @@ Notes:
 - For a `range` scope, use the resolved ISO timestamps from `scope.since` / `scope.until` over re-sending a relative phrase, so the stored bounds match the context exactly.
 - Stdout is JSON: `{id, body, scope_kind, scope_limit, scope_person, scope_person_handle, scope_tag, scope_since, scope_until, created_at, updated_at, entry_ids, entries}`. Check that `scope_kind` is the kind you intended.
 - A non-zero exit means the body was empty, an entry id was invalid, or the scope arguments were invalid. Surface stderr and stop.
+- A `warning: ... outside the <kind> scope` line on stderr means some `--entry` IDs are not in the scope you passed; the review is still stored. Mention it to the user, since it usually means the IDs did not come from the Step R1 context.
 
 ### Step R3b: Persist the loop
 
