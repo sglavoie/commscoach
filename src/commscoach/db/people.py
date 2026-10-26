@@ -260,7 +260,7 @@ def list_people(
         )
         params = [common.contains_pattern(query)] * 2
     rows = conn.execute(
-        sql + " ORDER BY is_self DESC, handle COLLATE NOCASE",
+        sql + " ORDER BY is_self DESC, search_fold(handle), handle_key(handle), handle",
         params,
     ).fetchall()
     return tuple(row_to_person(row) for row in rows)

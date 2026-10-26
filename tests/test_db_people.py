@@ -85,6 +85,17 @@ class PeopleCrudTests(DBTestCase):
         result = db.list_people(self.conn)
         self.assertEqual([p.handle for p in result], ["me", "alice", "Bob", "charlie"])
 
+    def test_accented_handles_and_tags_sort_with_their_base_letters(self) -> None:
+        for handle in ("zoe", "Émile", "adam", "élodie", "Bob"):
+            db.create_person(self.conn, handle)
+        expected = ["adam", "Bob", "élodie", "Émile", "zoe"]
+        self.assertEqual([p.handle for p in db.list_people(self.conn)], expected)
+        entry = db.create_entry(
+            self.conn, "msg", people=["zoe", "Émile", "adam"], tags=["zèbre", "école", "ami"]
+        )
+        self.assertEqual([p.handle for p in entry.people], ["adam", "Émile", "zoe"])
+        self.assertEqual(entry.tags, ("ami", "école", "zèbre"))
+
     def test_delete_person_returns_true_and_cascades_entry_people(self) -> None:
         alice = db.create_person(self.conn, "alice")
         entry = db.create_entry(self.conn, "msg", people=["alice"])

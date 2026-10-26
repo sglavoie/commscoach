@@ -210,7 +210,7 @@ def _collect_stats(
         "SELECT t.name, COUNT(*) AS uses FROM entry_tags et "
         "JOIN tags t ON t.id = et.tag_id JOIN entries e ON e.id = et.entry_id "
         f"WHERE {entry_where} GROUP BY t.id, t.name "
-        "ORDER BY uses DESC, t.name COLLATE NOCASE ASC LIMIT ?",
+        "ORDER BY uses DESC, search_fold(t.name), t.name LIMIT ?",
         [*entry_params, top],
     )
     top_sources = _ranked_counts(
@@ -221,7 +221,7 @@ def _collect_stats(
         "SELECT MIN(e.source) AS source, COUNT(*) AS uses FROM entries e "
         f"WHERE {entry_where} AND e.source IS NOT NULL AND e.source != '' "
         "GROUP BY handle_key(e.source) "
-        "ORDER BY uses DESC, handle_key(source) ASC, source ASC LIMIT ?",
+        "ORDER BY uses DESC, search_fold(source), handle_key(source), source LIMIT ?",
         [*entry_params, top],
     )
     top_people = _ranked_counts(
@@ -229,7 +229,7 @@ def _collect_stats(
         "SELECT p.handle, COUNT(*) AS uses FROM entry_people ep "
         "JOIN people p ON p.id = ep.person_id JOIN entries e ON e.id = ep.entry_id "
         f"WHERE {entry_where} GROUP BY p.id, p.handle "
-        "ORDER BY uses DESC, p.handle COLLATE NOCASE ASC LIMIT ?",
+        "ORDER BY uses DESC, search_fold(p.handle), handle_key(p.handle), p.handle LIMIT ?",
         [*entry_params, top],
     )
 

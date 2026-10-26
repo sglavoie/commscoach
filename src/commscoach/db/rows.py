@@ -61,7 +61,7 @@ def hydrate_entries(conn: sqlite3.Connection, rows: Sequence[sqlite3.Row]) -> tu
     for link in _rows_by_ids(
         conn,
         "SELECT et.entry_id, t.name FROM tags t JOIN entry_tags et ON et.tag_id = t.id"
-        " WHERE et.entry_id IN ({ids}) ORDER BY t.name",
+        " WHERE et.entry_id IN ({ids}) ORDER BY search_fold(t.name), t.name",
         ids,
     ):
         tags.setdefault(link["entry_id"], []).append(link["name"])
@@ -69,7 +69,8 @@ def hydrate_entries(conn: sqlite3.Connection, rows: Sequence[sqlite3.Row]) -> tu
     for link in _rows_by_ids(
         conn,
         "SELECT ep.entry_id, p.* FROM people p JOIN entry_people ep ON ep.person_id = p.id"
-        " WHERE ep.entry_id IN ({ids}) ORDER BY p.handle COLLATE NOCASE",
+        " WHERE ep.entry_id IN ({ids})"
+        " ORDER BY search_fold(p.handle), handle_key(p.handle), p.handle",
         ids,
     ):
         people.setdefault(link["entry_id"], []).append(row_to_person(link))

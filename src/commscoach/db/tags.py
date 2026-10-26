@@ -124,7 +124,7 @@ def list_tags(
         " COUNT(et.entry_id) AS entry_count"
         " FROM tags t LEFT JOIN entry_tags et ON et.tag_id = t.id"
         " GROUP BY t.id"
-        " ORDER BY entry_count DESC, t.name ASC"
+        " ORDER BY entry_count DESC, search_fold(t.name), t.name"
     )
     params: list[Any] = []
     if limit is not None:
