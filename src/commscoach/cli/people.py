@@ -46,7 +46,10 @@ def ensure_people(
         if db.get_person_by_handle(conn, handle) is not None:
             continue
         if not confirm(f"Create person @{handle}?", assume_yes=assume_yes):
-            raise db.PersonNotFoundError(handle)
+            raise db.DBError(
+                f"person @{handle} does not exist; pass --yes to create it, or run "
+                f"{shlex.join(['commscoach', 'person', 'add', handle])} first"
+            )
         db.create_person(conn, handle, name=None)
 
 

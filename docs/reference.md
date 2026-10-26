@@ -70,7 +70,7 @@ commscoach entry search --source email --person jdoe --since "30 days ago"
 
 `entry search --source` matches the complete stored channel or medium case-insensitively (`email` matches `Email`, but not `email-thread`). It combines with the existing query, tag, person, date, and feedback filters, and is applied before ordering and limiting results.
 
-`--oldest-first` applies to `entry search` and orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters.
+`--oldest-first` applies to `entry search` and orders matching entries by occurrence time (falling back to creation time), then ID, before applying `--limit`. Without it, results remain newest-first. By default, when SQLite has FTS5, `entry search --query` matches whole words, accent-insensitively: `meet` does not match `meeting`. Append `*` for a prefix (`meet*`), and quote phrases (`"lead with the ask"`); without FTS5 it falls back to substring matching. `--exact` performs a literal, case-insensitive substring search, including literal `%` and `_` characters. Feedback, review, and goal searches always use substring matching.
 
 When `entry search --limit N` omits matches, human output ends with a count such
 as `Showing 5 of 23 matching entries.` The total respects every search filter,

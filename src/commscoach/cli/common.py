@@ -285,6 +285,9 @@ def confirm(
     try:
         answer = input_fn("")
     except EOFError:
+        # End the prompt line so a following error message starts cleanly.
+        out.write("\n")
+        out.flush()
         return False
     return answer.strip().lower() in {"y", "yes"}
 

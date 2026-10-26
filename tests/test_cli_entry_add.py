@@ -69,6 +69,16 @@ class EntryAddTests(EntryTestBase):
         with closing(db.connect(self.db_path)) as conn:
             self.assertEqual(db.list_entries(conn), ())
 
+    def test_piped_body_with_unknown_person_explains_how_to_proceed(self) -> None:
+        # stdin is consumed by the body, so the prompt sees EOF.
+        rc, _, err = self._run(
+            "entry", "add", "-", "--person", "newbie", stdin=io.StringIO("body\n")
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("Create person @newbie? [y/N] \n", err)
+        self.assertIn("person @newbie does not exist; pass --yes to create it", err)
+        self.assertIn("commscoach person add newbie", err)
+
     def test_add_unknown_person_with_yes_creates_and_links(self) -> None:
         rc, _, _ = self._run(
             "--yes",
