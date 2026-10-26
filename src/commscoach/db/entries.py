@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Iterable, Literal
+from collections.abc import Iterable
+from typing import Any, Literal
 
 from ..models import Entry
 from ..timeparse import TimeParseError, parse_when
-from . import common, tags as tags_mod
+from . import common
+from . import tags as tags_mod
 from .errors import DBError, EntryNotFoundError
 from .people import resolve_person_handles
 from .rows import hydrate_entry

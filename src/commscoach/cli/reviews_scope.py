@@ -12,7 +12,6 @@ from .common import (
     parse_date_bounds,
 )
 
-
 #: Each axis flag as ``(flag, argparse dest, scope kind it derives)``, in the
 #: order the flags are declared so a conflict message names them predictably.
 #: ``latest`` has no flag: it is what "no axis given" derives to.

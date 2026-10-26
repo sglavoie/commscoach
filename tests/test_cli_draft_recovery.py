@@ -46,7 +46,7 @@ class DraftRecoveryTests(EntryTestBase):
         for failure in (7, KeyboardInterrupt()):
             with self.subTest(failure=failure):
 
-                def run(command):
+                def run(command, failure=failure):
                     self._write_draft(command)
                     self.draft_path.chmod(0o644)
                     if isinstance(failure, BaseException):

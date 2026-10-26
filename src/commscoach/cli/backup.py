@@ -9,7 +9,7 @@ take one *before* ``init`` upgrades the database.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .. import db
@@ -40,10 +40,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 def default_backup_path(db_path: Path, *, now: datetime | None = None) -> Path:
     """Return the timestamped default backup path for ``db_path``."""
-    current = now if now is not None else datetime.now(timezone.utc)
+    current = now if now is not None else datetime.now(UTC)
     if current.tzinfo is None:
-        current = current.replace(tzinfo=timezone.utc)
-    stamp = current.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        current = current.replace(tzinfo=UTC)
+    stamp = current.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
     directory = db_path.parent / "backups"
     candidate = directory / f"{BACKUP_PREFIX}{stamp}{BACKUP_SUFFIX}"
     counter = 1

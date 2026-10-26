@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from argparse import Namespace
 from contextlib import closing, redirect_stderr, redirect_stdout
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from commscoach import cli, db, paths
@@ -68,7 +68,7 @@ class BackupCommandTests(unittest.TestCase):
     def test_default_path_uses_injected_utc_time(self) -> None:
         args = Namespace(db=str(self.db_path), out=None, keep=None, json=True)
         out = io.StringIO()
-        now = datetime(2026, 8, 25, 17, 45, 6, tzinfo=timezone.utc)
+        now = datetime(2026, 8, 25, 17, 45, 6, tzinfo=UTC)
         with redirect_stdout(out):
             rc = backup_cli.cmd_backup(args, now=now)
         self.assertEqual(rc, 0)
@@ -84,7 +84,7 @@ class BackupCommandTests(unittest.TestCase):
         created: list[Path] = []
         for second in (1, 2, 3):
             out = io.StringIO()
-            now = datetime(2026, 8, 25, 12, 0, second, tzinfo=timezone.utc)
+            now = datetime(2026, 8, 25, 12, 0, second, tzinfo=UTC)
             with redirect_stdout(out):
                 backup_cli.cmd_backup(args, now=now)
             created.append(Path(json.loads(out.getvalue())["backup_path"]))
@@ -123,7 +123,7 @@ class BackupCommandTests(unittest.TestCase):
 
     def test_same_second_default_backups_do_not_overwrite(self) -> None:
         args = Namespace(db=str(self.db_path), out=None, keep=None, json=True)
-        now = datetime(2026, 8, 25, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 8, 25, 12, 0, 0, tzinfo=UTC)
         created: list[Path] = []
         for _ in range(2):
             out = io.StringIO()

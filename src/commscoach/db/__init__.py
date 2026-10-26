@@ -67,15 +67,15 @@ from .feedback import (
     count_search_feedback,
     create_feedback,
     delete_feedback,
-    get_feedback,
     feedback_entry_ids,
+    get_feedback,
     list_feedback,
     search_feedback,
     update_feedback,
 )
 from .goals import (
-    count_goals,
     close_goal,
+    count_goals,
     create_goal,
     delete_goal,
     get_goal,
@@ -91,8 +91,8 @@ from .notes import (
 from .people import (
     create_person,
     delete_person,
-    get_person,
     get_people_activity,
+    get_person,
     get_person_by_handle,
     get_self_person,
     list_people,
@@ -100,8 +100,8 @@ from .people import (
     update_person,
 )
 from .reviews import (
-    count_reviews,
     SCOPE_KINDS,
+    count_reviews,
     create_review,
     delete_review,
     get_review,

@@ -27,7 +27,6 @@ from .feedback import _format_feedback_human
 from .people import ensure_people
 from .serializers import entry_to_dict, feedback_to_dict
 
-
 ENTRY_PREAMBLE = (
     "Write the entry body below. Lines beginning with #> are ignored.\n"
     "Optional prompts (answer any that help):\n"

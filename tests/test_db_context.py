@@ -115,7 +115,7 @@ class ReviewContextTests(DBTestCase):
         self.assertEqual([r.id for r in context.prior_reviews], [review.id])
 
     def test_review_context_includes_only_open_goals_up_to_limit(self) -> None:
-        entry = db.create_entry(self.conn, "reviewed")
+        db.create_entry(self.conn, "reviewed")
         oldest = db.create_goal(self.conn, "oldest")
         closed = db.create_goal(self.conn, "closed")
         newest = db.create_goal(self.conn, "newest")

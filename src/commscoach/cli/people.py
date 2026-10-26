@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import shlex
 import sys
+from collections.abc import Iterable
 from dataclasses import asdict
-from typing import Any, Iterable
+from typing import Any
 
 from .. import db
 from .common import (

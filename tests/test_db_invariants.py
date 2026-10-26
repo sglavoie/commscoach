@@ -13,7 +13,6 @@ from contextlib import closing
 from pathlib import Path
 
 from commscoach import db
-
 from tests.db_case import DBTestCase
 from tests.db_schema_case import NOW
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections import Counter
 from datetime import date, datetime, timedelta
+from itertools import pairwise
 from typing import Any
 
 from ..models import Stats
@@ -92,7 +93,7 @@ def _weekly_metrics(
 
     longest = 1
     run = 1
-    for previous, current in zip(occupied, occupied[1:]):
+    for previous, current in pairwise(occupied):
         if (current - previous).days == 7:
             run += 1
         else:
@@ -102,7 +103,7 @@ def _weekly_metrics(
     current_streak = 0
     if (_monday(anchor) - last_monday).days <= 7:
         current_streak = 1
-        for previous, current in zip(reversed(occupied[:-1]), reversed(occupied[1:])):
+        for previous, current in reversed(list(pairwise(occupied))):
             if (current - previous).days != 7:
                 break
             current_streak += 1

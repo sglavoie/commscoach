@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, time, timedelta, timezone, tzinfo
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
 
 class TimeParseError(ValueError):
@@ -83,7 +83,7 @@ def _at_local_time(reference: datetime, day_offset: int, clock: time) -> datetim
 def _canonical(dt: datetime, reference: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=_local_timezone(reference))
-    return dt.astimezone(timezone.utc).isoformat()
+    return dt.astimezone(UTC).isoformat()
 
 
 def parse_when(text: str, *, now: datetime | None = None) -> str:
@@ -166,7 +166,7 @@ def parse_bound(text: str, *, upper: bool = False, now: datetime | None = None) 
         if upper:
             local_day += timedelta(days=1)
         boundary = datetime.combine(local_day, time(), tzinfo=reference.tzinfo)
-        parsed = boundary.astimezone(timezone.utc)
+        parsed = boundary.astimezone(UTC)
         if upper:
             parsed -= timedelta(microseconds=1)
     return parsed.isoformat()

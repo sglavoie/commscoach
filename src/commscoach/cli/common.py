@@ -20,10 +20,11 @@ import json
 import re
 import sqlite3
 import sys
+from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Iterator, TextIO
+from typing import Any, TextIO
 
 from .. import db, paths
 from ..timeparse import TimeParseError, parse_bound, parse_when

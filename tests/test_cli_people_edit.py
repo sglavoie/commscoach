@@ -244,7 +244,7 @@ class PersonRmTests(PeopleTestBase):
             self.assertIn(text, prompt)
 
     def test_rm_with_yes_skips_prompt(self) -> None:
-        person = self._seed_person("alice")
+        self._seed_person("alice")
         rc, out, _ = self._run("--yes", "person", "rm", "alice")
         self.assertEqual(rc, 0)
         self.assertIn("@alice", out)

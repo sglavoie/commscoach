@@ -20,7 +20,6 @@ from .common import (
 from .editor import compose_in_editor
 from .serializers import entry_to_dict, feedback_to_dict
 
-
 FEEDBACK_PREAMBLE = "Write the feedback body below. Lines beginning with #> are ignored."
 
 

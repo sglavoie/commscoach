@@ -21,7 +21,6 @@ from .serializers import (
     review_to_dict,
 )
 
-
 REVIEW_PREAMBLE = "Write the review body below. Lines beginning with #> are ignored."
 
 

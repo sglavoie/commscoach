@@ -15,7 +15,7 @@ import argparse
 import os
 import sqlite3
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 from .. import __version__, db
 from . import (

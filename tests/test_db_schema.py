@@ -17,7 +17,6 @@ from unittest import mock
 
 from commscoach import db, paths
 from commscoach.db import schema as db_schema
-
 from tests.db_schema_case import (
     EXPECTED_TABLES,
     NOW,

@@ -11,7 +11,6 @@ from pathlib import Path
 from commscoach import db
 
 from .db_case import DBTestCase
-from .db_schema_case import NOW
 
 # The canonical UTC form the CLI writes; restore normalizes to it.
 STAMP = "2026-06-20T00:00:00+00:00"

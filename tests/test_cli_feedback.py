@@ -88,7 +88,7 @@ class FeedbackAddTests(FeedbackTestBase):
         entry = self._seed_entry()
         rc, out, _ = self._run("feedback", "add", str(entry.id), "good listening")
         self.assertEqual(rc, 0)
-        self.assertIn(f"created feedback 1", out)
+        self.assertIn("created feedback 1", out)
         self.assertIn("good listening", out)
         with closing(db.connect(self.db_path)) as conn:
             items = db.list_feedback(conn, entry.id)

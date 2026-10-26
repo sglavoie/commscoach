@@ -7,7 +7,7 @@ import json
 import unittest
 from contextlib import closing
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest import mock
 
 from commscoach import db
@@ -51,7 +51,7 @@ class GoalCrudTests(GoalTestBase):
 
     def test_active_goal_age_uses_elapsed_days_since_creation(self) -> None:
         goal = self._seed_goal()
-        now = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
+        now = datetime(2026, 10, 2, 12, tzinfo=UTC)
         for stamp, expected in (
             ("2026-08-25T12:00:00+00:00", "38 days"),
             ("2026-10-01T12:00:00+00:00", "1 day"),

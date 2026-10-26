@@ -19,7 +19,7 @@ import sqlite3
 import warnings
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .common import normalize_date_bound
@@ -205,7 +205,7 @@ def _normalize_timestamp(value: Any, location: str) -> str | None:
         else:
             if stamp.tzinfo is not None:
                 try:
-                    return stamp.astimezone(timezone.utc).isoformat()
+                    return stamp.astimezone(UTC).isoformat()
                 except OverflowError:
                     pass
     raise DumpFormatError(f"{location} must be a timezone-aware ISO-8601 timestamp")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .. import db
@@ -226,8 +226,8 @@ def _format_goal_short(goal: db.Goal, *, now: datetime | None = None) -> str:
         try:
             created = datetime.fromisoformat(goal.created_at)
             if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            days = max(0, ((now or datetime.now(timezone.utc)) - created).days)
+                created = created.replace(tzinfo=UTC)
+            days = max(0, ((now or datetime.now(UTC)) - created).days)
             parts.append(f"· age: {days} {'day' if days == 1 else 'days'}")
         except ValueError:
             pass
@@ -262,7 +262,7 @@ def _emit_goals(
     if not goals:
         print("(no goals)")
         return
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for goal in goals:
         line = _format_goal_short(goal, now=now)
         if with_detail and goal.person is None:

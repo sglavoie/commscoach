@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 from typing import Any
 
 from .errors import DBError
@@ -14,7 +14,7 @@ UNSET: Any = object()
 
 def utcnow_iso() -> str:
     """Return a UTC ISO-8601 timestamp for ``created_at``/``updated_at`` columns."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def normalize_date_bound(value: str, *, name: str) -> str:
@@ -27,7 +27,7 @@ def normalize_date_bound(value: str, *, name: str) -> str:
         stamp = datetime.fromisoformat(value)
         if stamp.tzinfo is None:
             raise ValueError("timestamp needs a timezone")
-        return stamp.astimezone(timezone.utc).isoformat()
+        return stamp.astimezone(UTC).isoformat()
     except (TypeError, ValueError, OverflowError) as exc:
         raise DBError(
             f"{name} must be an ISO date (YYYY-MM-DD) or timezone-aware ISO timestamp"
@@ -41,7 +41,7 @@ def date_bound_timestamp(value: str, *, name: str, upper: bool = False) -> str:
         stamp = datetime.combine(
             date.fromisoformat(normalized),
             time.max if upper else time.min,
-            tzinfo=timezone.utc,
+            tzinfo=UTC,
         )
     else:
         stamp = datetime.fromisoformat(normalized)

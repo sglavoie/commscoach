@@ -6,7 +6,7 @@ import io
 import json
 import unittest
 from contextlib import closing, redirect_stderr
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from commscoach import cli, db
 from commscoach.cli.common import format_stamp
@@ -331,7 +331,7 @@ class EntrySearchTests(EntryTestBase):
         yesterday = datetime.now().astimezone() - timedelta(days=1)
         match = self._seed_entry(
             "yesterday entry",
-            occurred_at=yesterday.astimezone(timezone.utc).isoformat(),
+            occurred_at=yesterday.astimezone(UTC).isoformat(),
         )
 
         rc, out, _ = self._run("entry", "search", "--since", "yesterday")

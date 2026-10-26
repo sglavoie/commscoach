@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 
 from commscoach.timeparse import TimeParseError, parse_bound, parse_when
 
-
 NOW = datetime(
     2026,
     8,

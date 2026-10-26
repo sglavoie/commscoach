@@ -7,10 +7,10 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Callable, Iterator
 
 from .. import db
 
