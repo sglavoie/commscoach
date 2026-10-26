@@ -57,7 +57,8 @@ output puts goals before the interactions and shows each goal's full detail bene
 its title, so your current experiments are easy to act on. Override the counts with
 `--recent N` and `--reviews N`; either accepts zero.
 Its JSON output is the same as `person show HANDLE --recent 5 --with-feedback --reviews 2`
-with the corresponding limits. General goals are excluded by default. Add
+with the corresponding limits. General goals are excluded by default, and human
+output counts the ones left out with the command that shows them. Add
 `--include-general-goals` to include active goals with no linked person alongside
 this person's active goals, newest-first. Human output labels these goals
 `(general)`; JSON includes them in `active_goals`. This includes goals detached
