@@ -81,6 +81,8 @@ class PersonAddTests(PeopleTestBase):
         self.assertIn("@literal_%!", self._run("person", "list", "--query", "_%!")[1])
         self.assertEqual(self._run("person", "list", "--query", "missing")[1], "(no people)\n")
         self.assertEqual(self._run("person", "list", "--query", " ")[0], 1)
+        rc, out, _ = self._run("person", "list", "--query", "@JD", "--json")
+        self.assertEqual([p["handle"] for p in json.loads(out)], ["jdoe"])
 
     def test_brief_prep_previews_notes_goals_and_preserves_full_json(self) -> None:
         person = self._seed_person("alice")

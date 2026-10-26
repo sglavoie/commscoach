@@ -194,7 +194,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     edit.set_defaults(func=cmd_person_edit)
 
     lst = person_sub.add_parser("list", help="List people (self first, then handle-alphabetical).")
-    lst.add_argument("--query", metavar="TEXT", help="Match a literal name or handle substring.")
+    lst.add_argument(
+        "--query",
+        metavar="TEXT",
+        help="Match a literal name or handle substring (a leading @ is ignored).",
+    )
     lst.add_argument(
         "--limit",
         type=non_negative_int,
@@ -474,7 +478,9 @@ def cmd_person_edit(args: argparse.Namespace) -> int:
 
 def cmd_person_list(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
-        matched = db.list_people(conn, query=args.query)
+        # Handles display as @handle, so "@ali" should find @alice like "ali" does.
+        query = args.query.strip().removeprefix("@") if args.query is not None else None
+        matched = db.list_people(conn, query=query)
         activity = db.get_people_activity(conn) if args.with_activity else {}
     people = matched[: args.limit] if args.limit is not None else matched
     if not args.with_activity:

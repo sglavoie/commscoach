@@ -56,7 +56,7 @@ commscoach entry search --since "yesterday 9am" --until "yesterday 5pm"
 Human-readable `entry list` and `entry search` rows show the local occurrence date/time (or creation time), source when present, feedback status, text preview, tags, and people:
 
 ```text
-[42] · 2026-10-02 14:30 · in-person · needs feedback · Quarterly review with John. · #1on1,review · @jdoe
+[42] · 2026-10-02 14:30 · in-person · needs feedback · Quarterly review with John. · #1on1, #review · @jdoe
 ```
 
 The status becomes `has feedback` when an entry has at least one stored feedback note. Use `entry search --no-feedback` to see only the coaching backlog. Entry JSON output keeps its existing shape.

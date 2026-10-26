@@ -101,6 +101,14 @@ class EntryListTests(EntryTestBase):
         self.assertIn("needs feedback", out)
         self.assertNotIn("has feedback", out)
 
+    def test_rows_prefix_every_tag_and_person(self) -> None:
+        self._create_person("alice")
+        self._create_person("bob")
+        self._seed_entry("body", tags=("ops", "work"), people=("alice", "bob"))
+        rc, out, _ = self._run("entry", "list")
+        self.assertEqual(rc, 0)
+        self.assertIn("· #ops, #work · @alice, @bob", out)
+
     def test_list_empty(self) -> None:
         rc, out, _ = self._run("entry", "list")
         self.assertEqual(rc, 0)

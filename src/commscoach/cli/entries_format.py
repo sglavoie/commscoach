@@ -42,9 +42,9 @@ def format_entry_short(
     parts.append("has feedback" if has_feedback else "needs feedback")
     parts.append(excerpt if excerpt is not None else truncate(first_prose_line(entry.body)))
     if entry.tags:
-        parts.append("#" + ",".join(entry.tags))
+        parts.append(", ".join(f"#{tag}" for tag in entry.tags))
     if entry.people:
-        parts.append("@" + ",".join(p.handle for p in entry.people))
+        parts.append(", ".join(f"@{p.handle}" for p in entry.people))
     return " · ".join(parts)
 
 
