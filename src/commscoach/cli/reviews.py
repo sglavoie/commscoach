@@ -12,6 +12,7 @@ from .common import (
     open_db,
     print_json,
     read_body_arg,
+    read_replacement_body,
 )
 from .editor import compose_in_editor
 from .reviews_format import emit_review, emit_reviews, review_context_to_dict
@@ -309,20 +310,7 @@ def cmd_review_show(args: argparse.Namespace) -> int:
 
 
 def cmd_review_edit(args: argparse.Namespace) -> int:
-    if args.body is None:
-        raise db.DBError("review edit requires --body")
-    body = (
-        read_body_arg(
-            args.body,
-            what="body",
-            template="",
-            preamble=REVIEW_PREAMBLE,
-            isatty=sys.stdin.isatty,
-            compose=compose_in_editor,
-        )
-        if args.body != ""
-        else None
-    )
+    body = read_replacement_body(args.body, command="review edit")
     with open_db(args) as conn:
         if body is None:
             current = db.get_review(conn, args.review_id)

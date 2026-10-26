@@ -209,6 +209,17 @@ def read_body_arg(
     return compose(template=template, preamble=preamble)
 
 
+def read_replacement_body(value: str | None, *, command: str) -> str | None:
+    """Read an edit command's ``--body`` before the database is opened.
+
+    Returns the given text (literal, ``-`` or ``@PATH``), or ``None`` for a bare
+    ``--body``, meaning the caller opens the editor on the stored text.
+    """
+    if value is None:
+        raise db.DBError(f"{command} requires --body")
+    return read_body_or_raise(value) if value != "" else None
+
+
 def parse_when_or_raise(value: str, *, now: datetime | None = None) -> str:
     """Parse an occurrence timestamp, mapping failures to ``db.DBError``."""
     try:

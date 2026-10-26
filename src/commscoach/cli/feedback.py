@@ -15,6 +15,7 @@ from .common import (
     print_json,
     prose_lines,
     read_body_arg,
+    read_replacement_body,
     search_excerpt,
 )
 from .editor import compose_in_editor
@@ -227,20 +228,7 @@ def cmd_feedback_search(args: argparse.Namespace) -> int:
 
 
 def cmd_feedback_edit(args: argparse.Namespace) -> int:
-    if args.body is None:
-        raise db.DBError("feedback edit requires --body")
-    body = (
-        read_body_arg(
-            args.body,
-            what="body",
-            template="",
-            preamble=FEEDBACK_PREAMBLE,
-            isatty=sys.stdin.isatty,
-            compose=compose_in_editor,
-        )
-        if args.body != ""
-        else None
-    )
+    body = read_replacement_body(args.body, command="feedback edit")
     with open_db(args) as conn:
         if body is None:
             current = db.get_feedback(conn, args.feedback_id)
