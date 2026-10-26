@@ -475,6 +475,10 @@ def _apply_schema_steps(conn: sqlite3.Connection) -> None:
     if version is not None and not 1 <= version <= SCHEMA_VERSION:
         raise DBError(f"unsupported schema version {version}")
     conn.execute("DROP INDEX IF EXISTS idx_entries_occurred_at")
+    # The source and stored-handle filters moved to handle_key(), which these
+    # ASCII-only indexes cannot serve.
+    conn.execute("DROP INDEX IF EXISTS idx_entries_source_nocase")
+    conn.execute("DROP INDEX IF EXISTS idx_reviews_scope_person_handle_lower")
     _normalize_occurred_at_once(conn)
     # Must precede SCHEMA_V2_SQL: that script now creates
     # idx_reviews_scope_person_id, which cannot be built against a pre-v4
