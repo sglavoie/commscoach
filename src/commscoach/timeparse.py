@@ -40,6 +40,17 @@ _WEEKDAYS = {
 }
 
 
+# A day inside datetime's range on each side, since no UTC offset reaches a
+# full day: anything stored is then printable in every local timezone.
+EARLIEST = datetime.min.replace(tzinfo=UTC) + timedelta(days=1)
+LATEST = datetime.max.replace(tzinfo=UTC) - timedelta(days=1)
+
+
+def in_supported_range(dt: datetime) -> bool:
+    """Return whether an aware ``dt`` converts to any local timezone without overflow."""
+    return EARLIEST <= dt <= LATEST
+
+
 def _error(text: str) -> TimeParseError:
     return TimeParseError(f"cannot parse timestamp {text!r}; accepted forms: {_ACCEPTED_FORMS}")
 
@@ -89,10 +100,19 @@ def _canonical(dt: datetime, reference: datetime) -> str:
 def parse_when(text: str, *, now: datetime | None = None) -> str:
     """Parse a supported human timestamp into a UTC ISO-8601 string."""
     try:
-        return _parse_when(text, now=now)
-    except OverflowError as exc:
-        # e.g. "999999999 days ago" or a year-1 timestamp with a positive offset.
-        raise TimeParseError(f"timestamp {text!r} is out of range") from exc
+        result = _parse_when(text, now=now)
+    except TimeParseError:
+        raise
+    except (OverflowError, ValueError) as exc:
+        # e.g. "999999999 days ago", or a local 9999-12-31 that lands in year 10000 UTC.
+        raise _out_of_range(text) from exc
+    if not in_supported_range(datetime.fromisoformat(result)):
+        raise _out_of_range(text)
+    return result
+
+
+def _out_of_range(text: str) -> TimeParseError:
+    return TimeParseError(f"timestamp {text!r} is out of range")
 
 
 def _parse_when(text: str, *, now: datetime | None) -> str:
@@ -172,11 +192,14 @@ def parse_bound(text: str, *, upper: bool = False, now: datetime | None = None) 
         weekday = _WEEKDAY_RE.fullmatch(value)
         day_only = day_only or bool(weekday and weekday.group(2) is None)
     if day_only:
-        local_day = parsed.astimezone(reference.tzinfo).date()
-        if upper:
-            local_day += timedelta(days=1)
-        boundary = datetime.combine(local_day, time(), tzinfo=reference.tzinfo)
-        parsed = boundary.astimezone(UTC)
+        try:
+            local_day = parsed.astimezone(reference.tzinfo).date()
+            if upper:
+                local_day += timedelta(days=1)
+            boundary = datetime.combine(local_day, time(), tzinfo=reference.tzinfo)
+            parsed = boundary.astimezone(UTC)
+        except (OverflowError, ValueError) as exc:
+            raise _out_of_range(text) from exc
         if upper:
             parsed -= timedelta(microseconds=1)
     return parsed.isoformat()

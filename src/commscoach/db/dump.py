@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+from ..timeparse import in_supported_range
 from .common import handle_key, normalize_date_bound, read_snapshot, write_transaction
 from .errors import DBError
 from .people import renormalize_handles
@@ -217,9 +218,13 @@ def _normalize_timestamp(value: Any, location: str) -> str | None:
         else:
             if stamp.tzinfo is not None:
                 try:
-                    return stamp.astimezone(UTC).isoformat()
+                    stamp = stamp.astimezone(UTC)
                 except OverflowError:
                     pass
+                else:
+                    if in_supported_range(stamp):
+                        return stamp.isoformat()
+                    raise DumpFormatError(f"{location} is out of range")
     raise DumpFormatError(f"{location} must be a timezone-aware ISO-8601 timestamp")
 
 

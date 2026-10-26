@@ -153,9 +153,12 @@ class EntryAddTests(EntryTestBase):
         self.assertIn("cannot read body: not valid UTF-8", err)
 
     def test_add_out_of_range_occurred_at_exits_one(self) -> None:
-        rc, _, err = self._run("entry", "add", "body", "--occurred-at", "999999999 days ago")
-        self.assertEqual(rc, 1)
-        self.assertIn("out of range", err)
+        for value in ("999999999 days ago", "9999-12-31", "0001-01-01T00:00+00:00"):
+            with self.subTest(value=value):
+                rc, _, err = self._run("entry", "add", "body", "--occurred-at", value)
+                self.assertEqual(rc, 1)
+                self.assertIn("out of range", err)
+                self.assertNotIn("Traceback", err)
 
     def test_add_json_output_includes_entry_fields(self) -> None:
         self._create_person("alice")

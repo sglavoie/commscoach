@@ -402,6 +402,14 @@ class RestoreValidationTests(DBTestCase):
             ):
                 db.validate_dump(self._payload_with_entry(occurred_at=value))
 
+    def test_timestamps_unprintable_in_some_timezone_are_rejected(self) -> None:
+        for value in ("0001-01-01T00:00:00+00:00", "9999-12-31T12:00:00+00:00"):
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(db.DumpFormatError, r"occurred_at is out of range"),
+            ):
+                db.validate_dump(self._payload_with_entry(occurred_at=value))
+
     def test_out_of_range_id_is_a_clean_error_and_rolls_back(self) -> None:
         payload = self._payload_with_entry(id=2**70)
         restored_path = Path(self._tmp.name) / "restored" / "commscoach.sqlite3"

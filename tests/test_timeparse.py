@@ -105,13 +105,28 @@ class ParseWhenTests(unittest.TestCase):
             self.assertIn("accepted forms", str(raised.exception))
 
     def test_out_of_range_values_raise_time_parse_error(self) -> None:
-        for value in ("999999999 days ago", "0001-01-01T00:00:00+05:00"):
+        for value in (
+            "999999999 days ago",
+            "0001-01-01T00:00:00+05:00",
+            # Valid in UTC, but unprintable in any timezone west of it.
+            "0001-01-01T00:00:00+00:00",
+            # A local date whose UTC instant overflows past year 9999.
+            "9999-12-31",
+            "9999-12-31T23:00:00",
+        ):
             with self.subTest(value=value), self.assertRaises(TimeParseError) as raised:
                 parse_when(value, now=NOW)
             self.assertIn("out of range", str(raised.exception))
 
 
 class ParseBoundTests(unittest.TestCase):
+    def test_out_of_range_days_raise_time_parse_error(self) -> None:
+        east = NOW.astimezone(timezone(timedelta(hours=9)))
+        for text, upper in (("9999-12-31", True), ("0001-01-02", False)):
+            with self.subTest(text=text), self.assertRaises(TimeParseError) as raised:
+                parse_bound(text, upper=upper, now=east)
+            self.assertIn("out of range", str(raised.exception))
+
     def test_bare_days_cover_the_whole_local_day(self):
         for text, day in (
             ("today", "2026-08-25"),
