@@ -160,6 +160,19 @@ class GoalCrudTests(GoalTestBase):
         self.assertIn(f"closed goal {goal.id}", out)
         self.assertIn("It worked", out)
 
+    def test_repeated_close_reports_unchanged_updated_or_closed(self) -> None:
+        goal = self._seed_goal()
+        for flags, verb in (
+            ((), "closed"),
+            ((), "unchanged"),
+            (("--outcome", "Corrected"), "updated"),
+            (("--dropped",), "closed"),
+        ):
+            with self.subTest(flags=flags):
+                rc, out, err = self._run("goal", "close", str(goal.id), *flags)
+                self.assertEqual(rc, 0, err)
+                self.assertTrue(out.startswith(f"{verb} goal {goal.id}"), out)
+
     def test_close_json_dropped(self) -> None:
         goal = self._seed_goal()
         rc, out, _ = self._run("--json", "goal", "close", str(goal.id), "--dropped")

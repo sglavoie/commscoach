@@ -457,10 +457,10 @@ def cmd_goal_close(args: argparse.Namespace) -> int:
         else None
     )
     with open_db(args) as conn:
+        current = db.get_goal(conn, args.goal_id)
+        if current is None:
+            raise db.GoalNotFoundError(args.goal_id)
         if edit_outcome:
-            current = db.get_goal(conn, args.goal_id)
-            if current is None:
-                raise db.GoalNotFoundError(args.goal_id)
             outcome = read_body_arg(
                 None,
                 what="outcome",
@@ -475,7 +475,13 @@ def cmd_goal_close(args: argparse.Namespace) -> int:
             outcome=outcome,
             dropped=args.dropped,
         )
-    _emit_goal(args, goal, human_prefix="closed")
+    # Re-closing with the same status only corrects the outcome, if anything.
+    verb = (
+        "closed"
+        if goal.status != current.status
+        else edit_verb(current.updated_at, goal.updated_at)
+    )
+    _emit_goal(args, goal, human_prefix=verb)
     return 0
 
 
