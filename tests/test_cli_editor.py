@@ -80,6 +80,16 @@ class EditorCompositionTests(unittest.TestCase):
         assert observed_path is not None
         self.assertFalse(observed_path.exists())
 
+    def test_stored_marker_lines_survive_an_unchanged_round_trip(self) -> None:
+        template = "#>not an instruction\n\\#>already escaped\nreal text"
+        with mock.patch.dict(os.environ, {"EDITOR": "true"}, clear=True):
+            body = compose_in_editor(
+                template=template,
+                preamble="Write something.",
+                runner=lambda _command: 0,
+            )
+        self.assertEqual(body, template)
+
     def test_compose_rejects_nonzero_editor_exit(self) -> None:
         with mock.patch.dict(
             os.environ,

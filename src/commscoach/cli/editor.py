@@ -75,10 +75,32 @@ def editor_command() -> list[str]:
     return command
 
 
-def strip_comment_lines(text: str) -> str:
-    """Remove editor instruction lines without treating Markdown as comments."""
+def _is_escaped_marker(line: str) -> bool:
+    return line.startswith("\\") and line.lstrip("\\").startswith(COMMENT_MARKER)
+
+
+def escape_comment_lines(text: str) -> str:
+    """Escape stored lines that would otherwise read back as instructions.
+
+    A body saved from a literal, ``-`` or ``@PATH`` can contain ``#>`` lines;
+    prefixing a backslash keeps them through an editor round trip, and
+    ``strip_comment_lines`` removes exactly that backslash again.
+    """
     return "".join(
-        line for line in text.splitlines(keepends=True) if not line.startswith(COMMENT_MARKER)
+        "\\" + line if line.lstrip("\\").startswith(COMMENT_MARKER) else line
+        for line in text.splitlines(keepends=True)
+    )
+
+
+def strip_comment_lines(text: str) -> str:
+    """Remove editor instruction lines without treating Markdown as comments.
+
+    A line escaped as ``\\#>`` is body text: it loses one backslash and stays.
+    """
+    return "".join(
+        line[1:] if _is_escaped_marker(line) else line
+        for line in text.splitlines(keepends=True)
+        if not line.startswith(COMMENT_MARKER)
     )
 
 
@@ -102,7 +124,8 @@ def compose_in_editor(
         )
         initial = comment_preamble
         if template:
-            initial = f"{initial}\n\n{template}" if initial else template
+            escaped = escape_comment_lines(template)
+            initial = f"{initial}\n\n{escaped}" if initial else escaped
         if initial and not initial.endswith("\n"):
             initial += "\n"
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
