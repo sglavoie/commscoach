@@ -7,6 +7,8 @@ import sqlite3
 import sys
 
 from .. import db
+from ..db.common import date_bound_timestamp, handle_key
+from ..db.tags import normalize_tag
 from .common import (
     EDIT_IN_EDITOR,
     add_date_bounds,
@@ -18,6 +20,8 @@ from .common import (
     non_negative_int,
     open_db,
     parse_date_bounds,
+    plural,
+    print_err,
     print_json,
     read_body_arg,
     read_replacement_body,
@@ -25,7 +29,7 @@ from .common import (
 )
 from .editor import compose_in_editor
 from .reviews_format import emit_review, emit_reviews, review_context_to_dict
-from .reviews_scope import add_scope_flags, resolve_scope
+from .reviews_scope import Scope, add_scope_flags, resolve_scope
 from .serializers import (
     goal_to_dict,
     review_to_dict,
@@ -233,15 +237,45 @@ def cmd_review_context(args: argparse.Namespace) -> int:
     return 0
 
 
+def _entry_in_scope(entry: db.Entry, scope: Scope) -> bool:
+    """Report whether ``entry`` is one ``review context`` would select for ``scope``."""
+    if scope.kind == "person":
+        key = handle_key(scope.person_handle or "")
+        return any(handle_key(person.handle) == key for person in entry.people)
+    if scope.kind == "tag":
+        return normalize_tag(scope.tag or "") in entry.tags
+    if scope.kind == "range":
+        # Stored times are canonical UTC, so they order as strings, as in SQL.
+        when = entry.occurred_at or entry.created_at
+        if scope.since is not None and when < date_bound_timestamp(scope.since, name="since"):
+            return False
+        return scope.until is None or when <= date_bound_timestamp(
+            scope.until, name="until", upper=True
+        )
+    return True
+
+
 def cmd_review_add(args: argparse.Namespace) -> int:
     scope = resolve_scope(args)
     with open_db(args) as conn:
         if scope.person_handle is not None:
             if db.get_person_by_handle(conn, scope.person_handle) is None:
                 raise db.PersonNotFoundError(scope.person_handle)
+        outside: list[int] = []
         for entry_id in dict.fromkeys(args.entry_ids):
-            if db.get_entry(conn, entry_id) is None:
+            entry = db.get_entry(conn, entry_id)
+            if entry is None:
                 raise db.EntryNotFoundError(entry_id)
+            if not _entry_in_scope(entry, scope):
+                outside.append(entry_id)
+        if outside:
+            # A warning, not an error: an entry may have been edited since the
+            # context was generated, and the review is still worth keeping.
+            print_err(
+                f"warning: {plural(len(outside), 'covered entry', 'covered entries')}"
+                f" ({', '.join(map(str, outside))})"
+                f" {'falls' if len(outside) == 1 else 'fall'} outside the {scope.kind} scope"
+            )
         body = read_body_arg(
             args.body,
             what="body",

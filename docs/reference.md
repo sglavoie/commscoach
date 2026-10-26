@@ -217,6 +217,8 @@ Either bound alone is enough to select the `range` scope; an unbounded range wou
 
 A scope that matches nothing returns an empty entry list rather than failing — "no entries with @alice yet" is an answer, not an error. An unknown person handle or tag *is* an error, because that is a typo, and so is a reversed date range. `entry search --person`/`--tag` follow the same rule. (Tags exist only while some entry carries them, so `tag list` shows every name that can match.)
 
+`review add` stores the scope you pass alongside the `--entry` IDs. When some of those entries fall outside that scope (say `--person bob` with an entry that does not involve @bob), it warns on stderr and still stores the review, since an entry may have been edited after its context was generated.
+
 `review context` reports the scope in its own JSON block:
 
 ```json

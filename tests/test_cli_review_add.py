@@ -276,6 +276,29 @@ class ScopedAddTests(ReviewTestBase):
         self.assertEqual(review.scope_tag, "conflict")
         self.assertIsNone(review.scope_person_handle)
 
+    def test_entries_outside_the_scope_warn_but_still_store(self) -> None:
+        self._seed_person("bob")
+        self._seed_entry("Unrelated", people=("bob",))
+        for args, warned in (
+            (("--person", "alice"), False),
+            (("--tag", "conflict"), False),
+            (("--since", "2000-01-01"), False),
+            (("--person", "bob"), True),
+            (("--tag", "other"), True),
+            (("--until", "2000-01-01"), True),
+        ):
+            with self.subTest(args=args):
+                if args == ("--tag", "other"):
+                    self._seed_entry("tagged", tags=("other",))
+                rc, _, err = self._run(
+                    "review", "add", "body", "--entry", str(self.entry.id), *args
+                )
+                self.assertEqual(rc, 0, err)
+                if warned:
+                    self.assertIn(f"1 covered entry ({self.entry.id}) falls outside", err)
+                else:
+                    self.assertNotIn("outside", err)
+
     def test_date_bounds_store_range_scope(self) -> None:
         review = self._add("--since", "2026-07-01", "--until", "2026-09-01")
         self.assertEqual(review.scope_kind, "range")
