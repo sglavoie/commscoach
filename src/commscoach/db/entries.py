@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Iterable
 from typing import Any, Literal
@@ -13,6 +14,22 @@ from . import tags as tags_mod
 from .errors import DBError, EntryNotFoundError
 from .people import resolve_person_handles
 from .rows import hydrate_entry
+
+_PLAIN_WORDS = re.compile(r"[^\W_]+(?:\s+[^\W_]+)*")
+_FTS_OPERATORS = frozenset({"AND", "OR", "NOT", "NEAR"})
+
+
+def _fts_match_query(query: str) -> str:
+    """Turn plain words into prefix terms so ``meet`` also finds ``meeting``.
+
+    A query using any FTS5 syntax (quotes, ``*``, operators, columns, symbols)
+    is passed through unchanged, so phrases and boolean searches still work.
+    """
+    stripped = query.strip()
+    words = stripped.split()
+    if not _PLAIN_WORDS.fullmatch(stripped) or _FTS_OPERATORS.intersection(words):
+        return query
+    return " ".join(f'"{word}"*' for word in words)
 
 
 def _validate_occurred_at(value: Any) -> str | None:
@@ -385,7 +402,7 @@ def _search_entry_rows(
         use_fts = mode in {"auto", "fts"} and fts_enabled
         if use_fts:
             where.append("entries_fts MATCH ?")
-            params.append(query)
+            params.append(_fts_match_query(query) if mode == "auto" else query)
         else:
             where.append("e.body LIKE ? ESCAPE '!' COLLATE NOCASE")
             literal_query = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
@@ -453,7 +470,7 @@ def search_entry_snippets(
                 "SELECT rowid, snippet(entries_fts, 0, '', '', '…', 32)"
                 " FROM entries_fts WHERE entries_fts MATCH ?"
                 f" AND rowid IN ({placeholders})",
-                (query, *batch),
+                (_fts_match_query(query), *batch),
             ).fetchall()
             snippets.update((row[0], row[1]) for row in rows)
     except sqlite3.OperationalError:

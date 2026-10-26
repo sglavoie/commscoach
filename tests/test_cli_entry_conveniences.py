@@ -91,7 +91,15 @@ class EntryConvenienceTests(EntryTestBase):
             fts = conn.execute("SELECT value FROM _meta WHERE key = 'fts5'").fetchone()[0] == "1"
         cases = [("%", (), 2), ("10%", ("--exact",), 2)]
         if fts:
-            cases.extend((("cafe", (), 2), ('"cafe discussion"', (), 2), ("caf*", (), 3)))
+            cases.extend(
+                (
+                    # Plain words match as prefixes; quoted phrases stay exact.
+                    ("cafe", (), 3),
+                    ('"cafe discussion"', (), 2),
+                    ("caf*", (), 3),
+                    ("cafe discussion", (), 2),
+                )
+            )
         for query, extra, total in cases:
             with self.subTest(query=query, extra=extra):
                 rc, out, err = self._run(
