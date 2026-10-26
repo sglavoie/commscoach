@@ -237,6 +237,26 @@ class InitDbSchemaTests(unittest.TestCase):
             (foreign_keys,) = conn.execute("PRAGMA foreign_keys").fetchone()
             self.assertEqual(foreign_keys, 1)
 
+    def test_init_holds_the_write_lock_before_its_first_read(self) -> None:
+        db.init_db(self.db_path)
+        attempts: list[str] = []
+        apply_steps = db_schema._apply_schema_steps
+
+        def contend(conn: sqlite3.Connection) -> None:
+            with closing(sqlite3.connect(self.db_path, timeout=0)) as other:
+                try:
+                    other.execute("BEGIN IMMEDIATE")
+                except sqlite3.OperationalError as exc:
+                    attempts.append(str(exc))
+                else:
+                    other.rollback()
+                    attempts.append("acquired")
+            apply_steps(conn)
+
+        with mock.patch.object(db_schema, "_apply_schema_steps", side_effect=contend):
+            db.init_db(self.db_path)
+        self.assertEqual(attempts, ["database is locked"])
+
     def test_init_returns_resolved_path(self) -> None:
         returned = db.init_db(self.db_path)
         self.assertEqual(returned, self.db_path)

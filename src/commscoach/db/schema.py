@@ -427,7 +427,10 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
     (foreign_keys,) = conn.execute("PRAGMA foreign_keys").fetchone()
     conn.execute("PRAGMA foreign_keys = OFF")
     try:
-        conn.execute("BEGIN")
+        # IMMEDIATE, as write_transaction does: the steps read before they
+        # write, and upgrading a read lock while another writer waits fails
+        # at once with "database is locked" instead of honoring busy_timeout.
+        conn.execute("BEGIN IMMEDIATE")
         try:
             _apply_schema_steps(conn)
         except BaseException:
