@@ -24,7 +24,7 @@ def format_entry_human(entry: db.Entry) -> str:
     if entry.people:
         lines.append("people: " + ", ".join(f"@{p.handle}" for p in entry.people))
     if entry.tags:
-        lines.append("tags: " + ", ".join(entry.tags))
+        lines.append("tags: " + ", ".join(f"#{tag}" for tag in entry.tags))
     lines.append("---")
     lines.append(entry.body)
     return "\n".join(lines)

@@ -119,6 +119,10 @@ class StatsCLITests(unittest.TestCase):
         self.assertEqual(len(payload["top_sources"]), 1)
         self.assertEqual(payload["top_people"], [])
 
+        rc, out, _ = self._run("stats")
+        self.assertIn("  #alpha: 1", out)
+        self.assertIn("  slack: 1", out)
+
     def test_negative_top_or_weeks_is_argparse_error(self) -> None:
         for flag in ("--top", "--weeks"):
             with self.subTest(flag=flag), redirect_stderr(io.StringIO()) as err:

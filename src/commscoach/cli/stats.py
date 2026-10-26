@@ -73,7 +73,7 @@ def _format_human(stats: db.Stats, *, weeks: int) -> str:
         f"Weekly streak: {stats.current_weekly_streak} current, "
         f"{stats.longest_weekly_streak} longest",
     ]
-    lines.extend(_format_ranked("Top tags", stats.top_tags))
+    lines.extend(_format_ranked("Top tags", tuple((f"#{name}", n) for name, n in stats.top_tags)))
     lines.extend(_format_ranked("Top sources", stats.top_sources))
     lines.extend(
         _format_ranked("Top people", tuple((f"@{name}", n) for name, n in stats.top_people))

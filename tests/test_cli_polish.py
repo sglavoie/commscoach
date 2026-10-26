@@ -92,11 +92,12 @@ class EntryWriteTests(EntryTestBase):
         rc, out, _ = self._run("entry", "edit", str(entry.id), "--body", "new")
         self.assertTrue(out.startswith(f"updated entry {entry.id}"), out)
 
-    def test_entry_show_prefixes_handles(self) -> None:
+    def test_entry_show_prefixes_handles_and_tags(self) -> None:
         self._create_person("bob")
-        entry = self._seed_entry("body", people=("bob",))
+        entry = self._seed_entry("body", people=("bob",), tags=("1on1", "sync"))
         _, out, _ = self._run("entry", "show", str(entry.id))
         self.assertIn("people: @bob", out)
+        self.assertIn("tags: #1on1, #sync", out)
 
     def test_rm_warns_when_a_review_would_cover_no_entries(self) -> None:
         only = self._seed_entry("only")
