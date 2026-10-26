@@ -37,7 +37,8 @@ class EntryListTests(EntryTestBase):
         self.assertEqual(json.loads(out)[0]["body"], body)
         rc, shown, err = self._run("entry", "show", str(entry.id), "--json")
         self.assertEqual(rc, 0, err)
-        self.assertEqual(json.loads(out), [json.loads(shown)])
+        # Rows add the coaching status that list and search text output shows.
+        self.assertEqual(json.loads(out), [{**json.loads(shown), "has_feedback": False}])
 
     def test_token_search_excerpts_follow_fts_matching(self):
         with closing(db.connect(self.db_path)) as conn:
@@ -94,6 +95,12 @@ class EntryListTests(EntryTestBase):
             line = next(row for row in rows if row.startswith(f"[{fallback.id}]"))
             self.assertIn(format_stamp(fallback.created_at), line)
             self.assertIn("needs feedback", line)
+            rc, out, err = self._run("entry", command, "--json")
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(
+                {row["id"]: row["has_feedback"] for row in json.loads(out)},
+                {entry.id: True, fallback.id: False},
+            )
         with closing(db.connect(self.db_path)) as conn:
             db.delete_feedback(conn, feedback.id)
         rc, out, err = self._run("entry", "search", "--query", "useful")

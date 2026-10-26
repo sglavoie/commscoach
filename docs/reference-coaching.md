@@ -12,9 +12,10 @@ Search feedback bodies without remembering which entry they belong to:
 commscoach feedback search --query "lead with the ask"
 commscoach feedback search --query "ask" --person jdoe --limit 5
 commscoach --json feedback search --query "10%"
+commscoach feedback search --person jdoe --since 2026-09-01   # browse, no query
 ```
 
-Feedback search uses literal substring matching that ignores case and accents, including literal `%` and `_` characters. It returns the newest feedback first (creation time, then ID), with a default limit of 20. `--since`/`--until` bound when the feedback was written, and `--oldest-first` reverses the order before the limit. `--person` matches people linked to the feedback's entry, case-insensitively; an unknown handle is an error. The query must contain non-whitespace text. `--limit 0` returns an empty result. Human output shows feedback and entry IDs plus a preview; JSON returns the existing feedback objects.
+Feedback search uses literal substring matching that ignores case and accents, including literal `%` and `_` characters. It returns the newest feedback first (creation time, then ID), with a default limit of 20. `--since`/`--until` bound when the feedback was written, and `--oldest-first` reverses the order before the limit. `--person` matches people linked to the feedback's entry, case-insensitively; an unknown handle is an error. Omit `--query` to browse every note matching the other filters; a given query must contain non-whitespace text. `--limit 0` returns an empty result. Human output shows feedback and entry IDs plus a preview; JSON returns the existing feedback objects.
 
 Search previews show an excerpt around the first matching passage, including matches in headings or late in a long note. Ellipses mark omitted text; JSON always contains the full body.
 

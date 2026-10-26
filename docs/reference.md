@@ -89,7 +89,7 @@ For example, `Showing 5 of 23 matching feedback notes.` means you can increase
 `--limit` to see more advice. Counts refer to matching records, so multiple linked
 people or entries do not inflate them. JSON output remains unchanged.
 
-When `entry search --query` finds a match, human output shows the matching passage instead of just the entry's opening paragraph. Literal searches use an excerpt around the first match; token searches use SQLite's matching snippet, including for phrases, prefixes, and accent-insensitive matches. Ellipses mark omitted text. Searches without a query retain the opening preview, and JSON still returns the full entry with its existing fields.
+When `entry search --query` finds a match, human output shows the matching passage instead of just the entry's opening paragraph. Literal searches use an excerpt around the first match; token searches use SQLite's matching snippet, including for phrases, prefixes, and accent-insensitive matches. Ellipses mark omitted text. Searches without a query retain the opening preview, and JSON still returns the full entry. Each `entry list` and `entry search` JSON row (and each `person show --recent` entry) also carries `has_feedback`, the coaching status the text rows show as `has feedback` or `needs feedback`.
 
 `entry show --with-feedback` includes full feedback notes oldest-first, or an explicit empty marker when there are none. With `--json`, it adds a `feedback` array to the entry object; without this flag the JSON shape is unchanged.
 

@@ -74,14 +74,18 @@ def get_feedback(conn: sqlite3.Connection, feedback_id: int) -> Feedback | None:
 def search_feedback(
     conn: sqlite3.Connection,
     *,
-    query: str,
+    query: str | None = None,
     person_handle: str | None = None,
     since: str | None = None,
     until: str | None = None,
     limit: int = 20,
     oldest_first: bool = False,
 ) -> tuple[Feedback, ...]:
-    """Find literal body substrings, newest-first, by linked person or written date."""
+    """Find literal body substrings, newest-first, by linked person or written date.
+
+    Without ``query`` every note matching the other filters is returned, so
+    feedback can be browsed across entries the way ``entry search`` can.
+    """
     if limit < 0:
         raise DBError("limit must be non-negative")
     sql, params = _feedback_search_filter(conn, query, person_handle, since, until)
@@ -98,7 +102,7 @@ def search_feedback(
 def count_search_feedback(
     conn: sqlite3.Connection,
     *,
-    query: str,
+    query: str | None = None,
     person_handle: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -110,15 +114,18 @@ def count_search_feedback(
 
 def _feedback_search_filter(
     conn: sqlite3.Connection,
-    query: str,
+    query: str | None,
     person_handle: str | None,
     since: str | None = None,
     until: str | None = None,
 ) -> tuple[str, list[object]]:
-    if not query or not query.strip():
-        raise DBError("query must be a non-empty string")
-    sql = " FROM feedback f WHERE search_fold(f.body) LIKE ? ESCAPE '!'"
-    params: list[object] = [common.contains_pattern(query)]
+    sql = " FROM feedback f WHERE 1"
+    params: list[object] = []
+    if query is not None:
+        if not query.strip():
+            raise DBError("query must be a non-empty string")
+        sql += " AND search_fold(f.body) LIKE ? ESCAPE '!'"
+        params.append(common.contains_pattern(query))
     if person_handle is not None:
         person = get_person_by_handle(conn, person_handle)
         if person is None:

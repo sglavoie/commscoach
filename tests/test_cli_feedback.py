@@ -270,6 +270,22 @@ class FeedbackSearchTests(FeedbackTestBase):
         self.assertIn(f"entry {entry.id}", out)
         self.assertIn("Listen more", out)
 
+    def test_search_without_query_browses_feedback_across_entries(self):
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_person(conn, "alice")
+            mine = db.create_entry(conn, "meeting", people=("alice",))
+            other = db.create_entry(conn, "standup")
+            first = db.create_feedback(conn, mine.id, "Lead with the ask")
+            db.create_feedback(conn, other.id, "Listen more")
+            last = db.create_feedback(conn, mine.id, "Summarize at the end")
+        rc, out, err = self._run("feedback", "search", "--person", "alice", "--json")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual([f["id"] for f in json.loads(out)], [last.id, first.id])
+        rc, out, err = self._run("feedback", "search", "--limit", "1")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Summarize at the end", out)
+        self.assertIn("Showing 1 of 3 feedback notes.", err)
+
     def test_search_treats_wildcards_and_escape_characters_literally(self):
         entry = self._seed_entry()
         exact = self._seed_feedback(entry.id, "Improve 10%_! next time")

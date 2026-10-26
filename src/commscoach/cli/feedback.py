@@ -61,12 +61,17 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     lst.add_argument("entry_id", type=row_id, metavar="ENTRY_ID")
     lst.set_defaults(func=cmd_feedback_list)
 
-    search = feedback_sub.add_parser("search", help="Search stored coaching text.")
+    search = feedback_sub.add_parser(
+        "search", help="Search stored coaching text, or browse it across entries."
+    )
     search.add_argument(
         "--query",
-        required=True,
+        default=None,
         metavar="TEXT",
-        help="Literal substring (ignoring case and accents) to find in feedback bodies.",
+        help=(
+            "Literal substring (ignoring case and accents) to find in feedback bodies;"
+            " omit it to list every note matching the other filters."
+        ),
     )
     search.add_argument(
         "--person",
@@ -237,7 +242,8 @@ def cmd_feedback_search(args: argparse.Namespace) -> int:
         )
     _emit_feedback_list(args, items, query=args.query)
     if total > len(items):
-        print(f"Showing {len(items)} of {total} matching feedback notes.", file=sys.stderr)
+        noun = "matching feedback notes" if args.query is not None else "feedback notes"
+        print(f"Showing {len(items)} of {total} {noun}.", file=sys.stderr)
     return 0
 
 

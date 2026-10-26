@@ -321,13 +321,11 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                 if args.with_feedback
                 else {}
             )
-            coached = set()
-            if not args.json:
-                coached = (
-                    {entry_id for entry_id, notes in feedback.items() if notes}
-                    if args.with_feedback
-                    else db.feedback_entry_ids(conn, (e.id for e in entries))
-                )
+            coached = (
+                {entry_id for entry_id, notes in feedback.items() if notes}
+                if args.with_feedback
+                else db.feedback_entry_ids(conn, (e.id for e in entries))
+            )
     if args.json:
         payload = {
             **person_to_dict(person),
@@ -337,6 +335,7 @@ def cmd_person_show(args: argparse.Namespace) -> int:
             payload["recent_entries"] = [
                 {
                     **entry_to_dict(entry),
+                    "has_feedback": entry.id in coached,
                     **(
                         {"feedback": [feedback_to_dict(note) for note in feedback[entry.id]]}
                         if args.with_feedback

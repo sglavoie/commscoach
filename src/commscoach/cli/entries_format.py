@@ -70,7 +70,8 @@ def emit_entries(
     excerpts: dict[int, str] | None = None,
 ) -> None:
     if args.json:
-        print_json([entry_to_dict(e) for e in entries])
+        # The same coaching status the text rows show as has/needs feedback.
+        print_json([{**entry_to_dict(e), "has_feedback": e.id in coached} for e in entries])
         return
     if not entries:
         print("(no entries)")
