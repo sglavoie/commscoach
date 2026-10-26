@@ -152,6 +152,52 @@ class InitDbSchemaTests(unittest.TestCase):
                 ["legacy searchable body"],
             )
 
+    def test_init_rebuilds_fts_after_edits_made_without_fts5(self) -> None:
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            entry = db.create_entry(conn, "budget discussion")
+        with mock.patch.object(db_schema, "_probe_fts5", return_value=False):
+            db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            db.update_entry(conn, entry.id, body="hiring discussion")
+
+        db.init_db(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(
+                [found.id for found in db.search_entries(conn, query="hiring")],
+                [entry.id],
+            )
+            self.assertEqual(db.search_entries(conn, query="budget"), ())
+
+    def test_init_rolls_back_every_step_when_one_fails(self) -> None:
+        paths.ensure_data_dir(self.db_path)
+        with closing(db.connect(self.db_path)) as conn:
+            conn.executescript(db_schema.SCHEMA_V1_SQL)
+            conn.execute(
+                "INSERT INTO _meta (key, value) VALUES ('schema_version', '1')"
+            )
+            conn.execute(
+                "INSERT INTO entries (body, source, occurred_at, created_at, updated_at)"
+                " VALUES ('legacy', NULL, '2026-06-20T14:00:00-04:00', ?, ?)",
+                (NOW, NOW),
+            )
+            conn.commit()
+
+        with mock.patch.object(
+            db_schema, "_configure_fts5", side_effect=RuntimeError("boom")
+        ), self.assertRaises(RuntimeError):
+            db.init_db(self.db_path)
+
+        with closing(db.connect(self.db_path)) as conn:
+            self.assertEqual(db.get_schema_version(conn), 1)
+            self.assertEqual(
+                conn.execute("SELECT occurred_at FROM entries").fetchone()[0],
+                "2026-06-20T14:00:00-04:00",
+            )
+            self.assertNotIn("goals", table_names(conn))
+            (foreign_keys,) = conn.execute("PRAGMA foreign_keys").fetchone()
+            self.assertEqual(foreign_keys, 1)
+
     def test_init_returns_resolved_path(self) -> None:
         returned = db.init_db(self.db_path)
         self.assertEqual(returned, self.db_path)

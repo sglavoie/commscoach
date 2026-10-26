@@ -227,8 +227,15 @@ def _rebuild_reviews_table(conn: sqlite3.Connection) -> None:
 
 
 def _verify_reviews_rebuild(conn: sqlite3.Connection) -> None:
-    """Raise ``DBError`` unless the swapped-in table left the DB consistent."""
-    violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+    """Raise ``DBError`` unless the swapped-in table left the DB consistent.
+
+    Only the tables that reference ``reviews`` are checked, so an unrelated
+    pre-existing violation is not misreported as a migration failure.
+    """
+    violations = [
+        *conn.execute("PRAGMA foreign_key_check(review_entries)").fetchall(),
+        *conn.execute("PRAGMA foreign_key_check(goals)").fetchall(),
+    ]
     if violations:
         raise DBError(
             "schema v4 migration would leave foreign-key violations"
@@ -251,30 +258,15 @@ def _migrate_reviews_scope_v4(conn: sqlite3.Connection) -> None:
 
     Foreign keys must be off across the swap: with them on, ``DROP TABLE
     reviews`` cascade-deletes every ``review_entries`` row and nulls every
-    ``goals.review_id``, silently destroying the coaching loop. ``PRAGMA
-    foreign_keys`` is a silent no-op inside a transaction, so any implicit one
-    is committed first; the previous setting is restored in a ``finally`` and
-    the whole rebuild rolls back as one on any error.
+    ``goals.review_id``, silently destroying the coaching loop.
+    :func:`_apply_schema` turns them off before opening its transaction
+    (``PRAGMA foreign_keys`` is a silent no-op inside one) and rolls the whole
+    upgrade back on any error.
     """
     if not _reviews_need_scope_columns(conn):
         return
-
-    conn.commit()
-    (foreign_keys,) = conn.execute("PRAGMA foreign_keys").fetchone()
-    conn.execute("PRAGMA foreign_keys = OFF")
-    try:
-        conn.execute("BEGIN")
-        try:
-            _rebuild_reviews_table(conn)
-            _verify_reviews_rebuild(conn)
-        except BaseException:
-            conn.rollback()
-            raise
-        conn.execute("COMMIT")
-    finally:
-        conn.execute(
-            "PRAGMA foreign_keys = ON" if foreign_keys else "PRAGMA foreign_keys = OFF"
-        )
+    _rebuild_reviews_table(conn)
+    _verify_reviews_rebuild(conn)
 
 
 def _probe_fts5(conn: sqlite3.Connection) -> bool:
@@ -292,19 +284,25 @@ def _rebuild_fts5(conn: sqlite3.Connection) -> None:
 
 def _configure_fts5(conn: sqlite3.Connection) -> None:
     """Probe and configure optional FTS5 support for this database."""
+    previous = conn.execute(
+        "SELECT value FROM _meta WHERE key = ?", (_FTS5_META_KEY,)
+    ).fetchone()
     enabled = _probe_fts5(conn)
     if enabled:
-        conn.executescript(_FTS5_TRIGGER_SQL)
+        _execute_script(conn, _FTS5_TRIGGER_SQL)
         entry_count = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
         indexed_count = conn.execute(
             "SELECT COUNT(*) FROM entries_fts_docsize"
         ).fetchone()[0]
-        if indexed_count != entry_count:
+        # A build without FTS5 drops the sync triggers, so entries may have
+        # been edited there without the index noticing; equal counts cannot
+        # detect an edited body, hence the unconditional rebuild after one.
+        if indexed_count != entry_count or (previous is not None and previous[0] != "1"):
             _rebuild_fts5(conn)
     else:
         # A database may move between Python/SQLite builds. Keep writes working
         # when the current build cannot load an FTS table created elsewhere.
-        conn.executescript(_FTS5_DROP_TRIGGER_SQL)
+        _execute_script(conn, _FTS5_DROP_TRIGGER_SQL)
 
     conn.execute(
         "INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)",
@@ -312,9 +310,47 @@ def _configure_fts5(conn: sqlite3.Connection) -> None:
     )
 
 
+def _execute_script(conn: sqlite3.Connection, script: str) -> None:
+    """Run ``script`` statement by statement inside the current transaction.
+
+    ``Connection.executescript`` commits any pending transaction first, which
+    would split :func:`_apply_schema` into many separate commits.
+    """
+    statement = ""
+    for line in script.splitlines(keepends=True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            conn.execute(statement)
+            statement = ""
+    if statement.strip():
+        conn.execute(statement)
+
+
 def _apply_schema(conn: sqlite3.Connection) -> None:
-    """Apply schema v4 idempotently, migrating v1/v2/v3 databases in place."""
-    conn.executescript(SCHEMA_V1_SQL)
+    """Apply schema v4 idempotently, migrating v1/v2/v3 databases in place.
+
+    The whole upgrade runs in one transaction, so a failure or crash part-way
+    leaves the database exactly as it was.
+    """
+    conn.commit()
+    (foreign_keys,) = conn.execute("PRAGMA foreign_keys").fetchone()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN")
+        try:
+            _apply_schema_steps(conn)
+        except BaseException:
+            conn.rollback()
+            raise
+        conn.execute("COMMIT")
+    finally:
+        conn.execute(
+            "PRAGMA foreign_keys = ON" if foreign_keys else "PRAGMA foreign_keys = OFF"
+        )
+
+
+def _apply_schema_steps(conn: sqlite3.Connection) -> None:
+    _execute_script(conn, SCHEMA_V1_SQL)
     version = get_schema_version(conn)
     if version is not None and not 1 <= version <= SCHEMA_VERSION:
         raise DBError(f"unsupported schema version {version}")
@@ -324,8 +360,7 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
     # idx_reviews_scope_person_id, which cannot be built against a pre-v4
     # reviews table.
     _migrate_reviews_scope_v4(conn)
-    conn.executescript(SCHEMA_V2_SQL)
-    conn.executescript(SCHEMA_V3_SQL)
+    _execute_script(conn, SCHEMA_V2_SQL)
+    _execute_script(conn, SCHEMA_V3_SQL)
     _configure_fts5(conn)
     _set_schema_version(conn, SCHEMA_VERSION)
-    conn.commit()
