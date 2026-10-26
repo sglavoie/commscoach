@@ -185,6 +185,7 @@ def update_entry(
                 (now, entry_id),
             )
         if normalized_tags is not None:
+            unlinked = tags_mod.linked_tag_ids(conn, entry_id)
             conn.execute("DELETE FROM entry_tags WHERE entry_id = ?", (entry_id,))
             for tag in normalized_tags:
                 tag_id = tags_mod.upsert_tag(conn, tag)
@@ -192,7 +193,7 @@ def update_entry(
                     "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?, ?)",
                     (entry_id, tag_id),
                 )
-            tags_mod.gc_orphan_tags(conn)
+            tags_mod.gc_orphan_tags(conn, unlinked)
         if resolved_people is not None:
             conn.execute("DELETE FROM entry_people WHERE entry_id = ?", (entry_id,))
             for person in resolved_people:
@@ -284,10 +285,11 @@ def count_entries_with_person(
 def delete_entry(conn: sqlite3.Connection, entry_id: int) -> bool:
     """Delete an entry and GC orphan tags. Returns ``True`` if a row was deleted."""
     with common.write_transaction(conn):
+        unlinked = tags_mod.linked_tag_ids(conn, entry_id)
         cur = conn.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
         if cur.rowcount == 0:
             return False
-        tags_mod.gc_orphan_tags(conn)
+        tags_mod.gc_orphan_tags(conn, unlinked)
     return True
 
 
