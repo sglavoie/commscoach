@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from .common import handle_key, normalize_date_bound, read_snapshot
+from .common import handle_key, normalize_date_bound, read_snapshot, write_transaction
 from .errors import DBError
 from .people import renormalize_handles
 from .schema import get_schema_version
@@ -439,9 +439,6 @@ def load_from_dict(
     savepoint back. No merge or destructive force mode is provided.
     """
     validate_dump(data)
-    if _database_has_data(conn):
-        raise DatabaseNotEmptyError("database is not empty; import requires an empty database")
-
     foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
     if not foreign_keys:
         conn.execute("PRAGMA foreign_keys = ON")
@@ -459,22 +456,27 @@ def load_from_dict(
             stacklevel=2,
         )
 
-    savepoint = "commscoach_dump_import"
-    conn.execute(f"SAVEPOINT {savepoint}")
-    try:
-        for table in _AUTOINCREMENT_TABLES:
-            conn.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table,))
-        _restore_rows(conn, data)
-        renormalize_handles(conn)
-        renormalize_tag_names(conn)
-    except BaseException as exc:
-        conn.execute(f"ROLLBACK TO {savepoint}")
-        conn.execute(f"RELEASE {savepoint}")
-        if isinstance(exc, DBError):
+    # Hold the write lock from the emptiness check on, so a concurrent import
+    # cannot pass the same check and interleave its rows with these.
+    with write_transaction(conn):
+        if _database_has_data(conn):
+            raise DatabaseNotEmptyError("database is not empty; import requires an empty database")
+        savepoint = "commscoach_dump_import"
+        conn.execute(f"SAVEPOINT {savepoint}")
+        try:
+            for table in _AUTOINCREMENT_TABLES:
+                conn.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table,))
+            _restore_rows(conn, data)
+            renormalize_handles(conn)
+            renormalize_tag_names(conn)
+        except BaseException as exc:
+            conn.execute(f"ROLLBACK TO {savepoint}")
+            conn.execute(f"RELEASE {savepoint}")
+            if isinstance(exc, DBError):
+                raise
+            if isinstance(exc, (sqlite3.Error, KeyError, TypeError, ValueError, OverflowError)):
+                raise DumpFormatError(f"cannot import dump: {exc}") from exc
             raise
-        if isinstance(exc, (sqlite3.Error, KeyError, TypeError, ValueError, OverflowError)):
-            raise DumpFormatError(f"cannot import dump: {exc}") from exc
-        raise
-    if dry_run:
-        conn.execute(f"ROLLBACK TO {savepoint}")
-    conn.execute(f"RELEASE {savepoint}")
+        if dry_run:
+            conn.execute(f"ROLLBACK TO {savepoint}")
+        conn.execute(f"RELEASE {savepoint}")

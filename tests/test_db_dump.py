@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import copy
+import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest import mock
 
 from commscoach import db
+from commscoach.db import dump as dump_mod
 
 from .db_case import DBTestCase
 
@@ -146,6 +149,23 @@ class DumpRoundTripTests(DBTestCase):
             db.load_from_dict(self.conn, original)
 
         self.assertEqual(db.dump_to_dict(self.conn), before)
+
+    def test_emptiness_is_checked_under_the_write_lock(self) -> None:
+        data = db.dump_to_dict(self.conn)
+        target = Path(self._tmp.name) / "target.sqlite3"
+        db.init_db(target)
+        with closing(db.connect(target)) as conn, closing(db.connect(target)) as rival:
+            rival.execute("PRAGMA busy_timeout = 0")
+            real = dump_mod._database_has_data
+
+            def check_then_race(checked_conn):
+                # Another writer must not slip in between the check and the restore.
+                with self.assertRaises(sqlite3.OperationalError):
+                    rival.execute("BEGIN IMMEDIATE")
+                return real(checked_conn)
+
+            with mock.patch.object(dump_mod, "_database_has_data", side_effect=check_then_race):
+                db.load_from_dict(conn, data)
 
     def test_newer_format_version_is_a_hard_error(self) -> None:
         payload = db.dump_to_dict(self.conn)
