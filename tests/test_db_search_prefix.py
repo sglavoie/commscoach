@@ -22,7 +22,18 @@ class FtsMatchQueryTests(unittest.TestCase):
                 self.assertEqual(_fts_match_query(query), query)
 
     def test_other_text_is_left_to_substring_search(self) -> None:
-        for query in ("😀", "€50", "follow-up", "meet -budget", "x_y", "...", '"😀"'):
+        for query in (
+            "😀",
+            "€50",
+            "follow-up",
+            "meet -budget",
+            "x_y",
+            "...",
+            '"😀"',
+            "会議",
+            "カフェ",
+            "ประชุม",
+        ):
             with self.subTest(query=query):
                 self.assertIsNone(_fts_match_query(query))
 
@@ -52,6 +63,13 @@ class PrefixSearchTests(DBTestCase):
                 self.assertEqual([entry.id for entry in found], expected)
                 self.assertEqual(db.count_search_entries(self.conn, query=query), 1)
                 self.assertEqual(db.search_entry_snippets(self.conn, query, expected), {})
+
+    def test_words_in_unspaced_scripts_match_inside_a_sentence(self) -> None:
+        meeting = db.create_entry(self.conn, "今日の会議はよかった")
+        db.create_entry(self.conn, "会社")
+        found = db.search_entries(self.conn, query="会議")
+        self.assertEqual([entry.id for entry in found], [meeting.id])
+        self.assertEqual(db.count_search_entries(self.conn, query="会議"), 1)
 
     def test_plain_words_fold_beyond_the_tokenizer(self) -> None:
         street = db.create_entry(self.conn, "Walked down the Straße")

@@ -23,6 +23,25 @@ _FTS_OPERATORS = frozenset({"AND", "OR", "NOT", "NEAR"})
 _FTS_SYNTAX = re.compile(r'["*^():{}]')
 
 
+# Scripts written without spaces between words. FTS5's unicode61 tokenizer
+# reads a whole run of them as one token, so a word inside a sentence is only
+# found by substring search.
+_UNSPACED_SCRIPTS = (
+    "CJK ",
+    "HIRAGANA",
+    "KATAKANA",
+    "HALFWIDTH KATAKANA",
+    "THAI",
+    "LAO",
+    "KHMER",
+    "MYANMAR",
+)
+
+
+def _has_unspaced_script(query: str) -> bool:
+    return any(unicodedata.name(char, "").startswith(_UNSPACED_SCRIPTS) for char in query)
+
+
 def _is_plain_words(query: str) -> bool:
     stripped = query.strip()
     return bool(_PLAIN_WORDS.fullmatch(stripped)) and not _FTS_OPERATORS.intersection(
@@ -38,13 +57,16 @@ def _fts_match_query(query: str) -> str | None:
     through unchanged, so phrases and boolean searches still work. Anything
     else (``€50``, ``follow-up``, an emoji) is literal text: FTS5 reads
     non-ASCII symbols as token characters and then drops them, so ``€50``
-    would match any ``50`` and ``😀`` nothing at all. A query without a single
+    would match any ``50`` and ``😀`` nothing at all. Plain words in a script
+    written without spaces (``会議``) are literal text too. A query without a single
     letter or digit has no searchable tokens either way.
     """
     stripped = query.strip()
     if not any(char.isalnum() for char in stripped):
         return None
     if _is_plain_words(stripped):
+        if _has_unspaced_script(stripped):
+            return None
         return " ".join(f'"{word}"*' for word in stripped.split())
     if _FTS_SYNTAX.search(stripped) or _FTS_OPERATORS.intersection(stripped.split()):
         return query
