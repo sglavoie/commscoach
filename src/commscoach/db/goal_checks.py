@@ -147,7 +147,8 @@ def replace_goal_checks(
     """Replace a feedback note's checks with ``checks``; an empty list clears them.
 
     A goal whose verdict and note are unchanged keeps its stored row (and its
-    ``created_at``), so re-submitting the same set is a no-op.
+    ``created_at``), so re-submitting the same set is a no-op; any change
+    advances the note's ``updated_at``, as a body edit does.
     """
     if conn.execute("SELECT 1 FROM feedback WHERE id = ?", (feedback_id,)).fetchone() is None:
         raise FeedbackNotFoundError(feedback_id)
@@ -167,7 +168,11 @@ def replace_goal_checks(
             (feedback_id, goal_id),
         )
     fresh = [check for check in validated if current.get(check[0]) != (check[1], check[2])]
-    _insert_checks(conn, feedback_id, fresh, now or common.utcnow_iso())
+    if stale or fresh:
+        timestamp = now or common.utcnow_iso()
+        _insert_checks(conn, feedback_id, fresh, timestamp)
+        # Checks are part of the note, so changing them is an edit of it.
+        conn.execute("UPDATE feedback SET updated_at = ? WHERE id = ?", (timestamp, feedback_id))
     return list_feedback_goal_checks(conn, (feedback_id,)).get(feedback_id, ())
 
 

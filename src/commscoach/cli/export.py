@@ -58,7 +58,29 @@ def _format_person_export_label(person: db.Person) -> str:
     return label
 
 
-def _format_markdown_entry(entry: db.Entry, feedback_items: tuple[db.Feedback, ...]) -> str:
+def _format_markdown_goal_checks(
+    checks: tuple[db.GoalCheck, ...], goal_titles: dict[int, str]
+) -> list[str]:
+    """Render a note's checks as a list: ``- Goal 2 (Title): advanced — note``."""
+    lines = ["**Goal checks**", ""]
+    for check in checks:
+        line = f"- Goal {check.goal_id}"
+        if check.goal_id in goal_titles:
+            line += f" ({goal_titles[check.goal_id]})"
+        line += f": {check.verdict}"
+        if check.note is not None:
+            line += f" — {check.note}"
+        lines.append(line)
+    lines.append("")
+    return lines
+
+
+def _format_markdown_entry(
+    entry: db.Entry,
+    feedback_items: tuple[db.Feedback, ...],
+    goal_checks: dict[int, tuple[db.GoalCheck, ...]] | None = None,
+    goal_titles: dict[int, str] | None = None,
+) -> str:
     lines: list[str] = [f"## Entry {entry.id}", ""]
     lines.append(f"- **Created**: {entry.created_at}")
     if entry.occurred_at:
@@ -83,6 +105,9 @@ def _format_markdown_entry(entry: db.Entry, feedback_items: tuple[db.Feedback, .
             lines.append("")
             lines.append(feedback.body.rstrip("\n"))
             lines.append("")
+            checks = (goal_checks or {}).get(feedback.id)
+            if checks:
+                lines.extend(_format_markdown_goal_checks(checks, goal_titles or {}))
     return "\n".join(lines)
 
 
@@ -133,6 +158,7 @@ def _render_markdown_export(
     feedback_by_entry: dict[int, tuple[db.Feedback, ...]],
     reviews: tuple[db.Review, ...],
     goals: tuple[db.Goal, ...] = (),
+    goal_checks: dict[int, tuple[db.GoalCheck, ...]] | None = None,
 ) -> str:
     sections: list[str] = ["# commscoach export", ""]
     if reviews:
@@ -153,7 +179,14 @@ def _render_markdown_export(
         return "\n".join(sections)
     rendered_entries: list[str] = []
     for entry in entries:
-        rendered_entries.append(_format_markdown_entry(entry, feedback_by_entry[entry.id]))
+        rendered_entries.append(
+            _format_markdown_entry(
+                entry,
+                feedback_by_entry[entry.id],
+                goal_checks,
+                {goal.id: goal.title for goal in goals},
+            )
+        )
     sections.append("\n---\n\n".join(rendered_entries))
     if not sections[-1].endswith("\n"):
         sections.append("")
@@ -220,7 +253,13 @@ def cmd_export(args: argparse.Namespace) -> int:
                 feedback_by_entry = {
                     entry.id: db.list_feedback(conn, entry.id) for entry in entries
                 }
-            rendered = _render_markdown_export(entries, feedback_by_entry, reviews, goals)
+                goal_checks = db.list_feedback_goal_checks(
+                    conn,
+                    (note.id for notes in feedback_by_entry.values() for note in notes),
+                )
+            rendered = _render_markdown_export(
+                entries, feedback_by_entry, reviews, goals, goal_checks
+            )
     if not rendered.endswith("\n"):
         rendered += "\n"
     if out_path is None:

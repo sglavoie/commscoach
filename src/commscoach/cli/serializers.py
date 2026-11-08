@@ -37,13 +37,49 @@ def tag_to_dict(tag: db.Tag) -> dict[str, Any]:
     }
 
 
-def feedback_to_dict(feedback: db.Feedback) -> dict[str, Any]:
-    return {
+def feedback_to_dict(
+    feedback: db.Feedback, goal_checks: tuple[db.GoalCheck, ...] | None = None
+) -> dict[str, Any]:
+    """Serialize a feedback note; ``goal_checks`` adds its checks under that key.
+
+    Surfaces that load the checks pass them (an empty tuple included), so the
+    key is present there and absent from those that never did.
+    """
+    payload: dict[str, Any] = {
         "id": feedback.id,
         "entry_id": feedback.entry_id,
         "body": feedback.body,
         "created_at": feedback.created_at,
         "updated_at": feedback.updated_at,
+    }
+    if goal_checks is not None:
+        payload["goal_checks"] = [goal_check_to_dict(check) for check in goal_checks]
+    return payload
+
+
+def goal_check_to_dict(check: db.GoalCheck) -> dict[str, Any]:
+    """Serialize one check; ``at`` is when the checked interaction happened."""
+    return {
+        "id": check.id,
+        "feedback_id": check.feedback_id,
+        "goal_id": check.goal_id,
+        "entry_id": check.entry_id,
+        "verdict": check.verdict,
+        "note": check.note,
+        "at": check.at,
+        "created_at": check.created_at,
+    }
+
+
+def goal_check_summary_to_dict(summary: db.GoalCheckSummary) -> dict[str, Any]:
+    return {
+        "advanced": summary.advanced,
+        "hurt": summary.hurt,
+        "neutral": summary.neutral,
+        "total": summary.total,
+        "last_verdict": summary.last_verdict,
+        "last_at": summary.last_at,
+        "first_advanced_at": summary.first_advanced_at,
     }
 
 
@@ -83,8 +119,9 @@ def review_to_dict(review: db.Review) -> dict[str, Any]:
     }
 
 
-def goal_to_dict(goal: db.Goal) -> dict[str, Any]:
-    return {
+def goal_to_dict(goal: db.Goal, check_summary: db.GoalCheckSummary | None = None) -> dict[str, Any]:
+    """Serialize a goal; ``check_summary`` adds its progress under that key."""
+    payload: dict[str, Any] = {
         "id": goal.id,
         "title": goal.title,
         "detail": goal.detail,
@@ -97,6 +134,9 @@ def goal_to_dict(goal: db.Goal) -> dict[str, Any]:
         "updated_at": goal.updated_at,
         "is_open": goal.is_open,
     }
+    if check_summary is not None:
+        payload["check_summary"] = goal_check_summary_to_dict(check_summary)
+    return payload
 
 
 def stats_to_dict(stats: db.Stats, *, weeks: int | None = None) -> dict[str, Any]:

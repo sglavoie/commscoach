@@ -35,6 +35,7 @@ class FeedbackExcerptTests(FeedbackTestBase):
                     "body": body,
                     "created_at": note.created_at,
                     "updated_at": note.updated_at,
+                    "goal_checks": [],
                 }
             ],
         )
