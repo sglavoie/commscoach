@@ -94,8 +94,8 @@ class InitDbSchemaTests(unittest.TestCase):
     def test_init_stamps_schema_version(self) -> None:
         db.init_db(self.db_path)
         with closing(db.connect(self.db_path)) as conn:
-            self.assertEqual(db.SCHEMA_VERSION, 4)
-            self.assertEqual(db.get_schema_version(conn), 4)
+            self.assertEqual(db.SCHEMA_VERSION, 5)
+            self.assertEqual(db.get_schema_version(conn), 5)
 
     def test_init_adds_no_tables_beyond_the_expected_set(self) -> None:
         db.init_db(self.db_path)

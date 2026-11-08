@@ -4,7 +4,8 @@ The archive format is deliberately independent of the CLI display serializers.
 Unknown top-level keys and unknown row columns are ignored so readers remain
 forward compatible. Columns added by a later format version are optional on
 read, so an archive written before they existed still restores with those
-values NULL. Missing known tables are treated as empty. A dump with a
+values NULL. Missing known tables are treated as empty, which is how an
+archive written before ``goal_checks`` existed restores. A dump with a
 newer ``format_version`` is rejected because its representation may no longer
 be safe to interpret, while a ``schema_version`` mismatch emits a warning: a
 dump from one schema version restored into another is the normal migration
@@ -24,12 +25,13 @@ from typing import Any
 from ..timeparse import in_supported_range
 from .common import handle_key, normalize_date_bound, read_snapshot, write_transaction
 from .errors import DBError
+from .goal_checks import GOAL_CHECK_VERDICTS
 from .people import renormalize_handles
 from .schema import get_schema_version
 from .tags import normalize_tag, renormalize_tag_names
 
 FORMAT = "commscoach-dump"
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 
 class DumpFormatError(DBError):
@@ -87,6 +89,8 @@ _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "updated_at",
     ),
     "person_notes": ("person_id", "body", "created_at", "updated_at"),
+    # Added in format version 3; earlier archives have no such key.
+    "goal_checks": ("id", "feedback_id", "goal_id", "verdict", "note", "created_at"),
 }
 
 # Columns added after a table was already exported by a released format
@@ -119,13 +123,22 @@ _INTEGER_COLUMNS: dict[str, tuple[str, ...]] = {
     "reviews": ("id",),
     "goals": ("id",),
     "person_notes": ("person_id",),
+    "goal_checks": ("id", "feedback_id", "goal_id"),
 }
 _NULLABLE_INTEGER_COLUMNS: dict[str, tuple[str, ...]] = {
     "reviews": ("scope_limit", "scope_person_id"),
     "goals": ("person_id", "review_id"),
 }
 
-_AUTOINCREMENT_TABLES = ("people", "entries", "tags", "feedback", "reviews", "goals")
+_AUTOINCREMENT_TABLES = (
+    "people",
+    "entries",
+    "tags",
+    "feedback",
+    "reviews",
+    "goals",
+    "goal_checks",
+)
 _ALL_DATA_TABLES = (*_TABLE_COLUMNS, "entry_tags", "entry_people", "review_entries")
 
 
@@ -190,6 +203,7 @@ def _dump_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         "reviews": reviews,
         "goals": _dump_rows(conn, "goals"),
         "person_notes": _dump_rows(conn, "person_notes"),
+        "goal_checks": _dump_rows(conn, "goal_checks"),
         # Optional: lets a restore keep handing out fresh IDs instead of
         # reusing those of rows deleted before the dump.
         "sequences": {
@@ -289,7 +303,15 @@ def _validate_row(table: str, index: int, row: Any) -> None:
                 f"{location}.name must be a non-empty, trimmed, lowercase tag name"
             )
 
-    if table == "entries":
+    if table == "goal_checks":
+        if row["verdict"] not in GOAL_CHECK_VERDICTS:
+            raise DumpFormatError(f"{location}.verdict must be 'advanced', 'hurt', or 'neutral'")
+        note = row["note"]
+        if note is not None and (
+            not isinstance(note, str) or not note.strip() or "\n" in note or "\r" in note
+        ):
+            raise DumpFormatError(f"{location}.note must be null or a non-empty single line")
+    elif table == "entries":
         for key in ("tag_ids", "person_ids"):
             values = row.get(key, [])
             if not isinstance(values, list):
@@ -431,6 +453,8 @@ def _restore_rows(conn: sqlite3.Connection, data: Mapping[str, Any]) -> None:
         _insert_row(conn, "person_notes", row)
     for row in data.get("goals", []):
         _insert_row(conn, "goals", row)
+    for row in data.get("goal_checks", []):
+        _insert_row(conn, "goal_checks", row)
     _restore_sequences(conn, data.get("sequences", {}))
 
 

@@ -72,11 +72,11 @@ class ReviewsScopeV4MigrationTests(unittest.TestCase):
             )
             self.before_goals = _rows(conn, "SELECT id, title, review_id FROM goals ORDER BY id")
 
-    def test_migration_stamps_v4_and_keeps_the_table_set(self) -> None:
+    def test_migration_stamps_the_current_version_and_keeps_the_table_set(self) -> None:
         db.init_db(self.db_path)
 
         with closing(db.connect(self.db_path)) as conn:
-            self.assertEqual(db.get_schema_version(conn), 4)
+            self.assertEqual(db.get_schema_version(conn), db.SCHEMA_VERSION)
             self.assertTrue(EXPECTED_TABLES.issubset(table_names(conn)))
             self.assertNotIn("reviews_new", table_names(conn))
 

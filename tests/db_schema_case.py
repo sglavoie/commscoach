@@ -31,6 +31,7 @@ EXPECTED_TABLES = {
     "review_entries",
     "goals",
     "person_notes",
+    "goal_checks",
 }
 
 NOW = "2026-06-20T00:00:00Z"
