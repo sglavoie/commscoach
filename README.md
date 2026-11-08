@@ -81,6 +81,23 @@ Confirmation prompts only read answers from a terminal; when stdin is a pipe or 
 Use `commscoach --help` for top-level help and `commscoach <command> --help`
 for subcommand-specific options.
 
+## Shell completion
+
+TAB completes subcommands and options, plus person handles, tag names, and
+entry, goal, feedback, and review IDs read from your database (zsh and fish
+also show each ID's excerpt or title):
+
+```sh
+eval "$(commscoach completion bash)"   # in ~/.bashrc
+eval "$(commscoach completion zsh)"    # in ~/.zshrc, after compinit
+commscoach completion fish > ~/.config/fish/completions/commscoach.fish
+```
+
+For zsh you can instead save the output as `_commscoach` in a directory on
+`$fpath`. Completion honors `--db PATH` on the line and `$COMMSCOACH_DB`, and
+only ever opens the database read-only. See
+[shell completion](docs/reference-operations.md#shell-completion) for details.
+
 
 ## Reference
 
@@ -98,6 +115,7 @@ Database files, exports, and backups contain private personal data.
 - [Diagnostics and backups](docs/reference-operations.md#diagnostics-and-backups)
 - [Export and import](docs/reference-operations.md#export)
 - [Schema migrations](docs/reference-operations.md#schema-version-and-migration)
+- [Shell completion](docs/reference-operations.md#shell-completion)
 
 ## Layout
 

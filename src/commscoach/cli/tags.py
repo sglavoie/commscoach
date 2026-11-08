@@ -8,6 +8,7 @@ import sys
 from .. import db
 from ..db.tags import normalize_tag
 from .common import confirm, non_negative_int, open_db, plural, print_json
+from .completion import TAG, complete_as
 from .serializers import tag_to_dict
 
 
@@ -35,17 +36,17 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     lst.set_defaults(func=cmd_tag_list)
 
     rename = tag_sub.add_parser("rename", help="Rename a tag, keeping every entry link.")
-    rename.add_argument("old", metavar="OLD")
+    complete_as(rename.add_argument("old", metavar="OLD"), TAG)
     rename.add_argument("new", metavar="NEW")
     rename.set_defaults(func=cmd_tag_rename)
 
     merge = tag_sub.add_parser("merge", help="Fold one existing tag into another and drop it.")
-    merge.add_argument("source", metavar="SOURCE")
-    merge.add_argument("dest", metavar="DEST")
+    complete_as(merge.add_argument("source", metavar="SOURCE"), TAG)
+    complete_as(merge.add_argument("dest", metavar="DEST"), TAG)
     merge.set_defaults(func=cmd_tag_merge)
 
     rm = tag_sub.add_parser("rm", help="Unlink a tag from every entry and drop it.")
-    rm.add_argument("name", metavar="NAME")
+    complete_as(rm.add_argument("name", metavar="NAME"), TAG)
     rm.set_defaults(func=cmd_tag_rm)
 
 

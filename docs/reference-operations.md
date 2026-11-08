@@ -168,3 +168,40 @@ commscoach --db /path/to/empty.sqlite3 import --dry-run commscoach.json
 commscoach --db /path/to/empty.sqlite3 import commscoach.json
 cat commscoach.json | commscoach --db /path/to/empty.sqlite3 import -
 ```
+
+## Shell completion
+
+`commscoach completion {bash,zsh,fish}` prints a script that wires TAB to the
+CLI itself:
+
+```sh
+eval "$(commscoach completion bash)"                              # ~/.bashrc
+eval "$(commscoach completion zsh)"                               # ~/.zshrc, after compinit
+commscoach completion zsh > ~/.zfunc/_commscoach                 # or autoload it (~/.zfunc on $fpath)
+commscoach completion fish > ~/.config/fish/completions/commscoach.fish
+```
+
+On each TAB the script runs the hidden `commscoach __complete -- WORD...` with
+the words typed so far and offers what it prints: one candidate per line,
+optionally followed by a tab and a description (bash drops descriptions).
+
+- Subcommands, options, and fixed choices (`--format`, `--status`, `--scope`)
+  are read from the argument parser, so new commands complete without changes.
+- Person handles complete for `--person` and `HANDLE` arguments (typing `@`
+  first keeps it); tag names for `--tag`, `--add-tag`/`--remove-tag`, and the
+  `tag` commands. After a comma (`--tag 1on1,re`) only the last part completes.
+- Entry IDs complete for `entry show/edit/rm`, `feedback add/list`, `context`,
+  and `review add --entry`; goal, feedback, and review IDs for their `show`,
+  `edit`, `close`, and `rm` commands and `goal add --review`. zsh and fish show
+  each ID's date and excerpt, or the goal's status and title.
+- `--db`, `--out`, and `import` paths fall back to the shell's file completion.
+
+Completion opens the database read-only at the path `--db` (anywhere on the
+line) or `$COMMSCOACH_DB` selects. It never creates or migrates a database: when
+the file is missing or its schema is not current, only the static candidates are
+offered, and errors are silent rather than printed into your prompt.
+
+For developers: an argument opts into a dynamic kind with one line at
+registration, `complete_as(parser.add_argument(...), TAG)` from
+`commscoach.cli.completion`, or simply by using a conventional metavar
+(`HANDLE`, `TAG`, `ENTRY_ID`, `GOAL_ID`, `FEEDBACK_ID`, `REVIEW_ID`, `PATH`).
