@@ -99,7 +99,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 window = f"since {args.since}"
             elif window and args.until and not args.since:
                 window = f"until {args.until}"
-            print(pretty_views.stats_view(summary, weeks=args.weeks, window=window))
+            print(pretty_views.stats_view(summary, weeks=args.weeks, window=window, until=until))
         else:
             print(_format_human(summary, weeks=args.weeks))
         if summary.entry_count > summary.entries_with_feedback:

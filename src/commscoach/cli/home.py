@@ -14,7 +14,14 @@ from datetime import date, datetime, timedelta
 
 from .. import db
 from . import pretty_views, style
-from .common import command_prefix, first_prose_line, open_db, parse_date_bound, plural
+from .common import (
+    command_prefix,
+    first_prose_line,
+    open_db,
+    parse_date_bound,
+    plural,
+    resolve_db_path,
+)
 
 QUIET_DAYS = 28
 QUIET_MIN_INTERACTIONS = 3
@@ -118,6 +125,17 @@ def render_home(args: argparse.Namespace, *, now: datetime | None = None) -> str
         with open_db(args) as conn:
             return _render(args, conn, now)
     except db.InitRequiredError:
+        if resolve_db_path(args).exists():
+            # An older schema: the journal has data, it only needs upgrading.
+            return "\n".join(
+                [
+                    style.heading("Your journal needs a quick upgrade"),
+                    "  Run " + _cmd(args, "init") + " to migrate it; your entries are kept.",
+                    style.muted("  (A backup first never hurts: ")
+                    + _cmd(args, "backup")
+                    + style.muted(")"),
+                ]
+            )
         return _onboarding(args, initialized=False, has_self=False, people=0)
 
 
@@ -130,7 +148,8 @@ def _render(args: argparse.Namespace, conn, now: datetime) -> str:  # type: igno
         return _onboarding(args, initialized=True, has_self=me is not None, people=len(people))
 
     lines: list[str] = []
-    who = (me.name.split()[0] if me and me.name else me.handle) if me else None
+    name_parts = (me.name or "").split() if me else []
+    who = (name_parts[0] if name_parts else me.handle) if me else None
     lines.append(style.heading(f"{_greeting(now)}{', ' + who if who else ''}"))
 
     weekly = _weekly_counts(stats, today, SPARK_WEEKS)

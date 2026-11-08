@@ -31,7 +31,7 @@ from .people import confirm_new_people, create_people
 
 # A mention starts a word: "a@b.com" is an address, not a handle. Trailing
 # punctuation ("@jdoe's", "@jdoe,", "@jdoe.") is not part of it.
-_MENTION_RE = re.compile(r"(?<![\w@])@([\w][\w.\-]*)")
+_MENTION_RE = re.compile(r"(?<![\w@/:.])@([\w][\w.\-]*)")
 # A tag needs a letter, so "issue #42" stays prose while "#1on1" is a tag.
 _TAG_RE = re.compile(r"(?<![\w#&/])#([\w][\w\-]*)")
 
@@ -76,7 +76,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "words",
         nargs="*",
         metavar="TEXT",
-        help="What happened (joined with spaces; '-' reads stdin; omit to open $EDITOR).",
+        help=(
+            "What happened, as literal text (joined with spaces; '-' reads stdin;"
+            " omit to open $EDITOR)."
+        ),
     )
     parser.add_argument("--source", "-s", default=None, help="Channel (slack, email, in-person…).")
     parser.add_argument(
@@ -127,16 +130,22 @@ def _refuse_likely_typos(conn, handles: list[str], args: argparse.Namespace) -> 
 
 def cmd_log(args: argparse.Namespace) -> int:
     words = args.words
-    value = None if not words else "-" if words == ["-"] else " ".join(words)
+    # The words are literal text: "@jdoe ..." is a mention, never an @PATH file.
+    literal = " ".join(words) if words and words != ["-"] else None
+    value = None if literal is not None or not words else "-"
     occurred_at = parse_when_or_raise(args.occurred_at) if args.occurred_at is not None else None
     with open_db(args) as conn:
-        body = read_body_arg(
-            value,
-            what="text",
-            template="",
-            preamble=ENTRY_PREAMBLE,
-            isatty=sys.stdin.isatty,
-            compose=compose_in_editor,
+        body = (
+            literal
+            if literal is not None
+            else read_body_arg(
+                value,
+                what="text",
+                template="",
+                preamble=ENTRY_PREAMBLE,
+                isatty=sys.stdin.isatty,
+                compose=compose_in_editor,
+            )
         )
         people = mentions(body) + list(args.people or [])
         tags = hashtags(body) + list(args.tags or [])

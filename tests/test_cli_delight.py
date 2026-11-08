@@ -309,3 +309,55 @@ class PrettyGoalCheckTests(EntryTestBase):
         self.assertNotIn("---", show)
         self.assertIn("✓✗ advanced 1×, slipped 1×", home_out)
         self.assertIn("🎉 Done the same day · 2 checked conversations", close)
+
+
+class ReviewRegressionTests(EntryTestBase):
+    def test_log_text_starting_with_a_mention_is_never_a_file(self) -> None:
+        self._create_person("jdoe")
+        decoy = self.tmpdir / "jdoe"
+        decoy.write_text("SECRET FILE", encoding="utf-8")
+        cwd = os.getcwd()
+        os.chdir(self.tmpdir)
+        try:
+            rc, out, err = self._run("--json", "log", "@jdoe")
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(rc, 0, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["body"], "@jdoe")
+        self.assertEqual([p["handle"] for p in payload["people"]], ["jdoe"])
+
+    def test_log_ignores_at_signs_inside_urls(self) -> None:
+        self.assertEqual(
+            log.mentions("read https://medium.com/@author/post and ping @jdoe"), ["jdoe"]
+        )
+
+    def test_home_survives_a_blank_self_name(self) -> None:
+        self._create_person("me", is_self=True)
+        self._seed_entry("x")
+        with closing(db.connect(self.db_path)) as conn, conn:
+            conn.execute("UPDATE people SET name = '  ' WHERE handle = 'me'")
+        with _pretty():
+            rc, out, err = self._run()
+        self.assertEqual(rc, 0, err)
+        self.assertIn(", me\n", out)
+
+    def test_home_on_an_older_schema_asks_for_an_upgrade(self) -> None:
+        with closing(db.connect(self.db_path)) as conn, conn:
+            conn.execute("UPDATE _meta SET value = '4' WHERE key = 'schema_version'")
+        with _pretty():
+            rc, out, _ = self._run()
+        self.assertEqual(rc, 0)
+        self.assertIn("needs a quick upgrade", out)
+        self.assertNotIn("Welcome", out)
+
+    def test_stats_sparkline_ends_at_a_past_window(self) -> None:
+        self._seed_entry("a", occurred_at="2025-01-14T12:00:00+00:00")
+        self._seed_entry("b", occurred_at="2025-01-21T12:00:00+00:00")
+        with _pretty():
+            _, out, _ = self._run(
+                "stats", "--since", "2025-01-01", "--until", "2025-02-28", "--weeks", "8"
+            )
+        rhythm = next(line for line in out.splitlines() if "Weekly rhythm" in line)
+        self.assertIn("peak 1", rhythm)
+        self.assertIn("→ Feb 24", rhythm)

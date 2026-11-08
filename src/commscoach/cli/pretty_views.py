@@ -100,9 +100,9 @@ def _ranked(label: str, items: tuple[tuple[str, int], ...], render) -> list[str]
     return lines
 
 
-def stats_view(stats: db.Stats, *, weeks: int, window: str | None) -> str:
+def stats_view(stats: db.Stats, *, weeks: int, window: str | None, until: str | None = None) -> str:
     """The ``stats`` dashboard: coverage bar, streak, weekly sparkline, ranked bars."""
-    from datetime import date, timedelta
+    from datetime import date, datetime, timedelta
 
     title = "Your communication at a glance" + (f" · {window}" if window else "")
     lines = [style.heading(title), ""]
@@ -149,7 +149,10 @@ def stats_view(stats: db.Stats, *, weeks: int, window: str | None) -> str:
         # Weeks run up to the last entry; fill the quiet weeks since then.
         counts = [count for _, count in buckets]
         last = date.fromisoformat(buckets[-1][0])
-        this_monday = date.today() - timedelta(days=date.today().weekday())
+        end = date.today()
+        if until is not None:
+            end = min(end, datetime.fromisoformat(until).astimezone().date())
+        this_monday = end - timedelta(days=end.weekday())
         while last < this_monday and len(counts) < max(weeks, len(buckets)) + 52:
             last += timedelta(weeks=1)
             counts.append(0)
@@ -159,7 +162,11 @@ def stats_view(stats: db.Stats, *, weeks: int, window: str | None) -> str:
         row(
             "Weekly rhythm",
             style.paint(style.sparkline(counts), "green")
-            + style.muted(f"  {first:%b %-d} → this week · peak {max(counts)}"),
+            + style.muted(
+                f"  {first:%b %-d} → "
+                + ("this week" if end == date.today() else f"{this_monday:%b %-d}")
+                + f" · peak {max(counts)}"
+            ),
         )
     lines.append("")
     lines.extend(_ranked("Top people", stats.top_people, style.handle))
