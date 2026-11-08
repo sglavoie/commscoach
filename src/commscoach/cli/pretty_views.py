@@ -175,3 +175,90 @@ def stats_view(stats: db.Stats, *, weeks: int, window: str | None) -> str:
     )
     lines.extend(("", "  " + style.muted(style.SEP.join(span_parts))))
     return "\n".join(lines)
+
+
+VERDICT_STYLE = {
+    "advanced": ("✓", "green", "advanced"),
+    "hurt": ("✗", "red", "slipped"),
+    "neutral": ("·", "dim", "neutral"),
+}
+
+
+def verdict_glyph(verdict: str) -> str:
+    glyph, hue, _ = VERDICT_STYLE[verdict]
+    return style.paint(glyph, hue)
+
+
+def verdict_strip(checks) -> str:  # type: ignore[no-untyped-def]
+    return "".join(verdict_glyph(check.verdict) for check in checks)
+
+
+def momentum(summary) -> str:  # type: ignore[no-untyped-def]
+    """``advanced 3×, slipped 1×``, colored, naming only what happened."""
+    parts = []
+    for verdict, count in (
+        ("advanced", summary.advanced),
+        ("hurt", summary.hurt),
+        ("neutral", summary.neutral),
+    ):
+        if count:
+            _, hue, label = VERDICT_STYLE[verdict]
+            parts.append(style.paint(f"{label} {count}×", hue))
+    return ", ".join(parts)
+
+
+def check_trail(checks, summary) -> str:  # type: ignore[no-untyped-def]
+    """The goal's progress: a glyph strip, a win rate, then one line per check."""
+    rate = summary.advanced / summary.total if summary.total else 0.0
+    lines = [
+        "",
+        "  " + style.heading("Progress") + "  " + verdict_strip(checks) + "  " + momentum(summary),
+        "  "
+        + style.muted(
+            f"advanced in {summary.advanced} of {summary.total} checked conversations ({rate:.0%})"
+        ),
+    ]
+    for check in checks:
+        _, hue, label = VERDICT_STYLE[check.verdict]
+        line = (
+            f"    {verdict_glyph(check.verdict)} {style.pad(style.relative(check.at), 18)}"
+            f"{style.muted(f'entry {check.entry_id}')}  {style.paint(label, hue)}"
+        )
+        if check.note:
+            line += style.muted(" — ") + check.note
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def journey(goal: db.Goal, summary) -> str:  # type: ignore[no-untyped-def]
+    """The story of a closed goal, told once when it closes."""
+    opened = style.days_since(goal.created_at) or 0
+    closed = (style.days_since(goal.closed_at) or 0) if goal.closed_at else 0
+    days = max(0, opened - closed)
+    lead = "🎉 Done" if goal.status == "done" else "Dropped"
+    after = "the same day" if days == 0 else f"after {style.span(days)}"
+    conversations = f"{summary.total} checked conversation{'s' if summary.total != 1 else ''}"
+    parts = [f"{lead} {after}", conversations, momentum(summary)]
+    if summary.first_advanced_at is not None:
+        parts.append(f"first win {style.relative(summary.first_advanced_at)}")
+    return "\n" + style.join(parts)
+
+
+def feedback_stored(feedback: db.Feedback, checks, goals) -> str:  # type: ignore[no-untyped-def]
+    """One-line confirmation for ``feedback add`` plus each recorded goal check."""
+    lines = [
+        style.good("✓")
+        + " "
+        + style.join(
+            [style.heading(f"Stored feedback {feedback.id}"), f"on entry {feedback.entry_id}"]
+        )
+    ]
+    for check in checks:
+        goal = goals.get(check.goal_id) if goals else None
+        _, hue, label = VERDICT_STYLE[check.verdict]
+        title = goal.title if goal is not None else f"goal {check.goal_id}"
+        line = f"  {verdict_glyph(check.verdict)} {style.paint(label, hue)} {title}"
+        if check.note:
+            line += style.muted(" — " + check.note)
+        lines.append(line)
+    return "\n".join(lines)

@@ -9,7 +9,7 @@ import textwrap
 
 from .. import db
 from ..db.common import write_transaction
-from . import pretty_views, style
+from . import nudges, pretty_views, style
 from .common import (
     EDIT_IN_EDITOR,
     UsageError,
@@ -284,8 +284,13 @@ def cmd_feedback_add(args: argparse.Namespace) -> int:
             compose=compose_in_editor,
         )
         feedback = db.create_feedback(conn, args.entry_id, body, goal_checks=args.goal_check)
+        reaction = nudges.feedback_stored(conn, feedback) if nudges.enabled(args) else None
         checks = db.list_feedback_goal_checks(conn, [feedback.id]).get(feedback.id, ())
         goals = _checked_goals(conn, checks) if checks else None
+    if reaction is not None:
+        print(pretty_views.feedback_stored(feedback, checks, goals))
+        print("\n".join(reaction))
+        return 0
     _emit_feedback(args, feedback, checks, human_prefix="created", goals=goals)
     return 0
 

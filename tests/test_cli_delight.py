@@ -268,3 +268,44 @@ class PrettyStatsTests(EntryTestBase):
         self.assertIn("0/2 coached (0%)", out)
         self.assertIn("Weekly rhythm", out)
         self.assertIn("@jdoe", out)
+
+
+class PrettyGoalCheckTests(EntryTestBase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._create_person("jdoe")
+        for days in (3, 2, 1):
+            self._seed_entry(f"chat {days}", people=("jdoe",), occurred_at=_ago(days))
+        with closing(db.connect(self.db_path)) as conn:
+            db.create_goal(conn, "Lead with the ask", person_handle="jdoe")
+
+    def test_feedback_add_confirms_and_lists_checks(self) -> None:
+        with _pretty():
+            rc, out, err = self._run(
+                "feedback", "add", "1", "Good.", "--goal-check", "1=advanced:asked first"
+            )
+        self.assertEqual(rc, 0, err)
+        self.assertIn("✓ Stored feedback 1 · on entry 1", out)
+        self.assertIn("✓ advanced Lead with the ask — asked first", out)
+        self.assertIn("2 entries still waiting for coaching", out)
+
+    def test_all_caught_up_and_first_coached_milestone(self) -> None:
+        with _pretty():
+            _, out, _ = self._run("feedback", "add", "1", "a")
+            self.assertIn("1st coached conversation", out)
+            self._run("feedback", "add", "2", "b")
+            _, out, _ = self._run("feedback", "add", "3", "c")
+        self.assertIn("All caught up", out)
+
+    def test_goal_show_trail_and_close_story(self) -> None:
+        self._run("feedback", "add", "1", "a", "--goal-check", "1=advanced")
+        self._run("feedback", "add", "2", "b", "--goal-check", "1=hurt")
+        with _pretty():
+            _, show, _ = self._run("goal", "show", "1")
+            _, home_out, _ = self._run()
+            _, close, _ = self._run("goal", "close", "1")
+        self.assertIn("Progress  ✓✗  advanced 1×, slipped 1×", show)
+        self.assertIn("advanced in 1 of 2 checked conversations (50%)", show)
+        self.assertNotIn("---", show)
+        self.assertIn("✓✗ advanced 1×, slipped 1×", home_out)
+        self.assertIn("🎉 Done the same day · 2 checked conversations", close)

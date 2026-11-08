@@ -248,6 +248,8 @@ def format_goal_check_line(check: db.GoalCheck) -> str:
 
 def _format_check_trail(checks: tuple[db.GoalCheck, ...], summary: db.GoalCheckSummary) -> str:
     """Render the chronological glyph strip, verdict counts, and one line per check."""
+    if style.pretty():
+        return pretty_views.check_trail(checks, summary)
     lines = [
         "progress: " + "".join(VERDICT_GLYPHS[check.verdict] for check in checks),
         f"advanced {summary.advanced} · hurt {summary.hurt} · neutral {summary.neutral}",
@@ -271,11 +273,15 @@ def _occurred_verdicts(summary: db.GoalCheckSummary) -> list[tuple[str, int]]:
 
 def _verdict_counts(summary: db.GoalCheckSummary) -> str:
     """Name only the verdicts that occurred: ``advanced 3×, hurt 1×``."""
+    if style.pretty():
+        return pretty_views.momentum(summary)
     return ", ".join(f"{verdict} {count}×" for verdict, count in _occurred_verdicts(summary))
 
 
 def _format_journey(goal: db.Goal, summary: db.GoalCheckSummary) -> str:
     """Summarize a closed goal's checks: ``Closed after 23 days · 6 checks (...)``."""
+    if style.pretty():
+        return pretty_views.journey(goal, summary)
     verb = "Dropped" if goal.status == "dropped" else "Closed"
     try:
         created = datetime.fromisoformat(goal.created_at)
@@ -334,7 +340,8 @@ def _emit_goal(
         print(f"{human_prefix} goal {goal.id}")
     print(_format_goal_human(goal))
     if checks:
-        print("---")
+        if not style.pretty():
+            print("---")
         print(_format_check_trail(checks, summary))
 
 

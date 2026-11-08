@@ -177,7 +177,7 @@ def _render(args: argparse.Namespace, conn, now: datetime) -> str:  # type: igno
             line = "  " + pretty_views.goal_short(goal)
             summary = summaries.get(goal.id)
             if summary is not None:
-                line += style.sep() + _momentum(summary)
+                line += style.sep() + _momentum(conn, goal.id, summary)
             lines.append(line)
         if len(goals) > GOALS_SHOWN:
             lines.append(
@@ -233,18 +233,17 @@ def _render(args: argparse.Namespace, conn, now: datetime) -> str:  # type: igno
 
 
 def _goal_summaries(conn, goal_ids: list[int]) -> dict:  # type: ignore[no-untyped-def]
-    summaries = getattr(db, "goal_check_summaries", None)
-    if summaries is None or not goal_ids:
+    """Goal-check summaries for goals that have at least one check."""
+    if not goal_ids:
         return {}
-    return summaries(conn, goal_ids)
+    return {
+        goal_id: summary
+        for goal_id, summary in db.goal_check_summaries(conn, goal_ids).items()
+        if summary.total
+    }
 
 
-def _momentum(summary) -> str:  # type: ignore[no-untyped-def]
-    parts = []
-    if summary.advanced:
-        parts.append(style.good(f"advanced {summary.advanced}×"))
-    if summary.hurt:
-        parts.append(style.bad(f"slipped {summary.hurt}×"))
-    if not parts:
-        parts.append(style.muted(f"neutral {summary.neutral}×"))
-    return ", ".join(parts)
+def _momentum(conn, goal_id: int, summary) -> str:  # type: ignore[no-untyped-def]
+    """The last few verdicts as glyphs, then the counts: ``✓✓✗✓ advanced 3×, slipped 1×``."""
+    recent = db.list_goal_checks(conn, goal_id)[-8:]
+    return pretty_views.verdict_strip(recent) + " " + pretty_views.momentum(summary)
