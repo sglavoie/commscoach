@@ -47,7 +47,10 @@ class GoalCrudTests(GoalTestBase):
         payload = json.loads(out)
         self.assertEqual([item["id"] for item in payload], [first.id])
         _, shown, _ = self._run("goal", "show", str(first.id), "--json")
-        self.assertEqual(payload[0], json.loads(shown))
+        shown_payload = json.loads(shown)
+        # Only show carries the full trail; the summary is in both.
+        self.assertEqual(shown_payload.pop("checks"), [])
+        self.assertEqual(payload[0], shown_payload)
 
     def test_active_goal_age_uses_elapsed_days_since_creation(self) -> None:
         goal = self._seed_goal()

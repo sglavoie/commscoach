@@ -1,4 +1,4 @@
-"""SQLite connection, schema v4 DDL, and idempotent init.
+"""SQLite connection, schema v5 DDL, and idempotent init.
 
 Schema invariants enforced at the DB level:
 
@@ -6,9 +6,13 @@ Schema invariants enforced at the DB level:
   ``LOWER(handle)``.
 * At most one row may have ``is_self = 1`` via a partial UNIQUE index.
 * Cascading deletes: removing an entry removes its tag links, people links,
-  attached feedback, and review-entry links. Removing a review removes its
+  attached feedback, and review-entry links. Removing feedback or a goal
+  removes the goal checks linking them. Removing a review removes its
   review-entry links and clears goal references. Removing a person removes
   their entry links and note while clearing goal references.
+* A feedback note judges each goal at most once: ``goal_checks`` is UNIQUE on
+  ``(feedback_id, goal_id)`` and its ``verdict`` is ``advanced``, ``hurt``, or
+  ``neutral``.
 * Stored review scopes are single-axis: ``scope_kind`` is one of ``latest``,
   ``person``, ``tag``, or ``range``, and CHECK constraints keep exactly the
   columns of that one axis populated. ``person`` requires
@@ -40,10 +44,11 @@ from .schema_sql import (
     SCHEMA_V1_SQL,
     SCHEMA_V2_SQL,
     SCHEMA_V3_SQL,
+    SCHEMA_V5_SQL,
 )
 from .tags import renormalize_tag_names
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 EXPECTED_TABLES = frozenset(
     {
@@ -58,6 +63,7 @@ EXPECTED_TABLES = frozenset(
         "review_entries",
         "goals",
         "person_notes",
+        "goal_checks",
     }
 )
 
@@ -91,7 +97,7 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
 
 
 def init_db(db_path: Path | str | None = None) -> Path:
-    """Create the data dir, apply schema v4, and chmod the DB file.
+    """Create the data dir, apply schema v5, and chmod the DB file.
 
     Idempotent: re-running ``init_db`` on an existing DB leaves data intact and
     reaffirms the DB file at ``0o600`` (and the default data directory at
@@ -418,7 +424,7 @@ def _execute_script(conn: sqlite3.Connection, script: str) -> None:
 
 
 def _apply_schema(conn: sqlite3.Connection) -> None:
-    """Apply schema v4 idempotently, migrating v1/v2/v3 databases in place.
+    """Apply schema v5 idempotently, migrating v1-v4 databases in place.
 
     The whole upgrade runs in one transaction, so a failure or crash part-way
     leaves the database exactly as it was.
@@ -488,6 +494,7 @@ def _apply_schema_steps(conn: sqlite3.Connection) -> None:
     _migrate_reviews_scope_v4(conn)
     _execute_script(conn, SCHEMA_V2_SQL)
     _execute_script(conn, SCHEMA_V3_SQL)
+    _execute_script(conn, SCHEMA_V5_SQL)
     _normalize_names_once(conn)
     _configure_fts5(conn)
     # After the FTS5 step: this rewrites entry bodies, which fires the sync

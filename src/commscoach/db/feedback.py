@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from ..models import Feedback
 from . import common
 from .entries import get_entry
 from .errors import DBError, EntryNotFoundError, FeedbackNotFoundError, PersonNotFoundError
+from .goal_checks import GoalCheckSpec, add_goal_checks
 from .people import get_person_by_handle
 from .rows import row_to_feedback
 
@@ -35,8 +36,14 @@ def create_feedback(
     conn: sqlite3.Connection,
     entry_id: int,
     body: str,
+    *,
+    goal_checks: Sequence[GoalCheckSpec] = (),
 ) -> Feedback:
-    """Attach a feedback note to an existing entry."""
+    """Attach a feedback note to an existing entry.
+
+    ``goal_checks`` are ``(goal_id, verdict, note)`` judgments stored in the
+    same transaction, so an invalid check leaves no note behind either.
+    """
     if not body or not body.strip():
         raise DBError("feedback body must be a non-empty string")
     if get_entry(conn, entry_id) is None:
@@ -47,6 +54,8 @@ def create_feedback(
             "INSERT INTO feedback (entry_id, body, created_at, updated_at) VALUES (?, ?, ?, ?)",
             (entry_id, body, now, now),
         )
+        if goal_checks:
+            add_goal_checks(conn, cur.lastrowid, goal_checks, now=now)
     feedback = get_feedback(conn, cur.lastrowid)
     assert feedback is not None
     return feedback
@@ -179,7 +188,8 @@ def update_feedback(
 def delete_feedback(conn: sqlite3.Connection, feedback_id: int) -> bool:
     """Delete a feedback note. Returns ``True`` if a row was deleted.
 
-    Nothing references ``feedback``, so there is no orphan collection to run.
+    Its goal checks go with it (``ON DELETE CASCADE``); nothing else references
+    ``feedback``, so there is no orphan collection to run.
     """
     with common.write_transaction(conn):
         cur = conn.execute("DELETE FROM feedback WHERE id = ?", (feedback_id,))

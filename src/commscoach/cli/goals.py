@@ -26,7 +26,7 @@ from .common import (
 )
 from .completion import REVIEW, complete_as
 from .editor import compose_in_editor
-from .serializers import goal_to_dict
+from .serializers import goal_check_to_dict, goal_to_dict
 
 _EDIT_TEXT = object()
 DETAIL_PREAMBLE = (
@@ -34,6 +34,9 @@ DETAIL_PREAMBLE = (
     "Use --clear-detail to remove detail; an empty draft will not be saved."
 )
 OUTCOME_PREAMBLE = "Edit goal outcome below. Lines beginning with #> are ignored."
+
+# One glyph per verdict for the compact trail strip in ``goal show``.
+VERDICT_GLYPHS = {"advanced": "✓", "hurt": "✗", "neutral": "·"}
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -232,6 +235,68 @@ def _format_goal_human(goal: db.Goal) -> str:
     return "\n".join(lines)
 
 
+def _stamp_date(iso: str) -> str:
+    """Render a stored timestamp as its local ``YYYY-MM-DD`` day."""
+    return format_stamp(iso)[:10]
+
+
+def format_goal_check_line(check: db.GoalCheck) -> str:
+    """Render one trail line: ``2026-11-02 · entry 12 · advanced — note``."""
+    line = f"{_stamp_date(check.at)} · entry {check.entry_id} · {check.verdict}"
+    return f"{line} — {check.note}" if check.note is not None else line
+
+
+def _format_check_trail(checks: tuple[db.GoalCheck, ...], summary: db.GoalCheckSummary) -> str:
+    """Render the chronological glyph strip, verdict counts, and one line per check."""
+    lines = [
+        "progress: " + "".join(VERDICT_GLYPHS[check.verdict] for check in checks),
+        f"advanced {summary.advanced} · hurt {summary.hurt} · neutral {summary.neutral}",
+    ]
+    lines.extend(format_goal_check_line(check) for check in checks)
+    return "\n".join(lines)
+
+
+def _occurred_verdicts(summary: db.GoalCheckSummary) -> list[tuple[str, int]]:
+    """Return the ``(verdict, count)`` pairs that occurred, in a fixed order."""
+    return [
+        (verdict, count)
+        for verdict, count in (
+            ("advanced", summary.advanced),
+            ("hurt", summary.hurt),
+            ("neutral", summary.neutral),
+        )
+        if count
+    ]
+
+
+def _verdict_counts(summary: db.GoalCheckSummary) -> str:
+    """Name only the verdicts that occurred: ``advanced 3×, hurt 1×``."""
+    return ", ".join(f"{verdict} {count}×" for verdict, count in _occurred_verdicts(summary))
+
+
+def _format_journey(goal: db.Goal, summary: db.GoalCheckSummary) -> str:
+    """Summarize a closed goal's checks: ``Closed after 23 days · 6 checks (...)``."""
+    verb = "Dropped" if goal.status == "dropped" else "Closed"
+    try:
+        created = datetime.fromisoformat(goal.created_at)
+        closed = datetime.fromisoformat(goal.closed_at or "")
+    except ValueError:
+        parts = [verb]
+    else:
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        if closed.tzinfo is None:
+            closed = closed.replace(tzinfo=UTC)
+        days = max(0, (closed - created).days)
+        parts = [f"{verb} after {days} {'day' if days == 1 else 'days'}"]
+    checks = f"{summary.total} {'check' if summary.total == 1 else 'checks'}"
+    counts = ", ".join(f"{count} {verdict}" for verdict, count in _occurred_verdicts(summary))
+    parts.append(f"{checks} ({counts})")
+    if summary.first_advanced_at is not None:
+        parts.append(f"first win {_stamp_date(summary.first_advanced_at)}")
+    return " · ".join(parts)
+
+
 def _format_goal_short(goal: db.Goal, *, now: datetime | None = None) -> str:
     if style.pretty():
         return pretty_views.goal_short(goal)
@@ -253,15 +318,24 @@ def _format_goal_short(goal: db.Goal, *, now: datetime | None = None) -> str:
 def _emit_goal(
     args: argparse.Namespace,
     goal: db.Goal,
+    summary: db.GoalCheckSummary,
     *,
     human_prefix: str | None = None,
+    checks: tuple[db.GoalCheck, ...] | None = None,
 ) -> None:
+    """Print one goal; ``checks`` adds its trail (``goal show``)."""
     if args.json:
-        print_json(goal_to_dict(goal))
+        payload = goal_to_dict(goal, check_summary=summary)
+        if checks is not None:
+            payload["checks"] = [goal_check_to_dict(check) for check in checks]
+        print_json(payload)
         return
     if human_prefix:
         print(f"{human_prefix} goal {goal.id}")
     print(_format_goal_human(goal))
+    if checks:
+        print("---")
+        print(_format_check_trail(checks, summary))
 
 
 def _emit_goals(
@@ -271,9 +345,18 @@ def _emit_goals(
     with_detail: bool = False,
     query: str | None = None,
     with_outcome: bool = False,
+    summaries: dict[int, db.GoalCheckSummary] | None = None,
 ) -> None:
+    """Print a goal listing; ``summaries`` adds each goal's check counts."""
     if args.json:
-        print_json([goal_to_dict(goal) for goal in goals])
+        print_json(
+            [
+                goal_to_dict(
+                    goal, check_summary=summaries[goal.id] if summaries is not None else None
+                )
+                for goal in goals
+            ]
+        )
         return
     if not goals:
         print("(no goals)")
@@ -283,6 +366,8 @@ def _emit_goals(
         line = _format_goal_short(goal, now=now)
         if with_detail and goal.person is None:
             line += " (general)"
+        if summaries is not None and summaries[goal.id].total:
+            line += " · " + _verdict_counts(summaries[goal.id])
         print(line)
         if with_detail and goal.detail is not None:
             print("\n".join(f"  {line}" for line in goal.detail.splitlines()))
@@ -343,7 +428,8 @@ def cmd_goal_add(args: argparse.Namespace) -> int:
             person_handle=args.person,
             review_id=args.review,
         )
-    _emit_goal(args, goal, human_prefix="created")
+        summary = db.goal_check_summaries(conn, [goal.id])[goal.id]
+    _emit_goal(args, goal, summary, human_prefix="created")
     return 0
 
 
@@ -368,9 +454,11 @@ def cmd_goal_list(args: argparse.Namespace) -> int:
             if args.limit is not None
             else len(goals)
         )
+        summaries = db.goal_check_summaries(conn, (goal.id for goal in goals))
     _emit_goals(
         args,
         goals,
+        summaries=summaries,
         with_detail=args.with_detail,
         with_outcome=args.with_outcome,
         query=getattr(args, "query", None),
@@ -387,9 +475,11 @@ def cmd_goal_list(args: argparse.Namespace) -> int:
 def cmd_goal_show(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         goal = db.get_goal(conn, args.goal_id)
-    if goal is None:
-        raise db.GoalNotFoundError(args.goal_id)
-    _emit_goal(args, goal)
+        if goal is None:
+            raise db.GoalNotFoundError(args.goal_id)
+        checks = db.list_goal_checks(conn, goal.id)
+        summary = db.goal_check_summaries(conn, [goal.id])[goal.id]
+    _emit_goal(args, goal, summary, checks=checks)
     return 0
 
 
@@ -455,7 +545,8 @@ def cmd_goal_edit(args: argparse.Namespace) -> int:
                 flag="--outcome",
             )
         goal = db.update_goal(conn, args.goal_id, **update_kwargs)
-    _emit_goal(args, goal, human_prefix=edit_verb(current.updated_at, goal.updated_at))
+        summary = db.goal_check_summaries(conn, [goal.id])[goal.id]
+    _emit_goal(args, goal, summary, human_prefix=edit_verb(current.updated_at, goal.updated_at))
     return 0
 
 
@@ -486,13 +577,16 @@ def cmd_goal_close(args: argparse.Namespace) -> int:
             outcome=outcome,
             dropped=args.dropped,
         )
+        summary = db.goal_check_summaries(conn, [goal.id])[goal.id]
     # Re-closing with the same status only corrects the outcome, if anything.
     verb = (
         "closed"
         if goal.status != current.status
         else edit_verb(current.updated_at, goal.updated_at)
     )
-    _emit_goal(args, goal, human_prefix=verb)
+    _emit_goal(args, goal, summary, human_prefix=verb)
+    if summary.total and not args.json:
+        print(_format_journey(goal, summary))
     return 0
 
 

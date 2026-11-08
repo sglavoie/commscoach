@@ -46,7 +46,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
-def _context_to_dict(context: db.EntryContext) -> dict[str, Any]:
+def _context_to_dict(
+    context: db.EntryContext,
+    summaries: dict[int, db.GoalCheckSummary],
+    prior_checks: dict[int, tuple[db.GoalCheck, ...]],
+) -> dict[str, Any]:
+    """Build the skill payload; goals carry ``check_summary``, prior notes their checks."""
     return {
         "entry": entry_to_dict(context.entry),
         "self": {**person_to_dict(context.self_person), "notes": context.self_notes},
@@ -70,8 +75,10 @@ def _context_to_dict(context: db.EntryContext) -> dict[str, Any]:
             }
             for person_context in context.people
         ],
-        "prior_feedback": [feedback_to_dict(f) for f in context.prior_feedback],
-        "goals": [goal_to_dict(goal) for goal in context.goals],
+        "prior_feedback": [
+            feedback_to_dict(f, prior_checks.get(f.id, ())) for f in context.prior_feedback
+        ],
+        "goals": [goal_to_dict(goal, check_summary=summaries[goal.id]) for goal in context.goals],
         "goal_summary": {
             "limit": context.goal_limit,
             "count": len(context.goals),
@@ -91,5 +98,7 @@ def cmd_context(args: argparse.Namespace) -> int:
             prior_review_limit=args.prior_review_limit,
             goal_limit=args.goal_limit,
         )
-    print_json(_context_to_dict(context))
+        summaries = db.goal_check_summaries(conn, (goal.id for goal in context.goals))
+        prior_checks = db.list_feedback_goal_checks(conn, (f.id for f in context.prior_feedback))
+    print_json(_context_to_dict(context, summaries, prior_checks))
     return 0

@@ -20,7 +20,11 @@ _TABLE_NOUNS = {
     "reviews": ("review", "reviews"),
     "goals": ("goal", "goals"),
     "person_notes": ("person note", "person notes"),
+    "goal_checks": ("goal check", "goal checks"),
 }
+# Tables named in the text summary only when the archive has rows for them, so
+# a store that never recorded any reads as it did before they existed.
+_OMIT_WHEN_EMPTY = frozenset({"goal_checks"})
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -81,6 +85,7 @@ def cmd_import(args: argparse.Namespace) -> int:
         summary = ", ".join(
             plural(count, *_TABLE_NOUNS.get(table, (table, table)))
             for table, count in result["counts"].items()
+            if count or table not in _OMIT_WHEN_EMPTY
         )
         if args.dry_run:
             print(f"import validated ({summary}); no data written")

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 import textwrap
 
 from .. import db
+from ..db.common import write_transaction
 from . import pretty_views, style
 from .common import (
     EDIT_IN_EDITOR,
+    UsageError,
     add_date_bounds,
     add_oldest_first,
     confirm,
@@ -30,6 +33,45 @@ from .editor import compose_in_editor
 from .serializers import entry_to_dict, feedback_to_dict
 
 FEEDBACK_PREAMBLE = "Write the feedback body below. Lines beginning with #> are ignored."
+GOAL_CHECK_HELP = (
+    "Record this note's verdict on a goal as GOAL_ID=VERDICT, where VERDICT is"
+    " advanced, hurt, or neutral; append ':NOTE' for a one-line reason."
+    " Repeat for each goal."
+)
+
+
+def goal_check_arg(value: str) -> tuple[int, str, str | None]:
+    """Parse ``GOAL_ID=VERDICT`` or ``GOAL_ID=VERDICT:short note``."""
+    goal_part, equals, rest = value.partition("=")
+    if not equals:
+        raise argparse.ArgumentTypeError(f"expected GOAL_ID=VERDICT[:NOTE], got {value!r}")
+    try:
+        goal_id = row_id(goal_part.strip())
+    except argparse.ArgumentTypeError as exc:
+        raise argparse.ArgumentTypeError(
+            f"goal id must be a positive integer, got {goal_part.strip()!r}"
+        ) from exc
+    verdict_part, colon, note = rest.partition(":")
+    verdict = verdict_part.strip().lower()
+    if verdict not in db.GOAL_CHECK_VERDICTS:
+        raise argparse.ArgumentTypeError(
+            f"verdict must be advanced, hurt, or neutral, got {verdict_part.strip()!r}"
+        )
+    if not colon:
+        return goal_id, verdict, None
+    if not note.strip():
+        raise argparse.ArgumentTypeError(
+            f"note after ':' must not be empty in {value!r}; omit ':' to leave it unset"
+        )
+    return goal_id, verdict, note.strip()
+
+
+def _reject_duplicate_goals(checks: list[tuple[int, str, str | None]]) -> None:
+    seen: set[int] = set()
+    for goal_id, _verdict, _note in checks:
+        if goal_id in seen:
+            raise UsageError(f"--goal-check names goal {goal_id} more than once")
+        seen.add(goal_id)
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -55,6 +97,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
             "Feedback body (literal text, '-' for stdin, '@PATH' for a UTF-8"
             " file, or omit to open $EDITOR)."
         ),
+    )
+    add.add_argument(
+        "--goal-check",
+        action="append",
+        default=[],
+        type=goal_check_arg,
+        metavar="GOAL_ID=VERDICT[:NOTE]",
+        help=GOAL_CHECK_HELP,
     )
     add.set_defaults(func=cmd_feedback_add)
 
@@ -113,6 +163,19 @@ def register(subparsers: argparse._SubParsersAction) -> None:
             " $EDITOR with the current body."
         ),
     )
+    edit.add_argument(
+        "--goal-check",
+        action="append",
+        default=None,
+        type=goal_check_arg,
+        metavar="GOAL_ID=VERDICT[:NOTE]",
+        help=GOAL_CHECK_HELP.replace("Repeat for each goal.", "Replaces the note's checks."),
+    )
+    edit.add_argument(
+        "--clear-goal-checks",
+        action="store_true",
+        help="Remove every goal check from the note.",
+    )
     edit.set_defaults(func=cmd_feedback_edit)
 
     rm = feedback_sub.add_parser("rm", help="Delete one feedback note.")
@@ -148,28 +211,54 @@ def _format_feedback_short(feedback: db.Feedback, *, query: str | None = None) -
     return "\n".join([header, *(f"    {line}" for line in wrapped)])
 
 
+def _format_check_given(check: db.GoalCheck, goal: db.Goal | None) -> str:
+    """Render a stored check for ``feedback add``: ``goal 3 advanced: Title — note``."""
+    line = f"goal {check.goal_id} {check.verdict}"
+    if goal is not None:
+        line += f": {goal.title}"
+    return f"{line} — {check.note}" if check.note is not None else line
+
+
 def _emit_feedback(
     args: argparse.Namespace,
     feedback: db.Feedback,
+    checks: tuple[db.GoalCheck, ...],
     *,
     human_prefix: str | None = None,
+    goals: dict[int, db.Goal] | None = None,
 ) -> None:
+    """Print one note; ``goals`` (the checked goals) adds one line per check."""
     if args.json:
-        print_json(feedback_to_dict(feedback))
+        print_json(feedback_to_dict(feedback, checks))
         return
     if human_prefix:
         print(f"{human_prefix} feedback {feedback.id}")
     print(_format_feedback_human(feedback))
+    if goals is not None:
+        for check in checks:
+            print(_format_check_given(check, goals.get(check.goal_id)))
+
+
+def _checked_goals(
+    conn: sqlite3.Connection, checks: tuple[db.GoalCheck, ...]
+) -> dict[int, db.Goal]:
+    goals = {}
+    for check in checks:
+        goal = db.get_goal(conn, check.goal_id)
+        if goal is not None:
+            goals[goal.id] = goal
+    return goals
 
 
 def _emit_feedback_list(
     args: argparse.Namespace,
     items: tuple[db.Feedback, ...],
+    checks: dict[int, tuple[db.GoalCheck, ...]],
     *,
     query: str | None = None,
 ) -> None:
     if args.json:
-        print_json([feedback_to_dict(f) for f in items])
+        print_json([feedback_to_dict(f, checks.get(f.id, ())) for f in items])
         return
     if not items:
         print("(no feedback)")
@@ -181,9 +270,11 @@ def _emit_feedback_list(
 
 
 def cmd_feedback_add(args: argparse.Namespace) -> int:
+    _reject_duplicate_goals(args.goal_check)
     with open_db(args) as conn:
         if db.get_entry(conn, args.entry_id) is None:
             raise db.EntryNotFoundError(args.entry_id)
+        db.validate_goal_checks(conn, args.goal_check)
         body = read_body_arg(
             args.body,
             what="body",
@@ -192,8 +283,10 @@ def cmd_feedback_add(args: argparse.Namespace) -> int:
             isatty=sys.stdin.isatty,
             compose=compose_in_editor,
         )
-        feedback = db.create_feedback(conn, args.entry_id, body)
-    _emit_feedback(args, feedback, human_prefix="created")
+        feedback = db.create_feedback(conn, args.entry_id, body, goal_checks=args.goal_check)
+        checks = db.list_feedback_goal_checks(conn, [feedback.id]).get(feedback.id, ())
+        goals = _checked_goals(conn, checks) if checks else None
+    _emit_feedback(args, feedback, checks, human_prefix="created", goals=goals)
     return 0
 
 
@@ -202,7 +295,8 @@ def cmd_feedback_list(args: argparse.Namespace) -> int:
         if db.get_entry(conn, args.entry_id) is None:
             raise db.EntryNotFoundError(args.entry_id)
         items = db.list_feedback(conn, args.entry_id)
-    _emit_feedback_list(args, items)
+        checks = db.list_feedback_goal_checks(conn, (f.id for f in items))
+    _emit_feedback_list(args, items, checks)
     return 0
 
 
@@ -214,9 +308,10 @@ def cmd_feedback_show(args: argparse.Namespace) -> int:
         entry = db.get_entry(conn, feedback.entry_id) if args.with_entry else None
         if args.with_entry and entry is None:
             raise db.EntryNotFoundError(feedback.entry_id)
+        checks = db.list_feedback_goal_checks(conn, [feedback.id]).get(feedback.id, ())
     if entry is not None:
         if args.json:
-            print_json({**feedback_to_dict(feedback), "entry": entry_to_dict(entry)})
+            print_json({**feedback_to_dict(feedback, checks), "entry": entry_to_dict(entry)})
             return 0
         # Entry commands also use feedback renderers, so import at call time.
         from .entries_format import format_entry_human
@@ -224,7 +319,7 @@ def cmd_feedback_show(args: argparse.Namespace) -> int:
         print("Linked entry (current text):")
         print(format_entry_human(entry))
         print("\nFeedback:")
-    _emit_feedback(args, feedback)
+    _emit_feedback(args, feedback, checks)
     return 0
 
 
@@ -243,7 +338,8 @@ def cmd_feedback_search(args: argparse.Namespace) -> int:
         total = db.count_search_feedback(
             conn, query=args.query, person_handle=args.person, since=since, until=until
         )
-    _emit_feedback_list(args, items, query=args.query)
+        checks = db.list_feedback_goal_checks(conn, (f.id for f in items))
+    _emit_feedback_list(args, items, checks, query=args.query)
     if total > len(items):
         noun = "matching feedback notes" if args.query is not None else "feedback notes"
         print(f"Showing {len(items)} of {total} {noun}.", file=sys.stderr)
@@ -251,12 +347,26 @@ def cmd_feedback_search(args: argparse.Namespace) -> int:
 
 
 def cmd_feedback_edit(args: argparse.Namespace) -> int:
-    body = read_replacement_body(args.body, command="feedback edit")
+    """Rewrite a note's body, replace its goal checks, or both, in one transaction."""
+    if args.goal_check is not None and args.clear_goal_checks:
+        raise UsageError("--clear-goal-checks cannot be combined with --goal-check")
+    new_checks = [] if args.clear_goal_checks else args.goal_check
+    if new_checks is not None:
+        _reject_duplicate_goals(new_checks)
+    if args.body is None and new_checks is None:
+        raise db.DBError("feedback edit requires --body, --goal-check, or --clear-goal-checks")
+    body: str | None = None
+    edit_body = False
+    if args.body is not None:
+        body = read_replacement_body(args.body, command="feedback edit")
+        edit_body = body is None
     with open_db(args) as conn:
         current = db.get_feedback(conn, args.feedback_id)
         if current is None:
             raise db.FeedbackNotFoundError(args.feedback_id)
-        if body is None:
+        if new_checks is not None:
+            db.validate_goal_checks(conn, new_checks)
+        if edit_body:
             body = read_body_arg(
                 None,
                 what="body",
@@ -266,8 +376,22 @@ def cmd_feedback_edit(args: argparse.Namespace) -> int:
                 compose=compose_in_editor,
                 flag="--body",
             )
-        feedback = db.update_feedback(conn, args.feedback_id, body=body)
-    _emit_feedback(args, feedback, human_prefix=edit_verb(current.updated_at, feedback.updated_at))
+        with write_transaction(conn):
+            if body is not None:
+                db.update_feedback(conn, args.feedback_id, body=body)
+            if new_checks is not None:
+                db.replace_goal_checks(conn, args.feedback_id, new_checks)
+        feedback = db.get_feedback(conn, args.feedback_id)
+        assert feedback is not None
+        checks = db.list_feedback_goal_checks(conn, [feedback.id]).get(feedback.id, ())
+        goals = _checked_goals(conn, checks) if new_checks else None
+    _emit_feedback(
+        args,
+        feedback,
+        checks,
+        human_prefix=edit_verb(current.updated_at, feedback.updated_at),
+        goals=goals,
+    )
     return 0
 
 

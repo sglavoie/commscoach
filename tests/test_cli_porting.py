@@ -67,14 +67,14 @@ class PortingCLITests(unittest.TestCase):
     def test_json_export_to_stdout_is_complete(self) -> None:
         payload = self._export_payload()
 
-        self.assertEqual(payload["format_version"], 2)
+        self.assertEqual(payload["format_version"], 3)
         self.assertEqual(payload["entries"][0]["person_ids"], [1])
         self.assertEqual(payload["entries"][0]["tag_ids"], [1])
 
     def test_global_json_flag_selects_json_export(self) -> None:
         rc, out, err = self._run(self.source_path, "export", "--json")
         self.assertEqual(rc, 0, err)
-        self.assertEqual(json.loads(out)["format_version"], 2)
+        self.assertEqual(json.loads(out)["format_version"], 3)
 
         rc, _, err = self._run(self.source_path, "export", "--json", "--format", "markdown")
         self.assertEqual(rc, 2)
@@ -104,7 +104,7 @@ class PortingCLITests(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertIn(str(out_path), stderr)
         self.assertEqual(stat.S_IMODE(out_path.stat().st_mode), 0o600)
-        self.assertEqual(json.loads(out_path.read_text())["format_version"], 2)
+        self.assertEqual(json.loads(out_path.read_text())["format_version"], 3)
 
     def test_json_export_to_file_and_import_report_what_happened(self) -> None:
         archive = self.tmpdir / "archive.json"
@@ -128,6 +128,7 @@ class PortingCLITests(unittest.TestCase):
                 "reviews",
                 "goals",
                 "person_notes",
+                "goal_checks",
             },
         )
 

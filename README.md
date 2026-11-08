@@ -21,6 +21,7 @@ Ready to use. The CLI, SQLite schema, stored feedback and reviews, scoped review
 | Revisit what worked | `commscoach goal list --status done --with-outcome` |
 | Correct a goal's outcome without changing its status | `commscoach goal edit 1 --outcome` |
 | Find past experiments and outcomes | `commscoach goal search --query "lead with the ask"` |
+| See whether a goal is moving | `commscoach goal show 3` |
 | Read a review with its evidence | `commscoach review show 1 --with-entries --with-goals` |
 | Prepare for a conversation | `commscoach person prep jdoe` |
 | Read broader relationship advice | `commscoach person show jdoe --reviews 2` |
@@ -131,7 +132,7 @@ Database files, exports, and backups contain private personal data.
 - [Capture, editing, and dates](docs/reference.md#capture-and-dates)
 - [Quick capture with `log`](docs/reference.md#quick-capture-with-log) and [terminal output](docs/reference.md#terminal-output)
 - [Finding coaching, conversation prep, and people](docs/reference-coaching.md#finding-past-coaching-and-relationship-context)
-- [Goals and stats](docs/reference-operations.md#goals-and-stats)
+- [Goals and stats](docs/reference-operations.md#goals-and-stats), including [goal checks](docs/reference-operations.md#goal-checks-and-progress-trails)
 - [Tags](docs/reference.md#tags) and [review scopes](docs/reference.md#review-scopes)
 - [Correcting stored coaching](docs/reference-coaching.md#correcting-stored-coaching)
 - [AI skill integration](docs/reference-coaching.md#skill-integration)

@@ -54,8 +54,9 @@ Parse stdout as JSON. The payload shape is exactly:
 - `self`: `{id, handle, name, is_self, notes}` — the user being coached. `notes` contains durable coaching preferences, or `null`; use them to tailor feedback. The literal key is `self`, not `self_person`.
 - `people`: non-self counterparties for this entry, each enriched as `{id, handle, name, is_self, notes, history, history_summary}`. `notes` is private coaching context or `null`; `history` contains up to `--history` (default 3) interactions with that person before the target entry, oldest-first, as `[{entry, feedback}]`. Chronology uses occurrence time, falling back to creation time; later interactions are excluded, and an equal-time interaction counts as earlier only if it was logged first (lower id). Each history item's `feedback` is oldest-first. Feedback, notes, goals, and prior reviews are current coaching context and may have been recorded after the target interaction; do not imply they were known at the time. Use this field for who the user was talking to (`self` is already filtered out), relationship context, and repeated patterns. `history_summary` is `{limit, count, total_count, truncated}`: when `truncated` is true, only `count` of `total_count` earlier interactions are shown, so qualify claims about the whole relationship or rerun with a larger `--history`.
 - `entry`: `{id, body, source, occurred_at, created_at, updated_at, tags, people}` — the logged interaction. `tags` is a list of strings, `people` is the faithful link list (includes `self` if linked).
-- `prior_feedback`: previously stored feedback for this entry, ordered oldest-first — `[{id, entry_id, body, created_at, updated_at}]`.
-- `goals`: active goals capped by `--goal-limit` (default 10, zero omits goals). Goals for the entry's non-self participants come first, then general goals, then other goals; each group is newest-first. Without non-self participants, all goals are newest-first. Each goal has `{id, title, detail, status, person, review_id, outcome, closed_at, created_at, updated_at, is_open}`. Treat a goal as relevant when its scope or linked person bears on this interaction; do not force every goal into the feedback.
+- `prior_feedback`: previously stored feedback for this entry, ordered oldest-first — `[{id, entry_id, body, created_at, updated_at, goal_checks}]`. `goal_checks` lists the verdicts that note already recorded (see `check_summary` below); a goal checked there is already counted for this entry.
+- `goals`: active goals capped by `--goal-limit` (default 10, zero omits goals). Goals for the entry's non-self participants come first, then general goals, then other goals; each group is newest-first. Without non-self participants, all goals are newest-first. Each goal has `{id, title, detail, status, person, review_id, outcome, closed_at, created_at, updated_at, is_open, check_summary}`. Treat a goal as relevant when its scope or linked person bears on this interaction; do not force every goal into the feedback.
+- `check_summary` (on each goal): `{advanced, hurt, neutral, total, last_verdict, last_at, first_advanced_at}` — the verdicts earlier feedback notes stored for that goal, across the whole journal. `last_at` and `first_advanced_at` are when the checked interactions happened (occurrence time, falling back to creation time); all three milestone fields are `null` when `total` is zero. Use it for momentum ("third interaction in a row that advanced this", "first time this one slipped since it was set"), but judge this entry on its own evidence: the counts never decide a verdict, and an empty summary only means nothing was recorded yet.
 - `goal_summary`: `{limit, count, total_count, truncated}` — active-goal coverage across the whole journal, including when the limit is zero. An empty `goals` array means there are no active goals only when `total_count` is zero. If truncated, acknowledge the partial coverage; increase `--goal-limit` when the request needs a complete assessment.
 - `prior_reviews`: up to `--prior-review-limit` (default 1) stored syntheses, oldest-first. Each review has `{id, body, scope_kind, scope_limit, scope_person, scope_person_handle, scope_tag, scope_since, scope_until, created_at, updated_at, entry_ids, entries}`. `scope_kind` is one of `latest`, `person`, `tag`, or `range`, and only the axis keys that kind owns are non-null. `scope_person` is a live lookup that becomes `null` once that person is deleted; `scope_person_handle` is the stored handle and survives, so use it when naming who a prior review was about. Use these for longer-running progress and recurring-pattern context without repeating them verbatim.
 
@@ -68,7 +69,7 @@ Use the rubric below. Read every field of the payload. Address `self` as "you" a
 1. **Situation** — one or two sentences naming what happened, who was involved, and the source/medium (Slack, email, meeting, etc.) when present.
 2. **What worked** — 1–3 concrete strengths in how you communicated, grounded in the entry body.
 3. **What to improve** — 1–3 concrete weaknesses framed as observations, not judgments. Quote short fragments from the entry body when helpful.
-4. **Goal check** — for each relevant open goal, write exactly one line judging whether this interaction **advanced**, **hurt**, or was **neutral** to it. Name the goal and cite concrete evidence from the entry body. Omit the entire Goal check section when `goals` is empty; when goals exist but none is relevant, omit it rather than manufacturing a connection.
+4. **Goal check** — for each relevant open goal, write exactly one line judging whether this interaction **advanced**, **hurt**, or was **neutral** to it. Name the goal by ID and title (for example, `Goal 3 — Lead with the ask: advanced`) and cite concrete evidence from the entry body. Every line you write here is also stored as a structured check in Step E3, so write one only when you mean it to count toward that goal's trail. Omit the entire Goal check section when `goals` is empty; when goals exist but none is relevant, omit it rather than manufacturing a connection.
 5. **Try next time** — 1–3 specific, actionable suggestions. Prefer restating or sharpening an existing open goal over inventing a new one. Prefer phrasing the user can reuse verbatim in the next similar exchange.
 6. **Follow-ups** — optional. Threads to revisit with the counterparty, or questions to consider before the next interaction.
 
@@ -84,16 +85,20 @@ Use the rubric below. Read every field of the payload. Address `self` as "you" a
 
 Pipe the generated Markdown via stdin so multi-line content with quotes, backticks, and shell metacharacters survives unscathed. Replace the body between the sentinels with the Markdown produced in Step E2.
 
+Pass one `--goal-check GOAL_ID=VERDICT` for each line of the Goal check section, with the same goal ID and the same verdict (`advanced`, `hurt`, or `neutral`) the line states. Omit the flag entirely when the feedback has no Goal check section. For example, with Goal check lines for goals 3 and 5:
+
 ```bash
-commscoach --json feedback add <id> - <<'__COMMSCOACH_FEEDBACK_EOF__'
+commscoach --json feedback add <id> - --goal-check 3=advanced --goal-check 5=neutral <<'__COMMSCOACH_FEEDBACK_EOF__'
 <generated feedback markdown>
 __COMMSCOACH_FEEDBACK_EOF__
 ```
 
 Notes:
 
-- Stdout is JSON: `{id, entry_id, body, created_at, updated_at}`.
-- A non-zero exit means the entry id was invalid or the body was empty. Surface stderr and stop.
+- The flags and the Goal check lines must agree: no flag without a matching line, and no line without a flag. A goal may appear only once.
+- A check may carry a short reason after a colon, `--goal-check '3=advanced:Led with the ask in the first line'`. It appears in the goal's trail, so keep it to one line of evidence, single-quote the whole value, and leave out apostrophes; omit it rather than repeat the body.
+- Stdout is JSON: `{id, entry_id, body, created_at, updated_at, goal_checks}`, where `goal_checks` lists the stored checks as `{id, feedback_id, goal_id, entry_id, verdict, note, at, created_at}` (an empty list without flags).
+- A non-zero exit means the entry id was invalid, the body was empty, or a `--goal-check` was malformed (exit 2) or named a goal that does not exist (exit 1). Nothing is stored in any of these cases — not the note, not any check. Surface stderr and stop; do not retry without the failing check, because that would store a note whose Goal check section the data no longer matches.
 
 ### Step E4: Report
 
@@ -102,6 +107,8 @@ Parse the JSON returned in Step E3 and print one line to the user:
 ```
 Stored feedback <id> on entry <entry_id>.
 ```
+
+When `goal_checks` is non-empty, append ` Recorded <n> goal checks.` to that line, using the stored count, so the user can tell the goals' trails were updated.
 
 Then display the generated coaching Markdown below that line so the user can read the feedback without re-fetching it.
 
@@ -340,10 +347,23 @@ Notes:
 
 - `--body` follows the usual body-source convention: literal text, `-` for stdin, or `@PATH` for a UTF-8 file. Prefer `-` with a heredoc, as in the add flows.
 - Do **not** pass `--body` with no value. That opens `$EDITOR` pre-filled with the current body, which this skill cannot drive.
-- `feedback edit` and `review edit` require `--body`; omitting it exits 1.
+- `review edit` requires `--body`; omitting it exits 1. `feedback edit` requires `--body`, `--goal-check`, or `--clear-goal-checks`.
 - An edit updates `updated_at` and leaves `created_at` alone.
 - `review edit` rewrites the body only. A review's scope and covered-entry list are its provenance — the record of what it was generated from — and are not editable. If the user wants either changed, say so and offer to delete the review and store a new one; do not quietly rewrite the body instead.
-- Stdout is the updated record: `{id, entry_id, body, created_at, updated_at}` for feedback, the full review shape for a review. Report the id and show the corrected Markdown.
+- Stdout is the updated record: `{id, entry_id, body, created_at, updated_at, goal_checks}` for feedback, the full review shape for a review. Report the id and show the corrected Markdown.
+
+### Correcting goal checks
+
+When a correction changes a feedback note's Goal check section, or the user says a stored verdict is wrong, replace the note's checks so the goal trails match the corrected text. `--goal-check` on `feedback edit` replaces the note's whole set, so pass every check the corrected note should have, not just the changed one; `--clear-goal-checks` removes them all. Combine either with `--body` to correct text and checks in one step:
+
+```bash
+commscoach --json feedback edit <feedback_id> --goal-check 3=hurt --goal-check 5=neutral --body - <<'__COMMSCOACH_FEEDBACK_EOF__'
+<corrected feedback markdown>
+__COMMSCOACH_FEEDBACK_EOF__
+commscoach --json feedback edit <feedback_id> --clear-goal-checks
+```
+
+The body and the checks change together or not at all.
 
 ### Deleting a record
 

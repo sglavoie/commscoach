@@ -42,7 +42,7 @@ def seed_complete_store(conn: object) -> None:
         tags=("personal", "coaching"),
         people=(me.handle,),
     )
-    db.create_feedback(conn, first.id, "first feedback")
+    first_note = db.create_feedback(conn, first.id, "first feedback")
     db.create_feedback(conn, first.id, "second feedback")
     db.create_feedback(conn, third.id, "third feedback")
     review = db.create_review(
@@ -61,6 +61,10 @@ def seed_complete_store(conn: object) -> None:
     )
     closed = db.create_goal(conn, "Completed experiment")
     db.close_goal(conn, closed.id, outcome="It helped")
+    active = db.list_goals(conn)[0]
+    db.add_goal_checks(
+        conn, first_note.id, [(active.id, "advanced", "Asked first"), (closed.id, "neutral", None)]
+    )
 
 
 class DumpRoundTripTests(DBTestCase):
@@ -174,9 +178,9 @@ class DumpRoundTripTests(DBTestCase):
         with self.assertRaisesRegex(db.DumpFormatError, "unsupported dump format"):
             db.validate_dump(payload)
 
-    def test_current_format_version_is_two(self) -> None:
-        self.assertEqual(db.FORMAT_VERSION, 2)
-        self.assertEqual(db.dump_to_dict(self.conn)["format_version"], 2)
+    def test_current_format_version_is_three(self) -> None:
+        self.assertEqual(db.FORMAT_VERSION, 3)
+        self.assertEqual(db.dump_to_dict(self.conn)["format_version"], 3)
 
     def test_round_trip_preserves_every_review_scope_column(self) -> None:
         # The CRUD layer cannot write these yet, so drive the columns directly.
@@ -275,6 +279,62 @@ class DumpRoundTripTests(DBTestCase):
             },
         )
 
+    def test_goal_checks_round_trip_with_ids_and_sequence(self) -> None:
+        original = db.dump_to_dict(self.conn)
+        self.assertEqual(
+            [(row["goal_id"], row["verdict"], row["note"]) for row in original["goal_checks"]],
+            [(1, "advanced", "Asked first"), (2, "neutral", None)],
+        )
+        self.assertEqual(original["sequences"]["goal_checks"], 2)
+        restored = self._fresh_connection()
+
+        db.load_from_dict(restored, original)
+
+        self.assertEqual(db.dump_to_dict(restored)["goal_checks"], original["goal_checks"])
+        self.assertEqual(db.goal_check_summaries(restored, [1])[1].advanced, 1)
+        self.assertEqual(db.dump_row_counts(original)["goal_checks"], 2)
+
+    def test_archive_without_goal_checks_restores_like_a_format_two_export(self) -> None:
+        payload = db.dump_to_dict(self.conn)
+        payload["format_version"] = 2
+        payload["schema_version"] = 4
+        payload.pop("goal_checks")
+        payload["sequences"].pop("goal_checks")
+        restored = self._fresh_connection()
+
+        with self.assertWarns(RuntimeWarning):
+            db.load_from_dict(restored, payload)
+
+        dumped = db.dump_to_dict(restored)
+        self.assertEqual(dumped["goal_checks"], [])
+        self.assertEqual(len(dumped["feedback"]), 3)
+        self.assertEqual(db.dump_row_counts(payload)["goal_checks"], 0)
+
+    def test_invalid_goal_checks_are_rejected(self) -> None:
+        cases = {
+            "unknown verdict": (lambda d: d["goal_checks"][0].update(verdict="won"), "verdict"),
+            "blank note": (lambda d: d["goal_checks"][0].update(note="  "), "note"),
+            "multi-line note": (lambda d: d["goal_checks"][0].update(note="a\nb"), "note"),
+            "string goal id": (lambda d: d["goal_checks"][0].update(goal_id="1"), "goal_id"),
+            "missing verdict": (lambda d: d["goal_checks"][0].pop("verdict"), "verdict"),
+        }
+        for label, (mutate, column) in cases.items():
+            with self.subTest(label):
+                payload = db.dump_to_dict(self.conn)
+                mutate(payload)
+                with self.assertRaisesRegex(db.DumpFormatError, rf"goal_checks\[0\].*{column}"):
+                    db.validate_dump(payload)
+
+    def test_goal_check_naming_a_missing_goal_rolls_back(self) -> None:
+        payload = db.dump_to_dict(self.conn)
+        payload["goal_checks"][0]["goal_id"] = 999
+        restored = self._fresh_connection()
+
+        with self.assertRaises(db.DumpFormatError):
+            db.load_from_dict(restored, payload)
+
+        self.assertEqual(db.dump_to_dict(restored)["entries"], [])
+
     def test_missing_required_column_is_still_rejected(self) -> None:
         payload = db.dump_to_dict(self.conn)
         del payload["reviews"][0]["scope_kind"]
@@ -305,6 +365,7 @@ class DumpRoundTripTests(DBTestCase):
             "reviews",
             "goals",
             "person_notes",
+            "goal_checks",
         ):
             payload.pop(table)
         restored = self._fresh_connection()

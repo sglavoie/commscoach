@@ -135,6 +135,8 @@ commscoach --yes review rm 1
 
 `--body` follows the usual body-source convention — literal text, `-` for stdin, or `@PATH` for a UTF-8 file. Passing the flag with no value opens `$VISUAL`/`$EDITOR` pre-filled with the current text. An edit updates `updated_at` and leaves `created_at` alone.
 
+`feedback edit --goal-check GOAL_ID=VERDICT` (repeatable) replaces the note's [goal checks](reference-operations.md#goal-checks-and-progress-trails) and `--clear-goal-checks` removes them, alone or together with `--body`; the corrected text and verdicts are stored together or not at all.
+
 `review edit` rewrites the body only. A review's scope and covered-entry list are its provenance — the record of what it was generated from — so correcting either means deleting the review and storing a new one.
 
 `feedback rm` and `review rm` prompt for confirmation; `--yes` works before or after the command.
@@ -145,7 +147,7 @@ The skill is included in this repository at [skills/commscoach/SKILL.md](../skil
 
 Maintain the skill in this repository alongside the CLI. Existing local paths can be preserved with symlinks to the repository's `SKILL.md`, so they continue to read the same source without maintaining separate copies. Recreate those links if you move the checkout.
 
-Invoke the skill with an entry ID for entry-specific coaching, ask for a recent communications review, ask to catch up on uncoached entries, or ask "how am I doing?" Entry coaching uses `commscoach context <id>` and stores feedback via `commscoach --json feedback add <id> -`. Reviews use `commscoach review context` to gather entries, prior syntheses, and active goals; after storing the review, the skill creates its next experiments as linked goals and closes achieved or irrelevant goals only when the reviewed entries support that judgment.
+Invoke the skill with an entry ID for entry-specific coaching, ask for a recent communications review, ask to catch up on uncoached entries, or ask "how am I doing?" Entry coaching uses `commscoach context <id>` and stores feedback via `commscoach --json feedback add <id> -`, passing one `--goal-check GOAL_ID=VERDICT` for each goal its Goal check section judges, so each verdict joins that goal's [progress trail](reference-operations.md#goal-checks-and-progress-trails). Each goal in the context carries a `check_summary` of earlier verdicts, and each prior note its `goal_checks`, so the coach can speak to momentum without double-counting an entry. Reviews use `commscoach review context` to gather entries, prior syntheses, and active goals; after storing the review, the skill creates its next experiments as linked goals and closes achieved or irrelevant goals only when the reviewed entries support that judgment.
 
 Reviews may propose zero to three new experiments. When existing goals already
 cover the useful next steps, the skill names those goals without creating duplicates.

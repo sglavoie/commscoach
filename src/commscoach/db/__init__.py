@@ -4,7 +4,8 @@ The package is split by table:
 
 - :mod:`commscoach.db.schema` owns connections, DDL, and idempotent init.
 - :mod:`commscoach.db.people`, :mod:`commscoach.db.entries`,
-  :mod:`commscoach.db.feedback`, and :mod:`commscoach.db.reviews` own CRUD.
+  :mod:`commscoach.db.feedback`, :mod:`commscoach.db.goal_checks`, and
+  :mod:`commscoach.db.reviews` own CRUD.
 - :mod:`commscoach.db.context` aggregates the skill-facing read models.
 
 Each public mutator runs, lookups included, in one ``BEGIN IMMEDIATE``
@@ -19,6 +20,8 @@ from ..models import (
     EntryContext,
     Feedback,
     Goal,
+    GoalCheck,
+    GoalCheckSummary,
     Person,
     PersonActivity,
     PersonContext,
@@ -75,6 +78,15 @@ from .feedback import (
     list_feedback,
     search_feedback,
     update_feedback,
+)
+from .goal_checks import (
+    GOAL_CHECK_VERDICTS,
+    add_goal_checks,
+    goal_check_summaries,
+    list_feedback_goal_checks,
+    list_goal_checks,
+    replace_goal_checks,
+    validate_goal_checks,
 )
 from .goals import (
     close_goal,
@@ -147,7 +159,10 @@ __all__ = [
     "Feedback",
     "FeedbackNotFoundError",
     "FORMAT_VERSION",
+    "GOAL_CHECK_VERDICTS",
     "Goal",
+    "GoalCheck",
+    "GoalCheckSummary",
     "GoalNotFoundError",
     "InitRequiredError",
     "MissingSelfError",
@@ -164,6 +179,7 @@ __all__ = [
     "Stats",
     "Tag",
     "TagNotFoundError",
+    "add_goal_checks",
     "backup_database",
     "connect",
     "count_search_entries",
@@ -190,6 +206,7 @@ __all__ = [
     "get_feedback",
     "feedback_entry_ids",
     "get_goal",
+    "goal_check_summaries",
     "get_person",
     "get_people_activity",
     "get_person_by_handle",
@@ -206,6 +223,8 @@ __all__ = [
     "list_entries",
     "list_entries_with_person",
     "list_feedback",
+    "list_feedback_goal_checks",
+    "list_goal_checks",
     "list_goals",
     "list_people",
     "list_reviews",
@@ -215,6 +234,7 @@ __all__ = [
     "merge_tags",
     "prune_backups",
     "rename_tag",
+    "replace_goal_checks",
     "search_entries",
     "search_entry_snippets",
     "search_feedback",
@@ -228,6 +248,7 @@ __all__ = [
     "update_review",
     "validate_backup_source",
     "validate_dump",
+    "validate_goal_checks",
     "validate_range_bounds",
     "validate_schema",
 ]

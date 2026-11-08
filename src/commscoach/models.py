@@ -126,6 +126,46 @@ class Goal:
 
 
 @dataclass(frozen=True, slots=True)
+class GoalCheck:
+    """One feedback note's judgment of how its entry bore on one goal.
+
+    ``verdict`` is ``advanced``, ``hurt``, or ``neutral``. ``entry_id`` is the
+    feedback note's entry, and ``at`` is that entry's occurrence time, falling
+    back to its creation time: when the interaction happened, which is what a
+    progress trail orders by. ``created_at`` is when the check was stored.
+    """
+
+    id: int
+    feedback_id: int
+    goal_id: int
+    entry_id: int
+    verdict: str
+    note: str | None
+    at: str
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class GoalCheckSummary:
+    """Verdict counts and milestones across every check of one goal.
+
+    Timestamps are the checked entries' occurrence times, falling back to
+    their creation times; all three are ``None`` for a goal with no checks.
+    """
+
+    advanced: int = 0
+    hurt: int = 0
+    neutral: int = 0
+    last_verdict: str | None = None
+    last_at: str | None = None
+    first_advanced_at: str | None = None
+
+    @property
+    def total(self) -> int:
+        return self.advanced + self.hurt + self.neutral
+
+
+@dataclass(frozen=True, slots=True)
 class Stats:
     """Windowed activity and coaching-coverage summary."""
 

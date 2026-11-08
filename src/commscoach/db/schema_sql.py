@@ -158,6 +158,21 @@ CREATE TABLE IF NOT EXISTS person_notes (
 );
 """
 
+# Additive: v5 only creates a table, so an older database gains it in place.
+SCHEMA_V5_SQL = """
+CREATE TABLE IF NOT EXISTS goal_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feedback_id INTEGER NOT NULL REFERENCES feedback (id) ON DELETE CASCADE,
+    goal_id INTEGER NOT NULL REFERENCES goals (id) ON DELETE CASCADE,
+    verdict TEXT NOT NULL CHECK (verdict IN ('advanced', 'hurt', 'neutral')),
+    note TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (feedback_id, goal_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_goal_checks_goal_id ON goal_checks (goal_id);
+"""
+
 _FTS5_TABLE_SQL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
     body,
