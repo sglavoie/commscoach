@@ -13,6 +13,7 @@ from .common import (
     handle_arg,
     parse_date_bounds,
 )
+from .completion import TAG, complete_as
 
 #: Each axis flag as ``(flag, argparse dest, scope kind it derives)``, in the
 #: order the flags are declared so a conflict message names them predictably.
@@ -76,13 +77,14 @@ def add_scope_flags(parser: argparse.ArgumentParser) -> None:
         metavar="HANDLE",
         help="Scope to entries involving HANDLE (scope kind 'person').",
     )
-    parser.add_argument(
+    tag_flag = parser.add_argument(
         "--tag",
         default=None,
         dest="scope_tag",
         metavar="NAME",
         help="Scope to entries carrying NAME (scope kind 'tag').",
     )
+    complete_as(tag_flag, TAG)
     add_date_bounds(parser, noun="scoped entries")
 
 

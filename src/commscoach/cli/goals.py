@@ -23,6 +23,7 @@ from .common import (
     row_id,
     search_excerpt,
 )
+from .completion import REVIEW, complete_as
 from .editor import compose_in_editor
 from .serializers import goal_to_dict
 
@@ -60,13 +61,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="HANDLE",
         help="Tie the goal to an existing person (default: a general goal).",
     )
-    add.add_argument(
+    review_flag = add.add_argument(
         "--review",
         type=row_id,
         default=None,
         metavar="ID",
         help="Record the review this goal came from.",
     )
+    complete_as(review_flag, REVIEW)
     add.set_defaults(func=cmd_goal_add)
 
     lst = goal_sub.add_parser("list", help="List goals.")

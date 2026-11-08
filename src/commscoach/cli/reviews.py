@@ -27,6 +27,7 @@ from .common import (
     read_replacement_body,
     row_id,
 )
+from .completion import ENTRY, TAG, complete_as
 from .editor import compose_in_editor
 from .reviews_format import emit_review, emit_reviews, review_context_to_dict
 from .reviews_scope import Scope, add_scope_flags, resolve_scope
@@ -88,7 +89,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
             " or omit to open $EDITOR)."
         ),
     )
-    add.add_argument(
+    entry_flag = add.add_argument(
         "--entry",
         action="extend",
         nargs="+",
@@ -99,6 +100,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="ID",
         help="Entry id covered by this review (may list multiple ids).",
     )
+    complete_as(entry_flag, ENTRY)
     add_scope_flags(add)
     add.add_argument(
         "--limit",
@@ -137,11 +139,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="HANDLE",
         help="Only list reviews scoped to HANDLE.",
     )
-    lst.add_argument(
-        "--tag",
-        default=None,
-        metavar="NAME",
-        help="Only list reviews scoped to tag NAME.",
+    complete_as(
+        lst.add_argument(
+            "--tag",
+            default=None,
+            metavar="NAME",
+            help="Only list reviews scoped to tag NAME.",
+        ),
+        TAG,
     )
     add_date_bounds(lst, noun="reviews written")
     add_oldest_first(lst, noun="reviews")
@@ -176,11 +181,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         metavar="HANDLE",
         help="Only search reviews scoped to HANDLE, including deleted people.",
     )
-    search.add_argument(
-        "--tag",
-        default=None,
-        metavar="NAME",
-        help="Only search reviews scoped to tag NAME.",
+    complete_as(
+        search.add_argument(
+            "--tag",
+            default=None,
+            metavar="NAME",
+            help="Only search reviews scoped to tag NAME.",
+        ),
+        TAG,
     )
     add_date_bounds(search, noun="reviews written")
     add_oldest_first(search, noun="matching reviews")

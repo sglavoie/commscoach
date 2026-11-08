@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from .. import __version__, db
 from . import (
     backup,
+    completion,
     context,
     doctor,
     entries,
@@ -70,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     export.register(subparsers)
     porting.register(subparsers)
     stats.register(subparsers)
+    completion.register(subparsers)
 
     _reject_repeated_options(parser)
 
@@ -227,6 +229,9 @@ def main(argv: list[str] | None = None) -> int:
     reconfigure = getattr(sys.stdout, "reconfigure", None)
     if reconfigure is not None:
         reconfigure(line_buffering=True)
+    words = sys.argv[1:] if argv is None else argv
+    if words[:1] == [completion.CALLBACK]:  # hidden shell-completion callback
+        return completion.run_callback(build_parser(), words[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     func: Callable[[argparse.Namespace], int] | None = getattr(args, "func", None)
