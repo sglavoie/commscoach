@@ -151,3 +151,89 @@ def render(briefing: Briefing) -> str:
     if briefing.note:
         row("Your notes", [style.paint(style.clip(briefing.note, width - label_w - 2), "italic")])
     return "\n".join(lines)
+
+
+def render_details(
+    conn,  # type: ignore[no-untyped-def]
+    person: db.Person,
+    entries: tuple[db.Entry, ...],
+    coached: set[int],
+    reviews: tuple[db.Review, ...],
+    *,
+    prefix: list[str],
+    has_note: bool,
+) -> str:
+    """The rest of ``person prep`` on a terminal: goals, conversations, reviews.
+
+    Every section reads like the briefing above it, one line per thing, with
+    the command that opens the full record.
+    """
+    import shlex
+
+    from . import insights
+    from .entries_format import pretty_entry_rows
+
+    width = style.term_width()
+
+    def cmd(*words: str) -> str:
+        return style.paint(shlex.join([*prefix, *words]), "cyan")
+
+    lines: list[str] = []
+    goals = db.list_goals(conn, person_handle=person.handle, include_general=True)
+    if goals:
+        lines.append("\n" + style.heading("Goals"))
+        summaries = db.goal_check_summaries(conn, [g.id for g in goals])
+        for goal in sorted(goals, key=lambda g: g.person is None):
+            line = "  " + pretty_views.goal_short(goal)
+            if goal.person is None:
+                line += style.muted("  (general)")
+            if summaries[goal.id].total:
+                trail = db.list_goal_checks(conn, goal.id)
+                line += style.sep() + pretty_views.verdict_strip(trail[-8:])
+            lines.append(line)
+            if goal.detail:
+                lines.append(
+                    "      " + style.muted(style.clip(insights.excerpt(goal.detail), width - 8))
+                )
+
+    lines.append("\n" + style.heading("Recent conversations"))
+    if not entries:
+        lines.append("  " + style.muted("none logged yet"))
+    rows = pretty_entry_rows(entries, coached) if entries else []
+    shown_advice: set[str] = set()
+    latest_coached = None
+    for entry, row in zip(entries, rows, strict=True):
+        lines.append("  " + row)
+        notes = db.list_feedback(conn, entry.id)
+        if not notes:
+            continue
+        latest_coached = latest_coached or entry
+        advice = insights.key_advice(notes[-1].body)
+        if advice and advice not in shown_advice:
+            shown_advice.add(advice)
+            lines.append(
+                "        "
+                + style.paint("↳ ", "yellow")
+                + style.muted(style.clip(advice, width - 12))
+            )
+    if latest_coached is not None:
+        lines.append(
+            "  "
+            + style.muted("Read the last coaching in full: ")
+            + cmd("entry", "show", str(latest_coached.id), "--with-feedback")
+        )
+
+    if reviews:
+        lines.append("\n" + style.heading("Reviews of this relationship"))
+        for review in reviews:
+            lines.append(
+                f"  {style.ident(review.id)}  "
+                + style.muted(style.relative(review.created_at) + "  ")
+                + style.clip(insights.excerpt(review.body), width - 22)
+            )
+        lines.append(
+            "  " + style.muted("Full review: ") + cmd("review", "show", str(reviews[0].id))
+        )
+    if has_note:
+        lines.append("\n" + style.muted("Your full notes: ") + cmd("person", "show", person.handle))
+    return "\n".join(lines)

@@ -12,6 +12,7 @@ from .common import (
     print_json,
     truncate,
 )
+from .insights import plain_inline
 from .serializers import entry_to_dict
 
 
@@ -122,7 +123,7 @@ def pretty_entry_rows(
     """Aligned, glyph-led rows for a terminal: status, id, when, source, text, links."""
     width = style.term_width(cap=140)
     id_w = max(len(str(e.id)) for e in entries)
-    whens = {e.id: style.relative(e.occurred_at or e.created_at) for e in entries}
+    whens = {e.id: style.short_when(e.occurred_at or e.created_at) for e in entries}
     when_w = max(len(w) for w in whens.values())
     sources = {e.id: " ".join((e.source or "").split()) for e in entries}
     source_w = min(12, max((len(s) for s in sources.values()), default=0))
@@ -136,7 +137,7 @@ def pretty_entry_rows(
         e.id: (
             excerpts[e.id]
             if excerpts is not None and e.id in excerpts
-            else first_prose_line(e.body)
+            else plain_inline(first_prose_line(e.body))
         )
         for e in entries
     }

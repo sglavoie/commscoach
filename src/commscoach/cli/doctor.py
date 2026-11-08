@@ -13,6 +13,7 @@ from urllib.parse import quote
 from .. import db, paths
 from ..db import schema
 from ..timeparse import TimeParseError, parse_when
+from . import style
 from .common import print_json, resolve_db_path
 
 _DB_CHECKS = (
@@ -41,6 +42,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--quick",
         action="store_true",
         help="Use SQLite's quick integrity check instead of the full check.",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="On a terminal, list every check, not only the ones that need attention.",
     )
     parser.set_defaults(func=cmd_doctor)
 
@@ -361,8 +368,45 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     )
     if args.json:
         print_json({"db_path": str(db_path), "status": overall, "checks": checks})
+    elif style.pretty():
+        print(_pretty_report(db_path, checks, overall, verbose=args.verbose))
     else:
         for item in checks:
             print(f"[{item['status'].upper()}] {item['name']}: {item['message']}")
         print(f"overall: {overall}")
     return 1 if overall == "fail" else 0
+
+
+_PRETTY_STATUS = {"ok": ("✓", "green"), "warn": ("!", "yellow"), "fail": ("✗", "red")}
+
+
+def _pretty_report(
+    db_path: Path, checks: list[dict[str, Any]], overall: str, *, verbose: bool
+) -> str:
+    """One healthy line, or the checks that need attention spelled out."""
+    counts = next((c.get("details") for c in checks if c["name"] == "row_counts"), None) or {}
+    sizes = [
+        f"{counts[table]} {label}"
+        for table, label in (("entries", "entries"), ("feedback", "notes"), ("goals", "goals"))
+        if table in counts
+    ]
+    glyph, hue = _PRETTY_STATUS[overall]
+    title = {"ok": "Healthy", "warn": "Healthy, with warnings", "fail": "Needs attention"}[overall]
+    lines = [
+        style.paint(glyph, hue) + " " + style.join([style.heading(title), _passed(checks), *sizes])
+    ]
+    lines.append("  " + style.muted(str(db_path)))
+    shown = checks if verbose else [c for c in checks if c["status"] != "ok"]
+    for item in shown:
+        mark, tone = _PRETTY_STATUS.get(item["status"], ("·", "dim"))
+        lines.append(f"  {style.paint(mark, tone)} {style.pad(item['name'], 24)}{item['message']}")
+    if not verbose and overall == "ok":
+        lines.append("  " + style.muted("Every check: commscoach doctor --verbose"))
+    return "\n".join(lines)
+
+
+def _passed(checks: list[dict[str, Any]]) -> str:
+    ok = sum(1 for c in checks if c["status"] == "ok")
+    if ok == len(checks):
+        return f"{ok} check{'s' if ok != 1 else ''} passed"
+    return f"{ok} of {len(checks)} checks passed"

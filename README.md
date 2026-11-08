@@ -12,6 +12,8 @@ Ready to use. The CLI, SQLite schema, stored feedback and reviews, scoped review
 | --- | --- |
 | See what needs attention today | `commscoach` |
 | Log a conversation in one line | `commscoach log "Asked @jdoe for budget #1on1" -s slack` |
+| Get coached on an entry without leaving the terminal | `commscoach coach 42` |
+| See how the week went | `commscoach recap` |
 | See your habits at a glance | `commscoach stats` |
 | Get a short conversation brief | `commscoach person prep jdoe --brief` |
 | Find a person by name | `commscoach person list --query "John"` |
@@ -88,16 +90,20 @@ for subcommand-specific options.
 
 ## On a terminal
 
-Bare `commscoach` opens a home screen: entries waiting for coaching, goals in
-play, people you have not talked to in a while, an entry from this day in the
-past, and your weekly rhythm. An empty journal gets a setup checklist instead.
+Bare `commscoach` opens a home screen: entries waiting for coaching, the
+experiment your last coaching set, goals in play (and the ones ready to close),
+people who have gone quiet for that relationship's usual rhythm, an entry from
+this day in the past with how far you have come since, and your weekly rhythm.
+An empty journal gets a setup checklist instead.
 
 When stdout is a terminal, human output is designed to be read: times say
 "yesterday" or "3h ago", ids, handles, and tags are colored, Markdown feedback is
 rendered and wrapped, `stats` draws a coverage bar and a weekly sparkline,
 `person prep` opens with a "Before you talk" briefing, and logging an entry
-says how often you have talked to that person lately, which goal applies, and
-which `/commscoach` command coaches it.
+says how often you have talked to that person lately, what you planned to try
+last time, which goal applies, and offers to coach it right away with
+`commscoach coach` (Claude Code). `commscoach recap` tells the past week or
+month as a short story.
 
 Piped output, `--json`, and the files `export` writes keep the stable plain
 format. Override the detection with `COMMSCOACH_PRETTY=1` (for example

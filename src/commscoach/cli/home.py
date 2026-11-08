@@ -13,7 +13,7 @@ import shlex
 from datetime import date, datetime, timedelta
 
 from .. import db
-from . import pretty_views, style
+from . import coach, insights, pretty_views, style
 from .common import (
     command_prefix,
     first_prose_line,
@@ -23,8 +23,6 @@ from .common import (
     resolve_db_path,
 )
 
-QUIET_DAYS = 28
-QUIET_MIN_INTERACTIONS = 3
 GOALS_SHOWN = 3
 SPARK_WEEKS = 12
 
@@ -182,22 +180,53 @@ def _render(args: argparse.Namespace, conn, now: datetime) -> str:  # type: igno
             f"{style.relative(oldest.occurred_at or oldest.created_at)}{with_whom}: "
             f"{style.muted(style.clip(first_prose_line(oldest.body), 50))}"
         )
-        lines.append(f"    Ask your coach: {style.paint(f'/commscoach {oldest.id}', 'cyan')}")
+        ask = (
+            _cmd(args, "coach", str(oldest.id))
+            if coach.available()
+            else style.paint(f"/commscoach {oldest.id}", "cyan")
+        )
+        lines.append(f"    Ask your coach: {ask}")
     else:
         coverage = f"{stats.entries_with_feedback}/{stats.entry_count}"
         lines.append(f"  {style.good('✓')} All caught up · {coverage} entries coached")
+
+    # The experiment the last coaching set
+    plan = insights.latest_plan(conn)
+    if plan is not None:
+        lines.append(_section("Your current experiment"))
+        room = style.term_width() - 6
+        for item in plan.items[:2]:
+            lines.append(f"  {style.paint('→', 'yellow')} {style.clip(item, room)}")
+        with_whom = [style.handle(p.handle) for p in plan.entry.people if not p.is_self]
+        lines.append(
+            "    "
+            + style.muted(
+                f"from coaching on entry {plan.entry.id}" + (" with " if with_whom else "")
+            )
+            + ", ".join(with_whom)
+            + style.muted(f", {style.relative(plan.entry.occurred_at or plan.entry.created_at)}")
+        )
 
     # Goals
     goals = db.list_goals(conn, status="active", oldest_first=True)
     lines.append(_section("Goals in play"))
     if goals:
         summaries = _goal_summaries(conn, [goal.id for goal in goals])
-        for goal in goals[:GOALS_SHOWN]:
+        trails = {goal_id: db.list_goal_checks(conn, goal_id) for goal_id in summaries}
+        # A goal that has stuck jumps the queue: closing it is the next move.
+        ordered = sorted(goals, key=lambda g: not insights.ready_to_close(trails.get(g.id, ())))
+        for goal in ordered[:GOALS_SHOWN]:
             line = "  " + pretty_views.goal_short(goal)
             summary = summaries.get(goal.id)
             if summary is not None:
-                line += style.sep() + _momentum(conn, goal.id, summary)
+                line += style.sep() + _momentum(trails[goal.id], summary)
             lines.append(line)
+            run = insights.advanced_run(trails.get(goal.id, ()))
+            if run >= insights.GRADUATE_RUN:
+                lines.append(
+                    f"    🎓 {run} wins in a row. Is it a habit now? "
+                    + _cmd(args, "goal", "close", str(goal.id), "--outcome")
+                )
         if len(goals) > GOALS_SHOWN:
             lines.append(
                 style.muted(f"    and {len(goals) - GOALS_SHOWN} more: ")
@@ -209,26 +238,28 @@ def _render(args: argparse.Namespace, conn, now: datetime) -> str:  # type: igno
             + _cmd(args, "goal", "add", "Lead with the ask")
         )
 
-    # Relationships going quiet
-    activity = db.get_people_activity(conn)
+    # Relationships going quiet, each measured against its own rhythm
+    times = db.get_people_interaction_times(conn)
     quiet = []
     for person in people:
-        act = activity.get(person.id)
-        if act is None or act.interaction_count < QUIET_MIN_INTERACTIONS:
-            continue
-        days = style.days_since(act.last_logged_interaction, now=now)
-        if days is not None and days >= QUIET_DAYS:
-            quiet.append((days, person, act))
+        beat = insights.rhythm(times.get(person.id, ()), now=now)
+        if beat is not None and beat.quiet:
+            overdue = beat.days_since / max(1.0, beat.usual_gap_days)
+            quiet.append((overdue, person, beat))
     if quiet:
         lines.append(_section("Gone quiet"))
-        for days, person, act in sorted(quiet, key=lambda item: -item[0])[:3]:
-            label = person.name or person.handle
+        for _, person, beat in sorted(quiet, key=lambda item: -item[0])[:3]:
             lines.append(
                 f"  {style.paint('↻', 'blue')} {style.handle(person.handle)}"
-                + (f" ({label})" if person.name else "")
+                + (f" ({person.name})" if person.name else "")
                 + style.muted(
-                    f" · last talked {style.span(days)} ago · {plural(act.interaction_count, 'conversation')}"
+                    f" · usually {beat.usual()}, now {style.span(beat.days_since)} since you talked"
                 )
+            )
+            lines.append(
+                "    "
+                + style.muted("Before you reach out: ")
+                + _cmd(args, "person", "prep", person.handle, "--brief")
             )
 
     # On this day
@@ -241,6 +272,16 @@ def _render(args: argparse.Namespace, conn, now: datetime) -> str:  # type: igno
             + style.paint(
                 style.clip(first_prose_line(entry.body), style.term_width() - 10), "italic"
             )
+        )
+        lines.extend(_since_then(conn, entry))
+
+    # The week in review, offered when a new week starts
+    if today.weekday() == 0 and stats.entry_count >= 3:
+        lines.append(
+            "\n"
+            + style.paint("✦", "magenta")
+            + " New week. See how the last one went: "
+            + _cmd(args, "recap")
         )
 
     lines.append("")
@@ -262,7 +303,31 @@ def _goal_summaries(conn, goal_ids: list[int]) -> dict:  # type: ignore[no-untyp
     }
 
 
-def _momentum(conn, goal_id: int, summary) -> str:  # type: ignore[no-untyped-def]
+def _momentum(trail, summary) -> str:  # type: ignore[no-untyped-def]
     """The last few verdicts as glyphs, then the counts: ``✓✓✗✓ advanced 3×, slipped 1×``."""
-    recent = db.list_goal_checks(conn, goal_id)[-8:]
-    return pretty_views.verdict_strip(recent) + " " + pretty_views.momentum(summary)
+    return pretty_views.verdict_strip(trail[-8:]) + " " + pretty_views.momentum(summary)
+
+
+def _since_then(conn, entry: db.Entry) -> list[str]:  # type: ignore[no-untyped-def]
+    """What the coach said back then, and how your goals have moved since."""
+    out = []
+    room = style.term_width() - 16
+    for feedback in reversed(db.list_feedback(conn, entry.id)):
+        advice = insights.key_advice(feedback.body)
+        if advice:
+            out.append("    " + style.muted("Coach said: ") + style.clip(advice, room))
+            break
+    when = entry.occurred_at or entry.created_at
+    checks = [c for c in db.list_goal_checks_between(conn, since=when) if c.entry_id != entry.id]
+    if checks:
+        advanced = sum(1 for c in checks if c.verdict == "advanced")
+        goals = len({c.goal_id for c in checks})
+        out.append(
+            "    "
+            + style.muted("Since then: ")
+            + pretty_views.verdict_strip(checks[-12:])
+            + " "
+            + f"{advanced} of {plural(len(checks), 'goal check')} advanced"
+            + style.muted(f" across {plural(goals, 'goal')}")
+        )
+    return out

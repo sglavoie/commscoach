@@ -289,7 +289,11 @@ def cmd_entry_add(args: argparse.Namespace) -> int:
                 tags=args.tags or [],
                 people=people,
             )
-        reaction = nudges.entry_logged(conn, entry) if nudges.enabled(args) else None
+        reaction = (
+            nudges.entry_logged(conn, entry, prefix=command_prefix(args))
+            if nudges.enabled(args)
+            else None
+        )
     if reaction is not None:
         print("\n".join(reaction))
         return 0

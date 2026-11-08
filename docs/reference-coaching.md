@@ -145,6 +145,12 @@ commscoach --yes review rm 1
 
 The skill is included in this repository at [skills/commscoach/SKILL.md](../skills/commscoach/SKILL.md). Install or link the `skills/commscoach` directory into your harness's skill directory, keeping the entrypoint named `SKILL.md`. The skill and these docs are not part of the built wheel, so keep a checkout of the repository for them. The skill calls `commscoach` through `PATH`; install the CLI using the [quick-start instructions](../README.md#install-globally) before invoking it.
 
+The skill only runs when you invoke it (`/commscoach 42`, `/commscoach review recent comms`, or `commscoach coach`): its frontmatter sets `disable-model-invocation: true`, so its description is not loaded into unrelated conversations and Claude never starts it on its own. While it runs, `allowed-tools: Bash(commscoach:*)` lets it call the CLI without a permission prompt for each command; anything else still asks.
+
+```sh
+ln -s "$PWD/skills/commscoach" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/commscoach"
+```
+
 Maintain the skill in this repository alongside the CLI. Existing local paths can be preserved with symlinks to the repository's `SKILL.md`, so they continue to read the same source without maintaining separate copies. Recreate those links if you move the checkout.
 
 Invoke the skill with an entry ID for entry-specific coaching, ask for a recent communications review, ask to catch up on uncoached entries, or ask "how am I doing?" Entry coaching uses `commscoach context <id>` and stores feedback via `commscoach --json feedback add <id> -`, passing one `--goal-check GOAL_ID=VERDICT` for each goal its Goal check section judges, so each verdict joins that goal's [progress trail](reference-operations.md#goal-checks-and-progress-trails). Each goal in the context carries a `check_summary` of earlier verdicts, and each prior note its `goal_checks`, so the coach can speak to momentum without double-counting an entry. Reviews use `commscoach review context` to gather entries, prior syntheses, and active goals; after storing the review, the skill creates its next experiments as linked goals and closes achieved or irrelevant goals only when the reviewed entries support that judgment.
@@ -190,3 +196,19 @@ commscoach context 42 --goal-limit 20
 The skill is [scope](reference.md#review-scopes)-aware. It derives the scope from how you ask — "how am I doing with @alice?" becomes `--person alice`, "how is my conflict tag trending?" becomes `--tag conflict`, "how did last quarter go?" becomes a `--since`/`--until` range — and passes the same axis flags to `review add` that it passed to `review context`, so the stored review records the slice it was generated from. It reports the stored scope back to you. A scope that matches nothing is reported as an answer rather than stored as an empty review.
 
 The skill also runs [`feedback edit` / `feedback rm` / `review edit` / `review rm`](#correcting-stored-coaching), but only when you explicitly ask it to change or remove a named record — never as cleanup inside another flow. Because it runs non-interactively it has to pass `--yes`, so it asks for confirmation in the conversation before either `rm`.
+
+### Coaching from the terminal
+
+`commscoach coach ENTRY_ID` opens Claude Code on `/commscoach ENTRY_ID`, so the coaching loop does not need a separate window; without an ID it picks the oldest entry still waiting for feedback (and says so), or reports that everything is coached. It needs the `claude` command on `PATH` and the skill installed as above. An explicit `--db` is passed along in the request so the skill reads the same journal. The command exits with Claude Code's exit code.
+
+```sh
+commscoach coach 42
+commscoach coach                     # the oldest uncoached entry
+commscoach coach 42 --print          # headless: print the coaching and exit
+```
+
+`--print` runs `claude -p` with only `Bash(commscoach:*)` allowed, so the skill can read context and store feedback but run nothing else. `COMMSCOACH_COACH_CMD` replaces the launcher: it is split like a shell command line, and a `{prompt}` word is replaced by the request (otherwise the request is appended, after `-p --allowedTools …` with `--print`).
+
+After `log` on an interactive terminal with a launcher available, *Coach it now? [Y/n]* starts the same command for the new entry; any answer but yes (or Enter) skips it. `COMMSCOACH_COACH_PROMPT=0` turns the question off. It is never asked with `--json`, in a pipe, or when stdin is not a terminal.
+
+The CLI brings each coaching note's *Try next time* items back later: in `log`, `person prep`, the home screen, and `recap`. It finds them under a Markdown heading containing "Try next time" (or "next time", "try this", "to practice"), so keep that heading when editing feedback by hand.

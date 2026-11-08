@@ -216,6 +216,32 @@ def relative(iso: str, *, now: datetime | None = None) -> str:
     return f"{label} {local:%H:%M}"
 
 
+def short_when(iso: str, *, now: datetime | None = None) -> str:
+    """A compact :func:`relative` for table columns: ``2h ago``, ``3d ago``, ``Nov 1``."""
+    local = _local(iso)
+    if local is None:
+        return iso
+    current = now if now is not None else datetime.now(local.tzinfo)
+    if local.tzinfo is not None and current.tzinfo is None:
+        current = current.astimezone()
+    if local.time() != time.min:
+        seconds = (current - local).total_seconds()
+        if 0 <= seconds < 60:
+            return "just now"
+        if 0 <= seconds < 3600:
+            return f"{int(seconds // 60)}m ago"
+        if 0 <= seconds < 6 * 3600:
+            return f"{int(seconds // 3600)}h ago"
+    delta = (current.date() - local.date()).days
+    if delta == 0:
+        return "today"
+    if delta == 1:
+        return "yesterday"
+    if 1 < delta < 7:
+        return f"{delta}d ago"
+    return _day_label(local.date(), current.date())
+
+
 def days_since(iso: str | None, *, now: datetime | None = None) -> int | None:
     """Whole local calendar days between ``iso`` and now, or ``None``."""
     if not iso:

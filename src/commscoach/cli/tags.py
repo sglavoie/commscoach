@@ -7,6 +7,7 @@ import sys
 
 from .. import db
 from ..db.tags import normalize_tag
+from . import style
 from .common import confirm, non_negative_int, open_db, plural, print_json
 from .completion import TAG, complete_as
 from .serializers import tag_to_dict
@@ -76,6 +77,18 @@ def cmd_tag_list(args: argparse.Namespace) -> int:
         print_json([tag_to_dict(tag) for tag in tags])
     elif not tags:
         print("(no tags)")
+    elif style.pretty():
+        top = max(tag.entry_count for tag in tags) or 1
+        name_w = max(len(tag.name) for tag in tags) + 1
+        count_w = max(len(str(tag.entry_count)) for tag in tags)
+        for tag in tags:
+            meter = style.paint("█" * max(1, round(tag.entry_count / top * 20)), "magenta")
+            if not tag.entry_count:
+                meter = style.muted("unused")
+            print(
+                f"  {style.pad(style.tag(tag.name), name_w + 1)}"
+                f" {str(tag.entry_count).rjust(count_w)}  {meter}"
+            )
     else:
         for tag in tags:
             print(_format_tag_short(tag))

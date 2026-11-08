@@ -11,6 +11,7 @@ from .common import (
     first_prose_line,
     format_scope,
     format_stamp,
+    plural,
     print_json,
     search_excerpt,
     truncate,
@@ -89,6 +90,8 @@ def format_review_human(review: db.Review) -> str:
 
 
 def format_review_short(review: db.Review, *, query: str | None = None) -> str:
+    if style.pretty():
+        return _pretty_review_short(review, query=query)
     entry_ids = ",".join(str(entry.id) for entry in review.entries)
     parts = [
         f"[{review.id}]",
@@ -105,6 +108,27 @@ def format_review_short(review: db.Review, *, query: str | None = None) -> str:
         else truncate(first_prose_line(review.body))
     )
     return " ".join(parts)
+
+
+def _pretty_review_short(review: db.Review, *, query: str | None = None) -> str:
+    from .insights import excerpt, flatten, readable
+
+    head = style.join(
+        [
+            style.heading(f"Review {review.id}"),
+            format_scope(review),
+            plural(len(review.entries), "entry", "entries"),
+            style.muted(style.relative(review.created_at)),
+        ]
+    )
+    text = (
+        readable(
+            search_excerpt(flatten(review.body), query, width=style.term_width() - 6), query=query
+        )
+        if query is not None
+        else style.muted(style.clip(excerpt(review.body), style.term_width() - 4))
+    )
+    return f"{head}\n    {text}"
 
 
 def emit_review(

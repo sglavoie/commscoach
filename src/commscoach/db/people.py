@@ -44,6 +44,18 @@ def get_people_activity(conn: sqlite3.Connection) -> dict[int, PersonActivity]:
     }
 
 
+def get_people_interaction_times(conn: sqlite3.Connection) -> dict[int, tuple[str, ...]]:
+    """Each person's interaction times (occurrence, falling back to creation), oldest first."""
+    times: dict[int, list[str]] = {}
+    for row in conn.execute(
+        "SELECT ep.person_id, COALESCE(e.occurred_at, e.created_at) AS at"
+        " FROM entry_people ep JOIN entries e ON e.id = ep.entry_id"
+        " ORDER BY ep.person_id, at, e.id"
+    ):
+        times.setdefault(row["person_id"], []).append(row["at"])
+    return {person_id: tuple(values) for person_id, values in times.items()}
+
+
 def _wrap_people_integrity_error(exc: sqlite3.IntegrityError, handle: str | None) -> None:
     """Translate a people-table IntegrityError into a typed DBError. Always raises.
 

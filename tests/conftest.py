@@ -33,8 +33,20 @@ def _isolate_environment(monkeypatch, tmp_path):
     A test that forgets ``--db`` would otherwise read (or worse, write) the
     user's default database, so ``$COMMSCOACH_DB`` points at a fresh path that
     does not exist; tests that set it themselves override this. The pretty and
-    color switches are cleared so the plain line format is what tests see.
+    color switches are cleared so the plain line format is what tests see, and
+    ``claude`` is hidden so the coach launcher is unavailable unless a test sets it.
     """
     monkeypatch.setenv("COMMSCOACH_DB", str(tmp_path / "isolated" / "commscoach.sqlite3"))
-    for name in ("COMMSCOACH_PRETTY", "COMMSCOACH_PLAIN", "FORCE_COLOR", "CLICOLOR_FORCE"):
+    for name in (
+        "COMMSCOACH_PRETTY",
+        "COMMSCOACH_PLAIN",
+        "FORCE_COLOR",
+        "CLICOLOR_FORCE",
+        "COMMSCOACH_COACH_CMD",
+        "COMMSCOACH_COACH_PROMPT",
+    ):
         monkeypatch.delenv(name, raising=False)
+    # Whether Claude Code is installed must not change what the tests see.
+    from commscoach.cli import coach
+
+    monkeypatch.setattr(coach, "find_claude", lambda: None)

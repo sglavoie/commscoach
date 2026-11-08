@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from .. import __version__, db
 from . import (
     backup,
+    coach,
     completion,
     context,
     doctor,
@@ -36,6 +37,7 @@ from . import (
     log,
     people,
     porting,
+    recap,
     reviews,
     stats,
     style,
@@ -71,6 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     _register_init(subparsers)
     log.register(subparsers)
+    coach.register(subparsers)
     doctor.register(subparsers)
     backup.register(subparsers)
     entries.register(subparsers)
@@ -83,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     export.register(subparsers)
     porting.register(subparsers)
     stats.register(subparsers)
+    recap.register(subparsers)
     completion.register(subparsers)
 
     _reject_repeated_options(parser)

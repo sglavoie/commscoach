@@ -182,6 +182,25 @@ def list_goal_checks(conn: sqlite3.Connection, goal_id: int) -> tuple[GoalCheck,
     return tuple(_row_to_goal_check(row) for row in rows)
 
 
+def list_goal_checks_between(
+    conn: sqlite3.Connection, *, since: str | None = None, until: str | None = None
+) -> tuple[GoalCheck, ...]:
+    """Every goal's checks whose interaction falls inside ``[since, until]``, in trail order.
+
+    Bounds follow the same rules as entry filters (``parse_date_bound`` output).
+    """
+    where, params = [], []
+    if since is not None:
+        where.append("COALESCE(e.occurred_at, e.created_at) >= ?")
+        params.append(common.date_bound_timestamp(since, name="since"))
+    if until is not None:
+        where.append("COALESCE(e.occurred_at, e.created_at) <= ?")
+        params.append(common.date_bound_timestamp(until, name="until", upper=True))
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    rows = conn.execute(f"{_SELECT}{clause}{_CHRONOLOGICAL}", params).fetchall()
+    return tuple(_row_to_goal_check(row) for row in rows)
+
+
 def list_feedback_goal_checks(
     conn: sqlite3.Connection, feedback_ids: Iterable[int]
 ) -> dict[int, tuple[GoalCheck, ...]]:

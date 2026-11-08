@@ -269,8 +269,57 @@ def _emit_people(args: argparse.Namespace, people: tuple[db.Person, ...]) -> Non
     if not people:
         print("(no people)")
         return
+    if style.pretty():
+        handle_w = max(len(p.handle) for p in people) + 1
+        for person in people:
+            row = (
+                f"  {style.ident(str(person.id).rjust(3))}  "
+                f"{style.pad(style.handle(person.handle), handle_w + 1)} "
+                + (person.name or "")
+                + (style.muted("  (you)") if person.is_self else "")
+            )
+            print(row.rstrip())
+        return
     for person in people:
         print(_format_person_human(person))
+
+
+SPARK_WEEKS = 12
+
+
+def _pretty_activity(people, activity, times) -> list[str]:  # type: ignore[no-untyped-def]
+    """One row per person: handle, a 12-week sparkline, last talk, and their rhythm."""
+    from datetime import datetime
+
+    from . import insights
+
+    today = datetime.now().date()
+    handle_w = max(len(p.handle) for p in people) + 1
+    name_w = min(18, max((len(p.name or "") for p in people), default=0))
+    rows = []
+    for person in people:
+        summary = activity[person.id]
+        when = times.get(person.id, ())
+        cells = [style.pad(style.handle(person.handle), handle_w + 1)]
+        if name_w:
+            cells.append(style.pad(style.clip(person.name or "", name_w), name_w))
+        if person.is_self:
+            rows.append("  " + "  ".join(cells) + style.muted("  (you)"))
+            continue
+        cells.append(
+            style.paint(style.sparkline(insights.weekly_counts(when, today, SPARK_WEEKS)), "green")
+        )
+        last = summary.last_logged_interaction
+        cells.append(style.pad(style.short_when(last) if last else style.muted("never"), 10))
+        cells.append(style.pad(plural(summary.interaction_count, "talk"), 9))
+        beat = insights.rhythm(when)
+        detail = []
+        if beat is not None:
+            detail.append(style.warn("gone quiet") if beat.quiet else "usually " + beat.usual())
+        if summary.active_goal_count:
+            detail.append(style.warn("◎ ") + plural(summary.active_goal_count, "goal"))
+        rows.append("  " + "  ".join(cells) + "  " + style.muted(style.SEP).join(detail))
+    return [row.rstrip() for row in rows]
 
 
 def _resolve_existing_person(conn: Any, handle: str) -> db.Person:
@@ -341,6 +390,19 @@ def cmd_person_show(args: argparse.Namespace) -> int:
                 if args.with_feedback
                 else db.feedback_entry_ids(conn, (e.id for e in entries))
             )
+        details = (
+            prep.render_details(
+                conn,
+                person,
+                entries if args.recent is not None else (),
+                coached if args.recent is not None else set(),
+                reviews,
+                prefix=command_prefix(args),
+                has_note=note is not None,
+            )
+            if briefing is not None and not getattr(args, "brief", False)
+            else ""
+        )
     if args.json:
         payload = {
             **person_to_dict(person),
@@ -372,7 +434,8 @@ def cmd_person_show(args: argparse.Namespace) -> int:
             full = shlex.join([*command, "person", "prep", person.handle])
             print(style.muted(f"\nEverything: {full}"))
             return 0
-        print(style.muted("\n" + "─" * 40 + " details"))
+        print(details)
+        return 0
     _emit_person(args, person, note=note, include_notes=not brief)
     if brief and note is not None:
         print(f"\nNotes:\n{truncate(first_prose_line(note.body), width=180)}")
@@ -519,6 +582,10 @@ def cmd_person_list(args: argparse.Namespace) -> int:
                 for person in people
             ]
         )
+    elif style.pretty():
+        with open_db(args) as conn:
+            times = db.get_people_interaction_times(conn)
+        print("\n".join(_pretty_activity(people, activity, times)) if people else "(no people)")
     else:
         if not people:
             print("(no people)")

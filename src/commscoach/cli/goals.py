@@ -278,10 +278,10 @@ def _verdict_counts(summary: db.GoalCheckSummary) -> str:
     return ", ".join(f"{verdict} {count}×" for verdict, count in _occurred_verdicts(summary))
 
 
-def _format_journey(goal: db.Goal, summary: db.GoalCheckSummary) -> str:
+def _format_journey(goal: db.Goal, summary: db.GoalCheckSummary, checks=()) -> str:  # type: ignore[no-untyped-def]
     """Summarize a closed goal's checks: ``Closed after 23 days · 6 checks (...)``."""
     if style.pretty():
-        return pretty_views.journey(goal, summary)
+        return pretty_views.journey(goal, summary, checks)
     verb = "Dropped" if goal.status == "dropped" else "Closed"
     try:
         created = datetime.fromisoformat(goal.created_at)
@@ -585,6 +585,7 @@ def cmd_goal_close(args: argparse.Namespace) -> int:
             dropped=args.dropped,
         )
         summary = db.goal_check_summaries(conn, [goal.id])[goal.id]
+        trail = db.list_goal_checks(conn, goal.id) if summary.total else ()
     # Re-closing with the same status only corrects the outcome, if anything.
     verb = (
         "closed"
@@ -593,7 +594,7 @@ def cmd_goal_close(args: argparse.Namespace) -> int:
     )
     _emit_goal(args, goal, summary, human_prefix=verb)
     if summary.total and not args.json:
-        print(_format_journey(goal, summary))
+        print(_format_journey(goal, summary, trail))
     return 0
 
 

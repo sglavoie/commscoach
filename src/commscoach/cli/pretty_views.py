@@ -7,6 +7,8 @@ formats that scripts read stay untouched.
 
 from __future__ import annotations
 
+import shlex
+
 from .. import db
 from . import style
 
@@ -237,8 +239,8 @@ def check_trail(checks, summary) -> str:  # type: ignore[no-untyped-def]
     return "\n".join(lines)
 
 
-def journey(goal: db.Goal, summary) -> str:  # type: ignore[no-untyped-def]
-    """The story of a closed goal, told once when it closes."""
+def journey(goal: db.Goal, summary, checks=()) -> str:  # type: ignore[no-untyped-def]
+    """The story of a closed goal, told once when it closes: then, now, and the trail."""
     opened = style.days_since(goal.created_at) or 0
     closed = (style.days_since(goal.closed_at) or 0) if goal.closed_at else 0
     days = max(0, opened - closed)
@@ -248,10 +250,26 @@ def journey(goal: db.Goal, summary) -> str:  # type: ignore[no-untyped-def]
     parts = [f"{lead} {after}", conversations, momentum(summary)]
     if summary.first_advanced_at is not None:
         parts.append(f"first win {style.relative(summary.first_advanced_at)}")
-    return "\n" + style.join(parts)
+    lines = ["", style.join(parts)]
+    if checks:
+        lines.append("  " + verdict_strip(checks[-24:]))
+    noted = [c for c in checks if c.note]
+    then = next((c for c in noted if c.verdict == "hurt"), noted[0] if noted else None)
+    now = next((c for c in reversed(noted) if c.verdict == "advanced"), None)
+    if then is not None and now is not None and then.id != now.id:
+        room = style.term_width() - 30
+        lines.append(
+            f"  {style.muted('Then'.ljust(5))}{verdict_glyph(then.verdict)} "
+            f"{style.clip(then.note, room)}" + style.muted(f"  {style.relative(then.at)}")
+        )
+        lines.append(
+            f"  {style.muted('Now'.ljust(5))}{verdict_glyph(now.verdict)} "
+            f"{style.clip(now.note, room)}" + style.muted(f"  {style.relative(now.at)}")
+        )
+    return "\n".join(lines)
 
 
-def feedback_stored(feedback: db.Feedback, checks, goals) -> str:  # type: ignore[no-untyped-def]
+def feedback_stored(feedback: db.Feedback, checks, goals, runs=None, *, prefix=None) -> str:  # type: ignore[no-untyped-def]
     """One-line confirmation for ``feedback add`` plus each recorded goal check."""
     lines = [
         style.good("✓")
@@ -268,4 +286,33 @@ def feedback_stored(feedback: db.Feedback, checks, goals) -> str:  # type: ignor
         if check.note:
             line += style.muted(" — " + check.note)
         lines.append(line)
+        run = (runs or {}).get(check.goal_id, 0)
+        if check.verdict == "advanced" and run >= 3:
+            lines.append(
+                "    "
+                + style.paint(f"{run} in a row", "green")
+                + (
+                    style.muted(" · a habit now? ")
+                    + style.paint(
+                        shlex.join(
+                            [
+                                *(prefix or ["commscoach"]),
+                                "goal",
+                                "close",
+                                str(check.goal_id),
+                                "--outcome",
+                            ]
+                        ),
+                        "cyan",
+                    )
+                    if run >= _graduate_run()
+                    else ""
+                )
+            )
     return "\n".join(lines)
+
+
+def _graduate_run() -> int:
+    from .insights import GRADUATE_RUN
+
+    return GRADUATE_RUN

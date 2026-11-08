@@ -9,12 +9,13 @@ import textwrap
 
 from .. import db
 from ..db.common import write_transaction
-from . import nudges, pretty_views, style
+from . import insights, nudges, pretty_views, style
 from .common import (
     EDIT_IN_EDITOR,
     UsageError,
     add_date_bounds,
     add_oldest_first,
+    command_prefix,
     confirm,
     edit_verb,
     format_stamp,
@@ -198,6 +199,8 @@ PREVIEW_LINES = 3
 
 def _format_feedback_short(feedback: db.Feedback, *, query: str | None = None) -> str:
     """Render a listing block: an id/time/entry header over indented prose."""
+    if style.pretty():
+        return _pretty_feedback_short(feedback, query=query)
     header = f"[{feedback.id}] {format_stamp(feedback.created_at)} · entry {feedback.entry_id}"
     preview = (
         search_excerpt(feedback.body, query)
@@ -209,6 +212,29 @@ def _format_feedback_short(feedback: db.Feedback, *, query: str | None = None) -
         wrapped = wrapped[:PREVIEW_LINES]
         wrapped[-1] += "…"
     return "\n".join([header, *(f"    {line}" for line in wrapped)])
+
+
+def _pretty_feedback_short(feedback: db.Feedback, *, query: str | None = None) -> str:
+    header = style.join(
+        [
+            style.heading(f"Feedback {feedback.id}"),
+            f"entry {feedback.entry_id}",
+            style.muted(style.relative(feedback.created_at)),
+        ]
+    )
+    if query is not None:
+        flat = insights.flatten(feedback.body)
+        preview = insights.readable(
+            search_excerpt(flat, query, width=style.term_width() - 6), query=query
+        )
+        return f"{header}\n    {preview}"
+    preview = insights.flatten(feedback.body)
+    width = style.term_width() - 4
+    wrapped = textwrap.wrap(preview, width)
+    if len(wrapped) > 2:
+        wrapped = wrapped[:2]
+        wrapped[-1] = style.clip(wrapped[-1] + " …", width)
+    return "\n".join([header, *(f"    {style.muted(line)}" for line in wrapped)])
 
 
 def _format_check_given(check: db.GoalCheck, goal: db.Goal | None) -> str:
@@ -287,8 +313,15 @@ def cmd_feedback_add(args: argparse.Namespace) -> int:
         reaction = nudges.feedback_stored(conn, feedback) if nudges.enabled(args) else None
         checks = db.list_feedback_goal_checks(conn, [feedback.id]).get(feedback.id, ())
         goals = _checked_goals(conn, checks) if checks else None
+        runs = (
+            {c.goal_id: insights.advanced_run(db.list_goal_checks(conn, c.goal_id)) for c in checks}
+            if reaction is not None
+            else None
+        )
     if reaction is not None:
-        print(pretty_views.feedback_stored(feedback, checks, goals))
+        print(
+            pretty_views.feedback_stored(feedback, checks, goals, runs, prefix=command_prefix(args))
+        )
         print("\n".join(reaction))
         return 0
     _emit_feedback(args, feedback, checks, human_prefix="created", goals=goals)

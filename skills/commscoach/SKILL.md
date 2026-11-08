@@ -1,7 +1,8 @@
 ---
 name: commscoach
 description: Coach a logged commscoach entry, synthesize and persist a review scoped to the latest entries, one person, one tag, or a date range, prepare for a conversation with someone, find past advice, correct stored feedback and reviews on request, find the uncoached backlog, or report stored communication stats. Fetches CLI context, produces actionable Markdown, and closes the coaching loop through the CLI.
-allowed-tools: Bash, Read
+allowed-tools: Bash(commscoach:*), Read
+disable-model-invocation: true
 ---
 
 # Communications Coach
@@ -20,13 +21,10 @@ Choose the flow that matches the request:
 ## Step 1: Confirm `commscoach` is available
 
 ```bash
-command -v commscoach >/dev/null || {
-  echo "commscoach not on PATH; run 'uv tool install --editable --force .' in the project repo" >&2
-  exit 1
-}
+commscoach --version
 ```
 
-If this fails, surface the message and stop.
+If the command is not found, tell the user to run `uv tool install --editable --force .` in the project repository, and stop.
 
 Global flags `--db`, `--json`, and `--yes` work before or after commands, including nested commands. The examples below place them first. List and search JSON on stdout is always a plain array; when `--limit` cut results off, stderr says so (`Showing 5 of 23 matching entries.`), so do not describe a limited result as complete.
 
@@ -77,6 +75,7 @@ Use the rubric below. Read every field of the payload. Address `self` as "you" a
 
 - Keep total output under ~400 words.
 - Plain Markdown only. No HTML, no YAML front matter.
+- Write each rubric section under a `##` heading named as above (`## Try next time`, `## Follow-ups`), with its suggestions as a bulleted list, one suggestion per bullet and the most reusable first. The CLI brings those bullets back later (when the user logs the next conversation with that person, in `person prep`, on the home screen, and in `recap`), and finds them by heading, so the heading text matters.
 - If `prior_feedback` is non-empty, briefly note progress or recurring patterns. Do not restate earlier feedback verbatim.
 - Tone: direct, supportive, specific. No filler, no praise sandwiches.
 - Make sure the body does not contain a line equal to `__COMMSCOACH_FEEDBACK_EOF__` (the heredoc sentinel used in Step E3).

@@ -89,6 +89,18 @@ creation-time order within those groups. `--limit 0` returns no results. Human o
 labels matching excerpts by title, detail, or outcome; JSON returns complete goal
 objects. Add `--with-detail` to include full details in human search results too.
 
+### Recap
+
+`commscoach recap` tells the last seven days, ending today, as a short story; `commscoach recap month` does the same for the last 30. It compares the conversation count with the same span before, shows how much was coached, who you talked to (marking people whose first conversation fell in the period), each goal's checks in the period with whether it is moving or slipping, the best moment (the newest advanced check, preferring one with a reason), the advice worth carrying forward (the first *Try next time* item from the newest coaching in the period), and the weekly streak. It only reads.
+
+```sh
+commscoach recap
+commscoach recap month
+commscoach --json recap
+```
+
+Plain output is one fact per line (`conversations: 4 (previous week: 2)`). JSON is `{period, start, end, entry_count, previous_entry_count, coached_count, people, new_people, goals, best_moment, advice, weekly_streak}`, where `people` is `[{handle, name, count}]`, `goals` is `[{goal_id, title, verdicts}]`, `best_moment` is `{goal_id, entry_id, note}` or `null`, and `advice` is `{text, entry}` or `null`.
+
 ### Goal checks and progress trails
 
 Each feedback note can record how its interaction bore on a goal: **advanced**, **hurt**, or **neutral**. These are the verdicts the coaching skill writes in its Goal check section, stored as data so a goal accumulates a trail instead of leaving its progress buried in prose:
@@ -154,6 +166,7 @@ The `addressable_names` check warns about handles containing `@`, commas, or whi
 ```sh
 commscoach doctor
 commscoach doctor --quick              # PRAGMA quick_check instead of integrity_check
+commscoach doctor --verbose            # on a terminal, list passing checks too
 commscoach --json doctor
 ```
 

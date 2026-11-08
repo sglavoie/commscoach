@@ -16,7 +16,7 @@ import sys
 from .. import db
 from ..db.common import handle_key, write_transaction
 from ..db.tags import normalize_tag_list
-from . import nudges, suggest
+from . import coach, nudges, suggest
 from .common import (
     command_prefix,
     handle_arg,
@@ -163,9 +163,15 @@ def cmd_log(args: argparse.Namespace) -> int:
                 tags=tags,
                 people=people,
             )
-        reaction = nudges.entry_logged(conn, entry) if nudges.enabled(args) else None
+        reaction = (
+            nudges.entry_logged(conn, entry, prefix=command_prefix(args))
+            if nudges.enabled(args)
+            else None
+        )
     if reaction is not None:
         print("\n".join(reaction))
+        # The entry is stored either way; a failed coaching run does not undo it.
+        coach.offer_after_log(args, entry.id)
     else:
         emit_entry(args, entry, human_prefix="created")
     return 0
