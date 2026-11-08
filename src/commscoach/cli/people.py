@@ -11,6 +11,7 @@ from typing import Any
 
 from .. import db
 from ..db.common import handle_key
+from . import prep, style
 from .common import (
     command_prefix,
     confirm,
@@ -297,6 +298,11 @@ def cmd_person_show(args: argparse.Namespace) -> int:
     with open_db(args) as conn:
         person = _resolve_existing_person(conn, args.handle)
         note = db.get_person_note(conn, person.id)
+        briefing = (
+            prep.render(prep.gather(conn, person, note))
+            if args.person_command == "prep" and not args.json and style.pretty()
+            else None
+        )
         reviews = (
             db.list_reviews(
                 conn,
@@ -360,6 +366,13 @@ def cmd_person_show(args: argparse.Namespace) -> int:
         return 0
     brief = getattr(args, "brief", False)
     command = command_prefix(args)
+    if briefing is not None:
+        print(briefing)
+        if brief:
+            full = shlex.join([*command, "person", "prep", person.handle])
+            print(style.muted(f"\nEverything: {full}"))
+            return 0
+        print(style.muted("\n" + "─" * 40 + " details"))
     _emit_person(args, person, note=note, include_notes=not brief)
     if brief and note is not None:
         print(f"\nNotes:\n{truncate(first_prose_line(note.body), width=180)}")

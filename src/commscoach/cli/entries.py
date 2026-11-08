@@ -10,6 +10,7 @@ from typing import Any
 from .. import db
 from ..db.common import handle_key, write_transaction
 from ..db.tags import normalize_tag_list
+from . import nudges
 from .common import (
     EDIT_IN_EDITOR,
     UsageError,
@@ -288,6 +289,10 @@ def cmd_entry_add(args: argparse.Namespace) -> int:
                 tags=args.tags or [],
                 people=people,
             )
+        reaction = nudges.entry_logged(conn, entry) if nudges.enabled(args) else None
+    if reaction is not None:
+        print("\n".join(reaction))
+        return 0
     emit_entry(args, entry, human_prefix="created")
     return 0
 

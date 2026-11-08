@@ -21,3 +21,20 @@ def _connect_without_sync(*args, **kwargs):
 
 
 sqlite3.connect = _connect_without_sync
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_environment(monkeypatch, tmp_path):
+    """Keep every test away from the real journal and the terminal-only output.
+
+    A test that forgets ``--db`` would otherwise read (or worse, write) the
+    user's default database, so ``$COMMSCOACH_DB`` points at a fresh path that
+    does not exist; tests that set it themselves override this. The pretty and
+    color switches are cleared so the plain line format is what tests see.
+    """
+    monkeypatch.setenv("COMMSCOACH_DB", str(tmp_path / "isolated" / "commscoach.sqlite3"))
+    for name in ("COMMSCOACH_PRETTY", "COMMSCOACH_PLAIN", "FORCE_COLOR", "CLICOLOR_FORCE"):
+        monkeypatch.delenv(name, raising=False)

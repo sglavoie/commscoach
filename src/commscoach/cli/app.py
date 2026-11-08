@@ -31,13 +31,24 @@ from . import (
     export,
     feedback,
     goals,
+    home,
+    log,
     people,
     porting,
     reviews,
     stats,
+    style,
+    suggest,
     tags,
 )
-from .common import UsageError, command_prefix, print_err, print_json, resolve_db_path
+from .common import (
+    UsageError,
+    command_prefix,
+    open_db,
+    print_err,
+    print_json,
+    resolve_db_path,
+)
 from .editor import recover_editor_drafts
 
 PROG = "commscoach"
@@ -45,7 +56,7 @@ PROG = "commscoach"
 
 def build_parser() -> argparse.ArgumentParser:
     """Construct the top-level argparse parser with global flags and subcommands."""
-    parser = argparse.ArgumentParser(
+    parser = suggest.SuggestingParser(
         prog=PROG,
         description="Personal communications coach: track interactions, generate feedback.",
     )
@@ -58,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
 
     _register_init(subparsers)
+    log.register(subparsers)
     doctor.register(subparsers)
     backup.register(subparsers)
     entries.register(subparsers)
@@ -231,8 +243,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     func: Callable[[argparse.Namespace], int] | None = getattr(args, "func", None)
     if func is None:
-        parser.print_help()
-        return 0
+        func = _cmd_home
+    restore = _colorize_stdout(args)
     try:
         with _terminate_cleanly(), recover_editor_drafts():
             code = int(func(args) or 0)
@@ -242,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
         print_err(str(exc))
         return 2
     except db.DBError as exc:
-        print_err(_with_db_flag(str(exc), args))
+        print_err(_with_db_flag(_with_suggestion(exc, args), args))
         return 1
     except sqlite3.Error as exc:
         print_err(f"database error: {exc}")
@@ -258,6 +270,58 @@ def main(argv: list[str] | None = None) -> int:
     except _Terminated as exc:
         print_err("terminated")
         return 128 + exc.signum
+    finally:
+        restore()
+
+
+# Commands whose stdout is a document or machine payload, never decorated.
+_UNDECORATED = {"export", "context", "import", "backup", "completion", "__complete"}
+
+
+def _colorize_stdout(args: argparse.Namespace) -> Callable[[], None]:
+    """Route stdout through the line colorizer for human output on a color terminal."""
+    if (
+        getattr(args, "json", False)
+        or getattr(args, "command", None) in _UNDECORATED
+        or getattr(args, "review_command", None) == "context"
+        or not style.color()
+    ):
+        return lambda: None
+    original = sys.stdout
+    sys.stdout = style.ColorizingStream(original)  # type: ignore[assignment]
+
+    def restore() -> None:
+        try:
+            sys.stdout.flush()
+        except (BrokenPipeError, OSError, ValueError):
+            pass
+        sys.stdout = original
+
+    return restore
+
+
+def _cmd_home(args: argparse.Namespace) -> int:
+    """Bare ``commscoach``: the home screen (``--json`` keeps the old help output)."""
+    if args.json:
+        build_parser().print_help()
+        return 0
+    print(home.render_home(args))
+    return 0
+
+
+def _with_suggestion(exc: db.DBError, args: argparse.Namespace) -> str:
+    """Append a did-you-mean hint to a not-found handle or tag error."""
+    message = str(exc)
+    if not isinstance(exc, db.PersonNotFoundError | db.TagNotFoundError):
+        return message
+    if "did you mean" in message:
+        return message
+    try:
+        with open_db(args) as conn:
+            hint = suggest.not_found_hint(exc, conn)
+    except Exception:  # a hint must never mask the real error
+        return message
+    return f"{message}; {hint}" if hint else message
 
 
 def _silence_stdout() -> None:

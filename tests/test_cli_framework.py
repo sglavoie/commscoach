@@ -240,13 +240,21 @@ class InitCommandTests(unittest.TestCase):
 
 
 class ExitCodeTests(unittest.TestCase):
-    def test_no_command_prints_help_and_returns_zero(self) -> None:
+    def test_no_command_without_database_shows_onboarding(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):
             rc = cli.main([])
         self.assertEqual(rc, 0)
-        self.assertIn("commscoach", buf.getvalue())
-        self.assertIn("init", buf.getvalue())
+        self.assertIn("Welcome to commscoach", buf.getvalue())
+        self.assertIn("commscoach init", buf.getvalue())
+        self.assertIn("commscoach --help", buf.getvalue())
+
+    def test_no_command_with_json_prints_help(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = cli.main(["--json"])
+        self.assertEqual(rc, 0)
+        self.assertIn("usage: commscoach", buf.getvalue())
 
     def test_unknown_command_exits_two(self) -> None:
         with redirect_stderr(io.StringIO()):

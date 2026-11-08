@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .. import db
+from . import pretty_views, style
 from .common import (
     UsageError,
     confirm,
@@ -212,6 +213,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _format_goal_human(goal: db.Goal) -> str:
+    if style.pretty():
+        return pretty_views.goal_human(goal)
     parts = [f"[{goal.id}]", goal.status, f"created {format_stamp(goal.created_at)}"]
     if goal.closed_at is not None:
         parts.append(f"closed {format_stamp(goal.closed_at)}")
@@ -228,6 +231,8 @@ def _format_goal_human(goal: db.Goal) -> str:
 
 
 def _format_goal_short(goal: db.Goal, *, now: datetime | None = None) -> str:
+    if style.pretty():
+        return pretty_views.goal_short(goal)
     parts = [f"[{goal.id}]", goal.status, goal.title]
     if goal.person is not None:
         parts.append(f"@{goal.person.handle}")

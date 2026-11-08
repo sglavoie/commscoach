@@ -7,6 +7,7 @@ import sys
 import textwrap
 
 from .. import db
+from . import pretty_views, style
 from .common import (
     EDIT_IN_EDITOR,
     add_date_bounds,
@@ -120,6 +121,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _format_feedback_human(feedback: db.Feedback) -> str:
+    if style.pretty():
+        return pretty_views.feedback_human(feedback)
     header = (
         f"[{feedback.id}] entry {feedback.entry_id} created {format_stamp(feedback.created_at)}"
     )

@@ -6,6 +6,7 @@ import argparse
 from typing import Any
 
 from .. import db
+from . import pretty_views, style
 from .common import (
     first_prose_line,
     format_scope,
@@ -67,6 +68,8 @@ def review_context_to_dict(context: db.ReviewContext) -> dict[str, Any]:
 
 
 def format_review_human(review: db.Review) -> str:
+    if style.pretty():
+        return pretty_views.review_human(review, format_scope(review, separator=" "))
     header_parts = [
         f"[{review.id}]",
         f"created {format_stamp(review.created_at)}",

@@ -6,6 +6,7 @@ import argparse
 import shlex
 
 from .. import db
+from . import pretty_views, style
 from .common import (
     add_date_bounds,
     command_prefix,
@@ -92,7 +93,15 @@ def cmd_stats(args: argparse.Namespace) -> int:
     if args.json:
         print_json(stats_to_dict(summary, weeks=args.weeks))
     else:
-        print(_format_human(summary, weeks=args.weeks))
+        if style.pretty():
+            window = " to ".join(b for b in (args.since, args.until) if b) or None
+            if window and args.since and not args.until:
+                window = f"since {args.since}"
+            elif window and args.until and not args.since:
+                window = f"until {args.until}"
+            print(pretty_views.stats_view(summary, weeks=args.weeks, window=window))
+        else:
+            print(_format_human(summary, weeks=args.weeks))
         if summary.entry_count > summary.entries_with_feedback:
             command = command_prefix(args)
             command.extend(("entry", "search", "--no-feedback", "--oldest-first", "--limit", "5"))

@@ -149,8 +149,13 @@ def format_stamp(iso: str) -> str:
     """Render a stored ISO-8601 UTC timestamp as local ``YYYY-MM-DD HH:MM``.
 
     Unparseable values are returned verbatim so a malformed or legacy row never
-    breaks a listing.
+    breaks a listing. On a terminal (``style.pretty``) the stamp reads as a
+    person would say it instead: ``yesterday``, ``3h ago``, ``Nov 2``.
     """
+    from . import style
+
+    if style.pretty():
+        return style.relative(iso)
     try:
         parsed = datetime.fromisoformat(iso)
     except ValueError:
