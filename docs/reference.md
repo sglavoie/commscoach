@@ -127,6 +127,30 @@ commands to revisit it. The reminder goes to stderr, including with `--json`,
 and preserves an explicit `--db` path. Metadata-only edits and unchanged bodies
 produce no reminder. Existing coaching is left intact.
 
+## Quick capture with `log`
+
+`commscoach log TEXT...` creates an entry from one line. Every `@handle` in the text links that person and every `#tag` tags the entry; the text itself is stored exactly as written. A tag needs at least one letter, so `issue #42` stays prose while `#1on1` is a tag, and an address such as `a@b.com` is not a mention. Trailing punctuation (`@jdoe's`, `#standup.`) is not part of the name.
+
+```sh
+commscoach log "Pushed back on @priya's estimate in #standup" -s meeting -w yesterday
+commscoach log Quick call with @jdoe about the budget   # quotes are optional in zsh
+```
+
+`-s/--source`, `-w/--when` (alias `--occurred-at`), `-p/--person`, and `-t/--tag` add anything the text does not say. `-` reads stdin and no text opens the editor, as for `entry add`. A mention of a person who does not exist asks before creating them, like `entry add --person`; when the mention looks like a typo of an existing handle (`@jdo` with `@jdoe` on file) the command stops and suggests it instead, unless `--yes` insists. In bash, quote text containing `#`, which otherwise starts a comment.
+
+## Terminal output
+
+Human output has two forms. When stdout is a terminal it is laid out for reading: relative times (`just now`, `3h ago`, `yesterday`, `Thu (3 days ago)`, `Oct 9`, `Oct 4, 2025`; a date logged without a time never shows `00:00`), color for ids, handles, tags and status, aligned entry rows led by `●` (needs feedback) or `✓` (coached), rendered and wrapped Markdown for feedback, reviews and goal details, and a `stats` dashboard. Anywhere else (a pipe, a file, `--json`) output keeps the plain line format documented on this page, so scripts are unaffected.
+
+Terminal-only additions:
+
+- **Home screen.** Bare `commscoach` shows the coaching backlog with the command that coaches its oldest entry, active goals (oldest first, with their goal-check momentum), people with at least three logged conversations and none in four weeks, an entry from this calendar day one or more years, six, three, or one month ago, and the current weekly streak with a twelve-week sparkline. It only reads and never creates a database; without one, or with an empty journal, it shows a setup checklist. `commscoach --json` with no command prints the help.
+- **Reactions.** `entry add` and `log` confirm in one line, then note the count of conversations with each person (and this month's), the active goals that apply, entry-count milestones and a newly extended weekly streak, and the `/commscoach ID` command that coaches the entry.
+- **Prep briefing.** `person prep` opens with *Before you talk to…*: when you last talked, the goals to remember (the person's first, then general ones), the newest *Try next time* advice from feedback on your recent conversations with them, open *Follow-ups*, and the first line of your private notes. With `--brief`, the briefing replaces the rest.
+- **Did you mean.** An unknown subcommand, handle, or tag suggests the closest existing one (also for common synonyms: `goal done` suggests `close`, and a person's name suggests their handle). This applies in every output mode.
+
+Environment switches: `COMMSCOACH_PRETTY=1` forces the terminal form (useful with `less -R`), `COMMSCOACH_PLAIN=1` forces the plain form on a terminal, `NO_COLOR` or `TERM=dumb` keeps the terminal layout without color, and `FORCE_COLOR=1` keeps color when the terminal form is forced into a pipe.
+
 ## Tags
 
 Tags live in their own table with their own normalization (trimmed, lowercased, Unicode-composed, and without a leading `#`, so `--tag '#Review'` names `review`) and orphan collection, so the vocabulary stays maintainable instead of letting one typo split a theme across your stats permanently:

@@ -10,6 +10,9 @@ Ready to use. The CLI, SQLite schema, stored feedback and reviews, scoped review
 
 | When you want to… | Command |
 | --- | --- |
+| See what needs attention today | `commscoach` |
+| Log a conversation in one line | `commscoach log "Asked @jdoe for budget #1on1" -s slack` |
+| See your habits at a glance | `commscoach stats` |
 | Get a short conversation brief | `commscoach person prep jdoe --brief` |
 | Find a person by name | `commscoach person list --query "John"` |
 | See recorded relationship activity | `commscoach person list --with-activity` |
@@ -49,6 +52,7 @@ commscoach person add me --self --name "Your Name"
 commscoach person add jdoe --name "John Doe"
 echo "Quarterly review with John. I rambled before getting to my ask." \
   | commscoach entry add - --occurred-at yesterday --tag 1on1,review --person jdoe --source in-person
+commscoach log "Slack thread with @jdoe; I led with the ask #followup" -s slack  # same, in one line
 commscoach entry list
 commscoach tag list
 commscoach context 1                 # skill-facing JSON
@@ -81,6 +85,25 @@ Confirmation prompts only read answers from a terminal; when stdin is a pipe or 
 Use `commscoach --help` for top-level help and `commscoach <command> --help`
 for subcommand-specific options.
 
+## On a terminal
+
+Bare `commscoach` opens a home screen: entries waiting for coaching, goals in
+play, people you have not talked to in a while, an entry from this day in the
+past, and your weekly rhythm. An empty journal gets a setup checklist instead.
+
+When stdout is a terminal, human output is designed to be read: times say
+"yesterday" or "3h ago", ids, handles, and tags are colored, Markdown feedback is
+rendered and wrapped, `stats` draws a coverage bar and a weekly sparkline,
+`person prep` opens with a "Before you talk" briefing, and logging an entry
+says how often you have talked to that person lately, which goal applies, and
+which `/commscoach` command coaches it.
+
+Piped output, `--json`, and the files `export` writes keep the stable plain
+format. Override the detection with `COMMSCOACH_PRETTY=1` (for example
+`COMMSCOACH_PRETTY=1 FORCE_COLOR=1 commscoach entry list | less -R`) or
+`COMMSCOACH_PLAIN=1`; `NO_COLOR` keeps the layout but drops color. See
+[Terminal output](docs/reference.md#terminal-output).
+
 ## Shell completion
 
 TAB completes subcommands and options, plus person handles, tag names, and
@@ -106,6 +129,7 @@ The default database is `~/.local/share/commscoach/commscoach.sqlite3` (or under
 Database files, exports, and backups contain private personal data.
 
 - [Capture, editing, and dates](docs/reference.md#capture-and-dates)
+- [Quick capture with `log`](docs/reference.md#quick-capture-with-log) and [terminal output](docs/reference.md#terminal-output)
 - [Finding coaching, conversation prep, and people](docs/reference-coaching.md#finding-past-coaching-and-relationship-context)
 - [Goals and stats](docs/reference-operations.md#goals-and-stats)
 - [Tags](docs/reference.md#tags) and [review scopes](docs/reference.md#review-scopes)
