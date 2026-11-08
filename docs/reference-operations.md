@@ -89,24 +89,59 @@ creation-time order within those groups. `--limit 0` returns no results. Human o
 labels matching excerpts by title, detail, or outcome; JSON returns complete goal
 objects. Add `--with-detail` to include full details in human search results too.
 
-## Schema version and migration
+### Goal checks and progress trails
 
-The current schema version is **4**. Version 4 rebuilds the `reviews` table to carry the scope columns described under [Review scopes](reference.md#review-scopes): `scope_person_id`, `scope_person_handle`, `scope_tag`, `scope_since`, and `scope_until`, each guarded by a CHECK constraint tying it to its `scope_kind`.
-
-An existing database migrates automatically on the next `commscoach init`. The migration copies every review into a new table, then verifies the result with `PRAGMA integrity_check` and `PRAGMA foreign_key_check` before committing, and rolls the whole thing back if anything fails. Every pre-existing review becomes `scope_kind = 'latest'`, which is what it already was.
-
-`init` is safe to run against an existing database, but take a backup first anyway — the migration rewrites a table. It refuses a SQLite file that commscoach did not create (one with other tables and no schema version) and leaves it untouched:
+Each feedback note can record how its interaction bore on a goal: **advanced**, **hurt**, or **neutral**. These are the verdicts the coaching skill writes in its Goal check section, stored as data so a goal accumulates a trail instead of leaving its progress buried in prose:
 
 ```sh
-commscoach backup --out ~/Backups/commscoach-pre-v4.sqlite3
+commscoach feedback add 42 @note.md --goal-check 3=advanced --goal-check 5=hurt
+commscoach feedback add 42 @note.md --goal-check '3=advanced:Led with the ask in the first line'
+commscoach feedback edit 7 --goal-check 3=neutral   # replace the note's checks
+commscoach feedback edit 7 --clear-goal-checks
+commscoach goal show 3
+commscoach goal list
+```
+
+`--goal-check GOAL_ID=VERDICT` is repeatable, one per goal; the verdict ignores case, and an optional `:NOTE` adds a one-line reason. Every check is validated before an editor opens: a malformed value, an unknown verdict, an empty note, or the same goal twice is a usage error (exit 2), and a goal that does not exist exits 1. The note and its checks are stored in one transaction, so a failure stores neither. Checks may name a goal of any status. `feedback add` prints one extra line per check (`goal 3 advanced: Lead with the ask — Led with the ask in the first line`); without `--goal-check` its output is unchanged.
+
+`feedback edit --goal-check` replaces the note's whole set of checks, and `--clear-goal-checks` removes them; either combines with `--body`, and the edit applies all of it or none. Changing the checks advances the note's `updated_at`; resubmitting the same set leaves it alone.
+
+A goal's trail is ordered by when each checked interaction happened (the entry's occurrence time, falling back to its creation time), so coaching an old entry later places its check where the conversation belongs. Once a goal has checks, `goal show` ends with the trail:
+
+```text
+---
+progress: ✓✗·✓
+advanced 2 · hurt 1 · neutral 1
+2026-11-02 · entry 12 · advanced — Led with the ask in the first line
+2026-11-05 · entry 14 · hurt
+2026-11-06 · entry 15 · neutral
+2026-11-07 · entry 17 · advanced
+```
+
+`goal list` and `goal search` rows end with the verdicts that occurred, such as `· advanced 3×, hurt 1×`, and `goal close` prints a closing line such as `Closed after 23 days · 6 checks (5 advanced, 1 hurt) · first win 2026-11-02` (`Dropped after …` with `--dropped`). Goals without checks print exactly what they did before.
+
+In JSON, goal commands add `check_summary` — `{advanced, hurt, neutral, total, last_verdict, last_at, first_advanced_at}`, with the three milestone fields `null` until a goal has checks — and `goal show` also adds `checks`, the full trail. Each check is `{id, feedback_id, goal_id, entry_id, verdict, note, at, created_at}`, where `at` is when the interaction happened and `created_at` when the check was stored. Feedback command JSON adds the note's `goal_checks`. Deleting a feedback note, its entry, or the goal removes the checks that linked them.
+
+## Schema version and migration
+
+The current schema version is **5**. Version 5 adds the `goal_checks` table behind [goal checks](#goal-checks-and-progress-trails): one row per feedback note and goal (`UNIQUE (feedback_id, goal_id)`), with a `verdict` CHECK-constrained to `advanced`, `hurt`, or `neutral`, an optional `note`, and cascading deletes from both sides. It only creates a table and its index, so existing rows are untouched.
+
+Version 4 rebuilds the `reviews` table to carry the scope columns described under [Review scopes](reference.md#review-scopes): `scope_person_id`, `scope_person_handle`, `scope_tag`, `scope_since`, and `scope_until`, each guarded by a CHECK constraint tying it to its `scope_kind`.
+
+An existing database migrates automatically on the next `commscoach init`. From a v4 database that means adding the new table. From an older one, the v4 step also runs: it copies every review into a new table, then verifies the result with `PRAGMA integrity_check` and `PRAGMA foreign_key_check` before committing, and rolls the whole thing back if anything fails. Every pre-existing review becomes `scope_kind = 'latest'`, which is what it already was. Both steps commit together or not at all.
+
+`init` is safe to run against an existing database, but take a backup first anyway — upgrading from v3 or earlier rewrites a table. It refuses a SQLite file that commscoach did not create (one with other tables and no schema version) and leaves it untouched:
+
+```sh
+commscoach backup --out ~/Backups/commscoach-pre-v5.sqlite3
 commscoach init
-commscoach --json init            # {"db_path": "...", "schema_version": 4}
+commscoach --json init            # {"db_path": "...", "schema_version": 5}
 commscoach doctor
 ```
 
 `init` also cleans up occurrence times stored as free text by early versions, once: relative text such as `yesterday` is read against the entry's creation time, and text that still cannot be parsed is appended to the entry body as `(Originally recorded occurrence time: ...)` while the entry falls back to its creation time. Nothing is lost, and stats, date filters, and export/import keep working.
 
-`backup` is the one command that runs on a database of any schema version, which is what makes that first line work: the snapshot it writes is still stamped at the old version, with the old `reviews` shape and rows intact, so it restores to the state you had before migrating. Every other command still requires the current schema and answers `run 'commscoach init' first` until you migrate.
+`backup` is the one command that runs on a database of any schema version, which is what makes that first line work: the snapshot it writes is still stamped at the old version, with the old tables and rows intact, so it restores to the state you had before migrating. Every other command still requires the current schema and answers `run 'commscoach init' first` until you migrate.
 
 ## Diagnostics and backups
 
@@ -146,7 +181,7 @@ commscoach export --out export.md       # write Markdown to file (mode 0600)
 commscoach export --format json --out commscoach.json
 ```
 
-Markdown export includes goals, stored reviews, entries, linked people, and feedback in a readable report, but it is not an archive format. Use `--format json` for backup portability: it preserves the complete schema data and relationships needed by `import`.
+Markdown export includes goals, stored reviews, entries, linked people, and feedback in a readable report, with each note's goal checks listed beneath it (`- Goal 3 (Lead with the ask): advanced — reason`), but it is not an archive format. Use `--format json` for backup portability: it preserves the complete schema data and relationships needed by `import`.
 
 Each exported review names its scope axis, so a synthesis stays self-describing outside the database:
 
@@ -160,7 +195,9 @@ Each exported review names its scope axis, so a synthesis stays self-describing 
 
 `latest`, `tag conflict`, and `range 2026-07-01..2026-09-01` are the other three shapes. A review whose scoped person was deleted still renders `person @alice` from the stored handle, and the JSON archive round-trips that handle through `import`.
 
-Import restores a complete JSON export into an empty initialized database. Besides timestamps, it checks that ids are integers, handles are non-empty, trimmed, and unique ignoring case (including accented letters), entry, feedback, review, and note bodies and goal titles are not blank, and tag names are trimmed and lowercase (a name from an older export with a leading `#` or a decomposed accent is renormalized on import, folding into the tag it now equals), so a hand-edited archive cannot restore rows no command can address. It never merges with or replaces existing records. Timestamps must be timezone-aware ISO-8601 values and are stored normalized to UTC, as the CLI stores them; IDs of rows deleted before the export are not handed out again. Both the human and `--json` output report how many rows of each table were (or, with `--dry-run`, would be) restored as `counts`. Validate the whole restore, including constraints, with `--dry-run` before writing:
+Import restores a complete JSON export into an empty initialized database. Besides timestamps, it checks that ids are integers, handles are non-empty, trimmed, and unique ignoring case (including accented letters), entry, feedback, review, and note bodies and goal titles are not blank, and tag names are trimmed and lowercase (a name from an older export with a leading `#` or a decomposed accent is renormalized on import, folding into the tag it now equals), so a hand-edited archive cannot restore rows no command can address. It never merges with or replaces existing records. Timestamps must be timezone-aware ISO-8601 values and are stored normalized to UTC, as the CLI stores them; IDs of rows deleted before the export are not handed out again. Both the human and `--json` output report how many rows of each table were (or, with `--dry-run`, would be) restored as `counts`; the human summary names goal checks only when the archive has some.
+
+JSON exports are format version 3, which adds `goal_checks`; each check's verdict must be one of the three and its note, when present, a non-empty single line. An export written before goal checks existed (format version 1 or 2) still imports, with no checks. An older commscoach refuses a format 3 export rather than silently dropping its checks. Validate the whole restore, including constraints, with `--dry-run` before writing:
 
 ```sh
 commscoach --db /path/to/empty.sqlite3 init
